@@ -179,7 +179,7 @@ See [WEBUI.md](./WEBUI.md).
 ## 5. Data model (core)
 
 ```text
-LlmProvider    logical provider slot (anthropic | openai | custom id)
+LlmProvider    logical provider slot (my-llm | openai | custom id)
 LlmCredential  secret material for a provider (encrypted / env-ref / oauth)
 LlmModelRef    allowlisted model (provider_id + model_id); no implicit catalog use
 Account        platform + credentials + adapter config (one login identity)
@@ -227,7 +227,7 @@ Why SQLite (not only TOML):
 schema_migrations(version, applied_at)
 
 llm_providers(
-  id TEXT PK,                 -- "anthropic" | "openai" | "my-proxy"
+  id TEXT PK,                 -- "my-llm" | "openai" | "my-proxy"
   kind TEXT NOT NULL,         -- "builtin" | "openai_compat" | "anthropic_compat" | ...
   base_url TEXT,              -- required for custom; null = pi builtin default for kind
   display_name TEXT NOT NULL,
@@ -251,7 +251,7 @@ llm_credentials(
 --- each checked row is INSERTed here with optional per-model overrides.
 llm_models(
   provider_id TEXT NOT NULL → llm_providers,   -- composite PK
-  model_id TEXT NOT NULL,     -- pi catalog id, e.g. "claude-sonnet-4-6"
+  model_id TEXT NOT NULL,     -- pi catalog id, e.g. "gpt-5" or "claude-sonnet-4-6"
   display_name TEXT,          -- optional alias shown in WebUI
   enabled INTEGER NOT NULL,
   -- Per-model overrides (all optional; null = provider / bot default):
@@ -285,7 +285,7 @@ bot_profiles(
   id TEXT PK,
   display_name TEXT NOT NULL,
   system_prompt TEXT NOT NULL,       -- empty string allowed only if explicitly set
-  model_ref TEXT NOT NULL,           -- "anthropic/claude-sonnet-4-6" format; REQUIRED
+  model_ref TEXT NOT NULL,           -- "my-llm/main-model" format; REQUIRED
   tools_allowlist_json TEXT NOT NULL,        -- [] = no tools
   skills_allowlist_json TEXT NOT NULL,
   policy_json TEXT NOT NULL,
@@ -316,19 +316,19 @@ settings(
 #### Model discovery & selection flow
 
 ```text
-1. Operator: chrono llm provider add anthropic --kind builtin
+1. Operator: chrono llm provider add my-llm --kind builtin
    → INSERT llm_providers row; llm_models is empty
 
-2. Operator: chrono llm provider refresh anthropic   (or WebUI "Refresh models" button)
-   → agent-host calls pi-ai getModels("anthropic") → returns all known model ids
-   → WebUI presents checklist: ☐ claude-sonnet-4-6, ☐ claude-haiku-4-5, …
+2. Operator: chrono llm provider refresh my-llm   (or WebUI "Refresh models" button)
+   → agent-host calls pi-ai getModels("my-llm") → returns all known model ids
+   → WebUI presents checklist: ☐ gpt-5, ☐ claude-haiku-4-5, …
    → checked models → INSERT llm_models rows with operator's per-model overrides
 
 3. Operator creates a bot:
-   chrono bot add greeter --model anthropic/claude-sonnet-4-6 --system-prompt-file …
-   → model_ref = "anthropic/claude-sonnet-4-6"
+   chrono bot add greeter --model my-llm/main-model --system-prompt-file …
+   → model_ref = "my-llm/main-model"
 
-4. Runtime: agent-host parses model_ref → looks up llm_models WHERE provider_id='anthropic' AND model_id='claude-sonnet-4-6'
+4. Runtime: agent-host parses model_ref → looks up llm_models WHERE provider_id='my-llm' AND model_id='main-model'
    → not found or disabled → hard error
    → build pi Model<Api> + apply per-model overrides (temperature, extra_headers, …)
 ```
@@ -345,7 +345,7 @@ provider defaults (base_url, headers)
 Rules:
 
 1. **No row ⇒ no capability.** Empty `llm_models` ⇒ agent-host refuses non-fake runs. Empty `platform_accounts` ⇒ gateway starts control plane only (or `chrono dev --fake-llm` demo path).
-2. **`bot_profiles.model_ref` is mandatory** and must resolve to an enabled `llm_models` row. Format: `"provider_id/model_id"` (e.g. `"anthropic/claude-sonnet-4-6"`, `"my-proxy/my-fine-tune"`).
+2. **`bot_profiles.model_ref` is mandatory** and must resolve to an enabled `llm_models` row. Format: `"provider_id/model_id"` (e.g. `"my-llm/main-model"`, `"my-proxy/my-fine-tune"`).
 3. **Model catalogue is pi-ai's job.** ChronoSys does not maintain its own model directory. Discovery calls pi-ai; selection is stored in `llm_models`.
 4. **Secrets by reference.** Gateway / agent-host load secrets through a vault interface; audit who resolved what.
 5. **`json_ext` + migrations** for evolution; do not fork the core entity set for every new knob.
@@ -370,7 +370,7 @@ import { createModels, createProvider } from "@earendil-works/pi-ai";
 // 1. Build CredentialStore from llm_credentials + vault adapter
 // 2. For each enabled llm_providers row:
 //    - builtin → models already have stream; just resolve credential
-//    - custom (openai_compat / anthropic_compat) → createProvider({ id, baseUrl, api }) + setProvider
+//    - custom (compat_openai / compat_anthropic kind) → createProvider({ id, baseUrl, api }) + setProvider
 // 3. Per-bot resolution at prompt time:
 //    const [providerId, modelId] = bot.model_ref.split("/");
 //    const piModel = models.getModel(providerId, modelId);

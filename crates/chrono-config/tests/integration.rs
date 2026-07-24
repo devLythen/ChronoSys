@@ -10,18 +10,11 @@ mod tests {
     #[test]
     fn migration_creates_tables() {
         let store = setup();
-        // Verify tables exist by doing operations that touch each one.
-        // providers
         store.providers().list_providers().unwrap();
-        // credentials
         assert!(store.providers().get_credential("nope").is_err());
-        // models
         assert!(store.providers().get_model("x", "y").is_err());
-        // accounts
         store.accounts().list_accounts().unwrap();
-        // bots
         store.bots().list_bots().unwrap();
-        // bindings
         store.bots().list_all_bindings().unwrap();
     }
 
@@ -29,10 +22,10 @@ mod tests {
     fn provider_crud() {
         let store = setup();
         let p = LlmProvider {
-            id: "anthropic".into(),
+            id: "my-llm".into(),
             kind: "builtin".into(),
             base_url: None,
-            display_name: "Anthropic".into(),
+            display_name: "My LLM".into(),
             enabled: true,
             json_ext: json!({}),
             created_at: String::new(),
@@ -40,8 +33,8 @@ mod tests {
         };
         store.providers().insert_provider(&p).unwrap();
 
-        let got = store.providers().get_provider("anthropic").unwrap();
-        assert_eq!(got.id, "anthropic");
+        let got = store.providers().get_provider("my-llm").unwrap();
+        assert_eq!(got.id, "my-llm");
         assert!(got.enabled);
 
         let list = store.providers().list_enabled_providers().unwrap();
@@ -57,10 +50,10 @@ mod tests {
     fn model_upsert_and_overrides() {
         let store = setup();
         store.providers().insert_provider(&LlmProvider {
-            id: "openai".into(),
+            id: "my-llm".into(),
             kind: "builtin".into(),
             base_url: None,
-            display_name: "OpenAI".into(),
+            display_name: "My LLM".into(),
             enabled: true,
             json_ext: json!({}),
             created_at: String::new(),
@@ -68,9 +61,9 @@ mod tests {
         }).unwrap();
 
         let m = LlmModel {
-            provider_id: "openai".into(),
-            model_id: "gpt-5".into(),
-            display_name: Some("GPT-5".into()),
+            provider_id: "my-llm".into(),
+            model_id: "main-model".into(),
+            display_name: Some("Main Model".into()),
             enabled: true,
             temperature: Some(0.7),
             max_tokens: Some(4096),
@@ -84,18 +77,17 @@ mod tests {
         };
         store.providers().upsert_model(&m).unwrap();
 
-        let got = store.providers().get_model("openai", "gpt-5").unwrap();
+        let got = store.providers().get_model("my-llm", "main-model").unwrap();
         assert_eq!(got.temperature, Some(0.7));
         assert_eq!(got.max_tokens, Some(4096));
 
-        // Upsert with overrides
         let m2 = LlmModel {
             temperature: Some(0.3),
             extra_headers_json: Some(json!({"X-Custom": "v"})),
             ..m
         };
         store.providers().upsert_model(&m2).unwrap();
-        let got = store.providers().get_model("openai", "gpt-5").unwrap();
+        let got = store.providers().get_model("my-llm", "main-model").unwrap();
         assert_eq!(got.temperature, Some(0.3));
         assert_eq!(got.extra_headers_json, Some(json!({"X-Custom": "v"})));
     }
@@ -125,18 +117,18 @@ mod tests {
     fn bot_and_binding() {
         let store = setup();
         store.providers().insert_provider(&LlmProvider {
-            id: "anthropic".into(),
+            id: "my-llm".into(),
             kind: "builtin".into(),
             base_url: None,
-            display_name: "Anthropic".into(),
+            display_name: "My LLM".into(),
             enabled: true,
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
         }).unwrap();
         store.providers().upsert_model(&LlmModel {
-            provider_id: "anthropic".into(),
-            model_id: "claude-sonnet-4-6".into(),
+            provider_id: "my-llm".into(),
+            model_id: "main-model".into(),
             display_name: None,
             enabled: true,
             temperature: None,
@@ -166,7 +158,7 @@ mod tests {
             id: "greeter".into(),
             display_name: "Greeter".into(),
             system_prompt: "Be friendly.".into(),
-            model_ref: "anthropic/claude-sonnet-4-6".into(),
+            model_ref: "my-llm/main-model".into(),
             tools_allowlist_json: json!(["message.send"]),
             skills_allowlist_json: json!([]),
             policy_json: json!({}),
@@ -196,12 +188,11 @@ mod tests {
         assert_eq!(bindings[0].bot_profile_id, "greeter");
 
         let got = store.bots().get_bot("greeter").unwrap();
-        assert_eq!(got.model_ref, "anthropic/claude-sonnet-4-6");
+        assert_eq!(got.model_ref, "my-llm/main-model");
     }
 
     #[test]
     fn bot_without_model_ref_fails_later() {
-        // model_ref is just a string — validation happens at resolve time.
         let store = setup();
         let bot = BotProfile {
             id: "orphan".into(),
@@ -217,7 +208,27 @@ mod tests {
             updated_at: String::new(),
         };
         store.bots().insert_bot(&bot).unwrap();
-        // Insert succeeds; resolve would fail because no matching llm_models row.
         assert!(store.providers().get_model("nonexistent", "gpt-99").is_err());
+    }
+
+    #[test]
+    fn custom_provider_with_base_url() {
+        let store = setup();
+        let p = LlmProvider {
+            id: "my-proxy".into(),
+            kind: "openai_compat".into(),
+            base_url: Some("https://proxy.example.com/v1".into()),
+            display_name: "My Proxy".into(),
+            enabled: true,
+            json_ext: json!({"default_headers": {"X-Region": "us"}}),
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        store.providers().insert_provider(&p).unwrap();
+
+        let got = store.providers().get_provider("my-proxy").unwrap();
+        assert_eq!(got.kind, "openai_compat");
+        assert_eq!(got.base_url.as_deref(), Some("https://proxy.example.com/v1"));
+        assert_eq!(got.json_ext["default_headers"]["X-Region"], "us");
     }
 }

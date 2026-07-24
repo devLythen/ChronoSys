@@ -275,19 +275,19 @@ See ARCHITECTURE §5.1. Owns:
 chrono init
 
 # 2) LLM provider + credential
-chrono llm provider add anthropic --kind builtin
-chrono llm credential set anthropic --api-key-env ANTHROPIC_API_KEY
+chrono llm provider add my-llm --kind builtin
+chrono llm credential set my-llm --api-key-env MY_LLM_API_KEY
 
 # 3) Refresh model catalogue from pi-ai → operator selects models in WebUI/CLI
-chrono llm provider refresh anthropic
-chrono llm model select anthropic claude-sonnet-4-6 --temperature 0.7
-chrono llm model select anthropic claude-haiku-4-5
+chrono llm provider refresh my-llm
+chrono llm model select my-llm main-model --temperature 0.7
+chrono llm model select my-llm fast-model
 
 # 4) Platform account
 chrono account add tg1 --platform telegram --token-env TELEGRAM_BOT_TOKEN
 
 # 5) Bot profile (model_ref = provider_id/model_id)
-chrono bot add greeter --model anthropic/claude-sonnet-4-6 --system-prompt-file ./prompts/greeter.md
+chrono bot add greeter --model my-llm/main-model --system-prompt-file ./prompts/greeter.md
 chrono bot tools greeter --allow message.send,chat.history
 chrono bind add --account tg1 --pattern 'dm:*' --bot greeter --mode dm
 

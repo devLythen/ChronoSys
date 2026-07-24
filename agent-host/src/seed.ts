@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 /**
- * Seed the Chrono config database with test data for M1.5 verification.
+ * Seed the Chrono config database with example data.
  *
  * Usage: bun run src/seed.ts [chrono_home]
  *   Default chrono_home: .chrono
  *
  * Creates state/chrono.db with one builtin provider, one model, one bot.
- * Real API key must be in ANTHROPIC_API_KEY env var (or CHRONO_FAKE_LLM=1).
+ * Real API key must be in env (the provider's env var) or CHRONO_FAKE_LLM=1.
  */
 
 import { Database } from "bun:sqlite";
@@ -86,39 +86,43 @@ db.run(`
   );
 `);
 
-// ── Seed data ────────────────────────────────────────────────────
+// ── Example seed data (replace with your own providers/models) ──
 
-// Provider: anthropic (builtin)
+const providerId = process.env.CHRONO_SEED_PROVIDER ?? "my-llm";
+const modelId = process.env.CHRONO_SEED_MODEL ?? "main-model";
+const credentialEnv = process.env.CHRONO_SEED_CREDENTIAL_ENV ?? "MY_LLM_API_KEY";
+
 db.run(
   `INSERT OR IGNORE INTO llm_providers (id, kind, display_name, enabled)
-   VALUES ('anthropic', 'builtin', 'Anthropic', 1)`,
+   VALUES (?, 'builtin', ?, 1)`,
+  [providerId, providerId],
 );
 
-// Credential: read from env
 db.run(
   `INSERT OR REPLACE INTO llm_credentials (provider_id, auth_kind, secret_ref)
-   VALUES ('anthropic', 'env_ref', 'ANTHROPIC_API_KEY')`,
+   VALUES (?, 'env_ref', ?)`,
+  [providerId, credentialEnv],
 );
 
-// Model: claude-sonnet-4-6
 db.run(
   `INSERT OR REPLACE INTO llm_models (provider_id, model_id, display_name, enabled, temperature)
-   VALUES ('anthropic', 'claude-sonnet-4-6', 'Sonnet 4.6', 1, 0.7)`,
+   VALUES (?, ?, ?, 1, 0.7)`,
+  [providerId, modelId, modelId],
 );
 
-// Bot: greeter
 db.run(
   `INSERT OR REPLACE INTO bot_profiles (id, display_name, system_prompt, model_ref,
           tools_allowlist_json, enabled)
    VALUES ('greeter', 'Greeter',
            'You are a helpful assistant. When asked to send a message, use message.send.',
-           'anthropic/claude-sonnet-4-6',
-           '["message.send"]', 1)`,
+           ?, '["message.send"]', 1)`,
+  [`${providerId}/${modelId}`],
 );
 
 console.log(`Seeded ${dbPath}`);
-console.log("  llm_providers: anthropic (builtin)");
-console.log("  llm_models:    anthropic/claude-sonnet-4-6 (temp=0.7)");
-console.log("  bot_profiles:  greeter → anthropic/claude-sonnet-4-6");
+console.log(`  llm_providers: ${providerId} (builtin)`);
+console.log(`  llm_models:    ${providerId}/${modelId} (temp=0.7)`);
+console.log(`  bot_profiles:  greeter → ${providerId}/${modelId}`);
+console.log(`\nCustomize: CHRONO_SEED_PROVIDER CHRONO_SEED_MODEL CHRONO_SEED_CREDENTIAL_ENV`);
 
 db.close();

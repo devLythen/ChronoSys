@@ -57,7 +57,7 @@ Mobile: collapse nav; sessions + overview first.
 ┌──────────────────────────────────────────────────────────┐
 │ Bot: SupportCN                          [Save] [Duplicate]│
 ├─────────────────┬────────────────────────────────────────┤
-│ Model           │ anthropic / claude-sonnet-…  Thinking  │
+│ Model           │ my-llm / main-model  Thinking  │
 │ System prompt   │ multiline + skill chips                │
 │ Tools           │ checklist from registry + plugins      │
 │ Skills          │ enable/disable catalog                 │
