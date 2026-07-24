@@ -159,7 +159,7 @@ mod tests {
             display_name: "Greeter".into(),
             system_prompt: "Be friendly.".into(),
             model_ref: "my-llm/main-model".into(),
-            tools_allowlist_json: json!(["message.send"]),
+            tools_allowlist_json: json!(["message_send"]),
             skills_allowlist_json: json!([]),
             policy_json: json!({}),
             enabled: true,

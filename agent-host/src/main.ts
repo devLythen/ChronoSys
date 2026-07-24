@@ -1,19 +1,28 @@
-import { Agent } from "@earendil-works/pi-agent-core";
+import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Model, Api, MutableModels } from "@earendil-works/pi-ai";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { ChronoEvent, ToolIpcMessage } from "./ipc/types.ts";
 import { createFakeStreamFn, FAKE_MODEL } from "./fake-llm.ts";
-import { createMessageSendTool, type PendingCall } from "./tools.ts";
+import { createToolsForAllowlist, type PendingCall } from "./tools.ts";
 import {
   readFrames,
   stdinAsWebStream,
   writeFrameStdout,
 } from "./transport.ts";
-import { openConfig } from "./config.ts";
-import { buildModels, resolveBot } from "./resolve.ts";
+import { openConfig, type ChronoConfig } from "./config.ts";
+import {
+  buildModels,
+  resolveBot,
+  type ResolvedBot,
+} from "./resolve.ts";
 
 const DEFAULT_SYSTEM_PROMPT =
-  "You are an assistant in a chat platform. When asked to send a message, use the message.send tool.";
+  "You are an assistant in a chat platform. When asked to send a message, use the message_send tool.";
 
 const FAKE_SEND_TEXT = "Hello from ChronoSys!";
+
+/** Supported context scopes. Only "session" is implemented; others fall back. */
+type ContextScope = "session" | "bot" | "account";
 
 function logEvent(event: unknown) {
   let payload: Record<string, unknown>;
@@ -32,21 +41,28 @@ function writeControl(msg: Record<string, unknown>) {
 function isToolResponse(
   msg: unknown,
 ): msg is Extract<ToolIpcMessage, { type: "tool.response" }> {
-  if (!msg || typeof msg !== "object") return false;
-  if (!("type" in msg)) return false;
-  return msg.type === "tool.response";
+  return (
+    !!msg &&
+    typeof msg === "object" &&
+    "type" in msg &&
+    msg.type === "tool.response"
+  );
 }
 
 function isInboundMessage(msg: unknown): msg is ChronoEvent {
-  if (!msg || typeof msg !== "object") return false;
-  if (!("type" in msg)) return false;
-  return msg.type === "inbound.message";
+  return (
+    !!msg &&
+    typeof msg === "object" &&
+    "type" in msg &&
+    msg.type === "inbound.message"
+  );
 }
 
 function messageTypeOf(msg: unknown): string | undefined {
-  if (!msg || typeof msg !== "object") return undefined;
-  if (!("type" in msg)) return undefined;
-  return typeof msg.type === "string" ? msg.type : undefined;
+  if (msg && typeof msg === "object" && "type" in msg && typeof msg.type === "string") {
+    return msg.type;
+  }
+  return undefined;
 }
 
 type InboundWaiter = {
@@ -54,23 +70,105 @@ type InboundWaiter = {
   reject: (e: Error) => void;
 };
 
+/** Cache of resolved bot profiles for the lifetime of this process. */
+class BotProfileCache {
+  private cache = new Map<string, ResolvedBot>();
+
+  constructor(
+    private config: ChronoConfig | null,
+    private models: MutableModels | null,
+    private fallback: ResolvedBot | null,
+  ) {}
+
+  get(botId: string | undefined): ResolvedBot | null {
+    if (!botId) return this.fallback;
+    const hit = this.cache.get(botId);
+    if (hit) return hit;
+    if (!this.config || !this.models) return this.fallback;
+    const bot = resolveBot(this.config, this.models, botId);
+    if (!bot) {
+      logEvent({
+        type: "host_warn",
+        message: `bot profile "${botId}" not found; using fallback`,
+      });
+      return this.fallback;
+    }
+    this.cache.set(botId, bot);
+    return bot;
+  }
+}
+
+/**
+ * Per-conversation transcript bucket.
+ * Keyed by session_key + bot_profile_id + generation (after /new).
+ */
+type SessionBucket = {
+  messages: AgentMessage[];
+  generation: number;
+};
+
+function contextScopeOf(bot: ResolvedBot): ContextScope {
+  const raw = bot.policy.context_scope;
+  if (raw === "bot" || raw === "account" || raw === "session") return raw;
+  return "session";
+}
+
+function newSessionCommandEnabled(bot: ResolvedBot): boolean {
+  const commands = bot.policy.commands;
+  if (commands && typeof commands === "object" && !Array.isArray(commands)) {
+    const flag = (commands as Record<string, unknown>).new_session;
+    if (typeof flag === "boolean") return flag;
+  }
+  // Default: allow /new
+  return true;
+}
+
+/** Strip Telegram bot-command suffix: "/new@BotName" → "/new" */
+function normalizeCommand(text: string): string {
+  const t = text.trim();
+  const m = t.match(/^\/([a-zA-Z0-9_]+)(?:@\S+)?(?:\s+(.*))?$/);
+  if (!m) return t;
+  const cmd = m[1] ?? "";
+  const rest = (m[2] ?? "").trim();
+  return rest ? `/${cmd} ${rest}` : `/${cmd}`;
+}
+
+function isNewSessionCommand(text: string): boolean {
+  const n = normalizeCommand(text).toLowerCase();
+  return n === "/new" || n === "/newsession" || n === "/reset";
+}
+
 async function main() {
   const fakeLlm = process.env.CHRONO_FAKE_LLM === "1";
   const pendingCalls = new Map<string, PendingCall>();
 
-  // ── Resolve model + streamFn + system prompt ──────────────────
-  let streamFn;
-  let model;
-  let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+  // ── Resolve model + streamFn + default bot profile ────────────
+  let streamFn: StreamFn;
+  let defaultModel: Model<Api>;
+  let defaultSystemPrompt = DEFAULT_SYSTEM_PROMPT;
+  let defaultToolsAllowlist: string[] = [];
+  let config: ChronoConfig | null = null;
+  let models: MutableModels | null = null;
+  let fallbackBot: ResolvedBot | null = null;
 
   if (fakeLlm) {
     streamFn = createFakeStreamFn(FAKE_SEND_TEXT);
-    model = FAKE_MODEL;
+    defaultModel = FAKE_MODEL;
+    defaultToolsAllowlist = ["message_send"];
+    fallbackBot = {
+      id: "fake",
+      modelRef: "fake/fake",
+      resolvedModel: { model: FAKE_MODEL, overrides: null },
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      toolsAllowlist: ["message_send"],
+      skillsAllowlist: [],
+      policy: { context_scope: "session", commands: { new_session: true } },
+    };
   } else {
     const chronoHome = process.env.CHRONO_HOME ?? ".chrono";
     const dbPath = `${chronoHome}/state/chrono.db`;
-    const config = openConfig(dbPath);
-    const models = buildModels(config);
+    config = openConfig(dbPath);
+    models = buildModels(config);
     if (!models) {
       throw new Error(
         "No enabled LLM providers in config DB. " +
@@ -79,13 +177,12 @@ async function main() {
     }
 
     const botId = process.env.CHRONO_BOT;
+    let bot: ResolvedBot | null = null;
     if (botId) {
-      const bot = resolveBot(config, models, botId);
+      bot = resolveBot(config, models, botId);
       if (!bot) {
         throw new Error(`Bot "${botId}" not found or disabled in config DB.`);
       }
-      systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
-      model = bot.resolvedModel.model;
     } else {
       const bots = config.listBots();
       const enabled = bots.filter((b) => b.enabled !== 0);
@@ -95,31 +192,72 @@ async function main() {
             "INSERT INTO bot_profiles (id, display_name, model_ref, enabled) VALUES (...);",
         );
       }
-      const bot = resolveBot(config, models, enabled[0]!.id);
+      bot = resolveBot(config, models, enabled[0]!.id);
       if (!bot) {
         throw new Error(`Failed to resolve bot "${enabled[0]!.id}".`);
       }
-      systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
-      model = bot.resolvedModel.model;
     }
+
+    fallbackBot = bot;
+    defaultSystemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+    defaultModel = bot.resolvedModel.model;
+    defaultToolsAllowlist = bot.toolsAllowlist;
     streamFn = models.streamSimple.bind(models);
+
+    logEvent({
+      type: "host_info",
+      message: `default bot profile: id=${bot.id} model=${bot.modelRef} tools=${JSON.stringify(bot.toolsAllowlist)} scope=${contextScopeOf(bot)}`,
+    });
   }
 
+  const profiles = new BotProfileCache(config, models, fallbackBot);
+
+  // One Agent instance; transcript isolation is done by swapping state.messages.
   const agent = new Agent({
     initialState: {
-      systemPrompt,
-      model,
+      systemPrompt: defaultSystemPrompt,
+      model: defaultModel,
       tools: [],
       thinkingLevel: "minimal",
     },
     streamFn,
     toolExecution: "sequential",
-    sessionId: "chrono-m1",
+    sessionId: "chrono-host",
   });
 
   agent.subscribe((event) => {
     logEvent(event);
   });
+
+  /**
+   * Session isolation store.
+   * logicalKey = base session_key + bot id (generation tracked inside bucket)
+   */
+  const sessions = new Map<string, SessionBucket>();
+  /** Active generation override after /new: logicalKey → generation */
+  const generationByLogical = new Map<string, number>();
+
+  function logicalKey(sessionKey: string, botId: string): string {
+    return `${sessionKey}#${botId}`;
+  }
+
+  function getOrCreateBucket(logical: string): SessionBucket {
+    let bucket = sessions.get(logical);
+    if (!bucket) {
+      const gen = generationByLogical.get(logical) ?? 0;
+      bucket = { messages: [], generation: gen };
+      sessions.set(logical, bucket);
+    }
+    return bucket;
+  }
+
+  function rotateSession(logical: string): number {
+    const prev = generationByLogical.get(logical) ?? 0;
+    const next = prev + 1;
+    generationByLogical.set(logical, next);
+    sessions.set(logical, { messages: [], generation: next });
+    return next;
+  }
 
   // ── Event loop ─────────────────────────────────────────────────
   const inboundQueue: ChronoEvent[] = [];
@@ -222,16 +360,101 @@ async function main() {
 
     if (!event) break;
 
-    agent.state.tools = [
-      createMessageSendTool(event.session_key, pendingCalls, agent.signal),
-    ];
+    const bot = profiles.get(event.bot_profile_id);
+    if (!bot) {
+      logEvent({
+        type: "host_error",
+        message: `no bot profile for event (bot_profile_id=${event.bot_profile_id ?? "none"})`,
+      });
+      writeControl({
+        type: "error",
+        message: `no bot profile for event`,
+      });
+      continue;
+    }
+
+    // Reserved: bot/account shared context is not implemented yet.
+    const scope = contextScopeOf(bot);
+    if (scope !== "session") {
+      logEvent({
+        type: "host_warn",
+        message: `context_scope=${scope} is reserved/TODO; falling back to session isolation for bot=${bot.id}`,
+      });
+    }
+
+    const logical = logicalKey(event.session_key, bot.id);
+
+    // ── Platform commands (Telegram /new etc.) ───────────────────
+    if (isNewSessionCommand(event.message.text)) {
+      if (!newSessionCommandEnabled(bot)) {
+        logEvent({
+          type: "host_info",
+          message: `session command disabled by policy for bot=${bot.id}`,
+        });
+        // Still ack so gateway doesn't hang waiting for done
+        writeControl({ type: "done" });
+        continue;
+      }
+      const gen = rotateSession(logical);
+      logEvent({
+        type: "host_info",
+        message: `session rotated logical=${logical} generation=${gen}`,
+      });
+      // Confirm via message_send so the user sees the reset.
+      agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+      agent.state.model = bot.resolvedModel.model;
+      agent.state.messages = [];
+      agent.state.tools = createToolsForAllowlist(
+        bot.toolsAllowlist.length > 0 ? bot.toolsAllowlist : defaultToolsAllowlist,
+        event.session_key,
+        pendingCalls,
+        agent.signal,
+      );
+      try {
+        // Direct tool path: avoid LLM for a deterministic command.
+        const tools = agent.state.tools;
+        const send = tools.find((t) => t.name === "message_send");
+        if (send) {
+          await send.execute(`cmd_new_${Date.now()}`, {
+            text: "已开启新会话，之前的对话上下文已清空。",
+          });
+        }
+        writeControl({ type: "done" });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logEvent({ type: "host_error", message });
+        writeControl({ type: "error", message });
+      }
+      continue;
+    }
+
+    // ── Load isolated transcript for this session ────────────────
+    const bucket = getOrCreateBucket(logical);
+    agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+    agent.state.model = bot.resolvedModel.model;
+    agent.state.messages = bucket.messages;
+    agent.state.tools = createToolsForAllowlist(
+      bot.toolsAllowlist.length > 0 ? bot.toolsAllowlist : defaultToolsAllowlist,
+      event.session_key,
+      pendingCalls,
+      agent.signal,
+    );
+
+    logEvent({
+      type: "host_info",
+      message: `turn bot=${bot.id} model=${bot.modelRef} tools=${JSON.stringify(bot.toolsAllowlist)} session=${logical} gen=${bucket.generation} history=${bucket.messages.length}`,
+    });
 
     try {
       await agent.prompt(event.message.text);
+      // Persist transcript after the full agentic loop.
+      bucket.messages = agent.state.messages.slice();
       writeControl({ type: "done" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logEvent({ type: "host_error", message });
+      // Still snapshot whatever partial state we have.
+      bucket.messages = agent.state.messages.slice();
       writeControl({ type: "error", message });
       process.exitCode = 1;
       break;

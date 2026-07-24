@@ -14,11 +14,14 @@ export interface ResolvedModel {
 }
 
 export interface ResolvedBot {
+  id: string;
   modelRef: string;
   resolvedModel: ResolvedModel;
   systemPrompt: string;
   toolsAllowlist: string[];
   skillsAllowlist: string[];
+  /** Parsed bot_profiles.policy_json */
+  policy: Record<string, unknown>;
 }
 
 /**
@@ -94,12 +97,26 @@ export function resolveBot(
   const resolved = resolveModelRef(config, models, bot.model_ref);
 
   return {
+    id: bot.id,
     modelRef: bot.model_ref,
     resolvedModel: resolved,
     systemPrompt: bot.system_prompt || "",
     toolsAllowlist: parseJsonArray(bot.tools_allowlist_json),
     skillsAllowlist: parseJsonArray(bot.skills_allowlist_json),
+    policy: parseJsonObject(bot.policy_json),
   };
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function parseJsonArray(raw: string): string[] {

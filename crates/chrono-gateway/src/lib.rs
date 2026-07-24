@@ -1,12 +1,13 @@
-use std::io::{Read, Write};
-use std::path::Path;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+pub mod adapter;
+pub mod runner;
 
-use chrono_ipc::{
-    decode_frame, encode_frame, ChronoEvent, ChatKind, ChatRef, FrameError, InboundMessageBody,
-    SenderRef, ToolError, ToolIpcMessage, MAX_FRAME_BYTES,
-};
-use serde_json::{json, Value};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::Mutex;
+
+use anyhow::{bail, Context, Result};
+use chrono_ipc::{decode_frame, encode_frame, FrameError, MAX_FRAME_BYTES};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -29,13 +30,15 @@ pub enum GatewayError {
     AgentError(String),
 }
 
-pub struct GatewayMock {
+/// Manages the lifecycle of a spawned agent-host child process.
+/// stdin and stdout are independently locked for concurrent read/write.
+pub struct GatewayChild {
     child: Child,
-    stdin: ChildStdin,
-    stdout: ChildStdout,
+    stdin: Mutex<ChildStdin>,
+    stdout: Mutex<ChildStdout>,
 }
 
-impl GatewayMock {
+impl GatewayChild {
     /// Spawn `bun run src/main.ts` in `agent_host_dir` with stdin/stdout pipes.
     pub fn spawn(
         bun_path: &str,
@@ -81,147 +84,87 @@ impl GatewayMock {
 
         Ok(Self {
             child,
-            stdin,
-            stdout,
+            stdin: Mutex::new(stdin),
+            stdout: Mutex::new(stdout),
         })
     }
 
-    /// Inject a fake inbound chat message into the agent-host.
-    pub fn inject_message(&mut self, text: &str, session_key: &str) -> Result<(), GatewayError> {
-        let event = ChronoEvent::InboundMessage {
-            session_key: session_key.to_string(),
-            event_id: "evt_dev_001".to_string(),
-            platform: "dev".to_string(),
-            chat: ChatRef {
-                id: session_key.to_string(),
-                kind: ChatKind::Dm,
-                title: None,
-            },
-            sender: SenderRef {
-                id: "user_dev".to_string(),
-                name: "Dev User".to_string(),
-            },
-            message: InboundMessageBody {
-                id: "msg_dev_001".to_string(),
-                text: text.to_string(),
-                reply_to: None,
-                attachments: vec![],
-            },
-            received_at: "2026-07-24T00:00:00Z".to_string(),
-        };
-        let payload = serde_json::to_vec(&event)?;
-        write_frame(&mut self.stdin, &payload)?;
+    /// Write a length-prefixed JSON frame to the agent-host's stdin.
+    pub fn write_frame(&self, payload: &[u8]) -> Result<(), GatewayError> {
+        let frame = encode_frame(payload)?;
+        let mut stdin = self.stdin.lock().unwrap();
+        stdin.write_all(&frame)?;
+        stdin.flush()?;
         Ok(())
     }
 
-    /// Read framed messages from the child until `done`, `error`, or EOF.
-    pub fn run_loop(&mut self) -> Result<(), GatewayError> {
-        loop {
-            let payload = match read_frame(&mut self.stdout) {
-                Ok(p) => p,
-                Err(GatewayError::Io(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                    return Ok(());
-                }
-                Err(e) => return Err(e),
-            };
-
-            // Prefer ToolIpcMessage; fall back to generic Value for control messages.
-            if let Ok(tool_msg) = serde_json::from_slice::<ToolIpcMessage>(&payload) {
-                match tool_msg {
-                    ToolIpcMessage::Request {
-                        tool_call_id,
-                        name,
-                        args,
-                        ..
-                    } => {
-                        if name == "message.send" {
-                            let text = args
-                                .get("text")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            println!("[outbound] sending to chat: \"{text}\"");
-                            let response = ToolIpcMessage::Response {
-                                tool_call_id,
-                                ok: true,
-                                result: Some(json!({"message_id": "mock_001"})),
-                                error: None,
-                            };
-                            let body = serde_json::to_vec(&response)?;
-                            write_frame(&mut self.stdin, &body)?;
-                        } else {
-                            let response = ToolIpcMessage::Response {
-                                tool_call_id,
-                                ok: false,
-                                result: None,
-                                error: Some(ToolError {
-                                    code: "unsupported".to_string(),
-                                    message: format!("unsupported tool: {name}"),
-                                }),
-                            };
-                            let body = serde_json::to_vec(&response)?;
-                            write_frame(&mut self.stdin, &body)?;
-                        }
-                    }
-                    ToolIpcMessage::Response { .. } => {
-                        // Agent should not send responses to us.
-                        eprintln!("[gateway] unexpected tool.response from agent-host");
-                    }
-                }
-                continue;
-            }
-
-            let value: Value = serde_json::from_slice(&payload)?;
-            let msg_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            match msg_type {
-                "done" => return Ok(()),
-                "error" => {
-                    let message = value
-                        .get("message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown agent error");
-                    eprintln!("[gateway] agent error: {message}");
-                    return Err(GatewayError::AgentError(message.to_string()));
-                }
-                other => {
-                    eprintln!("[gateway] unknown message type from agent-host: {other}");
-                }
-            }
+    /// Read one full length-prefixed frame from the agent-host's stdout.
+    pub fn read_frame(&self) -> Result<Vec<u8>, GatewayError> {
+        let mut stdout = self.stdout.lock().unwrap();
+        let mut header = [0u8; 4];
+        stdout.read_exact(&mut header)?;
+        let len = u32::from_be_bytes(header) as usize;
+        if len > MAX_FRAME_BYTES {
+            return Err(GatewayError::Frame(FrameError::TooLarge { len }));
         }
+        let mut body = vec![0u8; len];
+        if len > 0 {
+            stdout.read_exact(&mut body)?;
+        }
+        let mut full = Vec::with_capacity(4 + len);
+        full.extend_from_slice(&header);
+        full.extend_from_slice(&body);
+        let (payload, _) = decode_frame(&full)?;
+        Ok(payload)
     }
 }
 
-impl Drop for GatewayMock {
+impl Drop for GatewayChild {
     fn drop(&mut self) {
-        // Close stdin so the child can exit its read loop.
-        // ChildStdin drops with self; try to wait without hanging forever.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
 }
 
-fn write_frame(writer: &mut impl Write, payload: &[u8]) -> Result<(), GatewayError> {
-    let frame = encode_frame(payload)?;
-    writer.write_all(&frame)?;
-    writer.flush()?;
-    Ok(())
+// ── shared helpers ────────────────────────────────────────────────
+
+/// Resolve `bun` path: env `CHRONO_BUN`, then PATH.
+pub fn find_bun() -> Result<String> {
+    if let Ok(path) = std::env::var("CHRONO_BUN") {
+        return Ok(path);
+    }
+    let output = Command::new("bun")
+        .arg("--version")
+        .output()
+        .context("failed to execute `bun --version`")?;
+    if !output.status.success() {
+        bail!("`bun --version` failed");
+    }
+    Ok("bun".to_string())
 }
 
-/// Read one full frame from `reader`. Uses a 4-byte header then body.
-fn read_frame(reader: &mut impl Read) -> Result<Vec<u8>, GatewayError> {
-    let mut header = [0u8; 4];
-    reader.read_exact(&mut header)?;
-    let len = u32::from_be_bytes(header) as usize;
-    if len > MAX_FRAME_BYTES {
-        return Err(GatewayError::Frame(FrameError::TooLarge { len }));
+/// Resolve the agent-host directory: env `CHRONO_AGENT_HOST_DIR`, then relative to manifest.
+pub fn resolve_agent_host_dir() -> Result<PathBuf> {
+    if let Ok(dir) = std::env::var("CHRONO_AGENT_HOST_DIR") {
+        let p = PathBuf::from(dir);
+        if p.join("src/main.ts").exists() {
+            return Ok(p);
+        }
+        bail!(
+            "CHRONO_AGENT_HOST_DIR does not contain src/main.ts: {}",
+            p.display()
+        );
     }
-    let mut body = vec![0u8; len];
-    if len > 0 {
-        reader.read_exact(&mut body)?;
+
+    let from_manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../agent-host");
+    let canonical = from_manifest
+        .canonicalize()
+        .with_context(|| format!("resolve agent-host at {}", from_manifest.display()))?;
+    if !canonical.join("src/main.ts").exists() {
+        bail!(
+            "agent-host main.ts not found at {}",
+            canonical.join("src/main.ts").display()
+        );
     }
-    // Validate via decode_frame for consistency (header+body already complete).
-    let mut full = Vec::with_capacity(4 + len);
-    full.extend_from_slice(&header);
-    full.extend_from_slice(&body);
-    let (payload, _) = decode_frame(&full)?;
-    Ok(payload)
+    Ok(canonical)
 }

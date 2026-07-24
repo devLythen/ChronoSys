@@ -8,6 +8,8 @@ pub enum ChronoEvent {
         session_key: String,
         event_id: String,
         platform: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bot_profile_id: Option<String>,
         chat: ChatRef,
         sender: SenderRef,
         message: InboundMessageBody,

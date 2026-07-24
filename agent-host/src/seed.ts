@@ -114,8 +114,8 @@ db.run(
   `INSERT OR REPLACE INTO bot_profiles (id, display_name, system_prompt, model_ref,
           tools_allowlist_json, enabled)
    VALUES ('greeter', 'Greeter',
-           'You are a helpful assistant. When asked to send a message, use message.send.',
-           ?, '["message.send"]', 1)`,
+           'You are a helpful assistant. When asked to send a message, use message_send.',
+           ?, '["message_send"]', 1)`,
   [`${providerId}/${modelId}`],
 );
 

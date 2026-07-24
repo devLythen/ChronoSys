@@ -1,11 +1,15 @@
 [package]
-name = "chrono-ipc"
+name = "chrono-adapter-telegram"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
+chrono-ipc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
+tokio = { workspace = true }
+teloxide = { workspace = true }
+futures = { workspace = true }

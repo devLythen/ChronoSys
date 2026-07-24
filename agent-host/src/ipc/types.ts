@@ -5,6 +5,7 @@ export interface ChronoEventInboundMessage {
   session_key: string;
   event_id: string;
   platform: string;
+  bot_profile_id?: string;
   chat: { id: string; kind: ChatKind; title?: string };
   sender: { id: string; name: string };
   message: {

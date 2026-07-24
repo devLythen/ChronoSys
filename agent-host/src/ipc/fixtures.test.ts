@@ -29,7 +29,7 @@ describe("fixtures discriminators", () => {
     expect(msg.type).toBe("tool.request");
     if (msg.type === "tool.request") {
       expect(msg.timeout_ms).toBe(15000);
-      expect(msg.name).toBe("message.send");
+      expect(msg.name).toBe("message_send");
     }
   });
 

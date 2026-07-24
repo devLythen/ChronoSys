@@ -61,6 +61,9 @@
 - [ ] `sandbox.exec` / `sandbox.read` / `sandbox.write` with bubblewrap or platform fallback
 - [ ] rate limit + mention-only policy (from bot `policy_json`)
 - [ ] basic audit log
+- [x] **Session-strong isolation** in agent-host (per `session_key` + bot + generation)
+- [x] Telegram `/new` command: rotate generation → fresh transcript for current chat
+- [x] `policy_json.context_scope` reserved (`session` default; `bot`/`account` TODO)
 
 **Exit:** support bot answers in DM; cannot touch host FS; token only via account secret_ref.
 
@@ -94,6 +97,9 @@
 - [ ] QQ / WeChat adapters (as protocols allow; stubs earlier)
 - [ ] binding pattern language advanced (regex, mention gates, multi-bot priority edge cases)
 - [ ] compaction + memory scopes
+- [ ] **Shared-context mode** (`policy_json.context_scope = bot|account`): platform-wide or
+      bot-wide transcript **only** after compaction + long-term memory (RAG/graph) + ACL
+      retrieval land; until then runtime stays session-isolated
 - [ ] human approval queue for dangerous tools
 - [ ] container image + systemd unit
 - [ ] backup/restore of `$CHRONO_HOME` (includes state DB + secrets)

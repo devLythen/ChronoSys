@@ -197,9 +197,34 @@ PluginManifest name, version, capabilities, entry, resources
 Session key:
 
 ```text
-session_key = hash(account_id, chat_id, thread_id?, mode)
+session_key = {account_id}:{chat_id}:{mode}
 // mode: "shared" (group one agent) | "dm" | "per_user" (group but private state)
+// runtime transcript key (agent-host) = session_key + "#" + bot_profile_id + "#gen" + generation
 ```
+
+**Default context policy: strong session isolation.** Each active transcript is scoped to one
+chat binding + bot profile (+ optional generation after `/new`). Cross-chat / platform-wide
+shared context is **not** the default and must not be enabled by accident.
+
+`bot_profiles.policy_json` reserved fields (forward-compatible):
+
+```json
+{
+  "mention_required": false,
+  "context_scope": "session",
+  "commands": { "new_session": true }
+}
+```
+
+| `context_scope` | Meaning | Status |
+|-----------------|---------|--------|
+| `session` (default) | Isolate transcript per `session_key` (+ bot + generation) | **Implemented** |
+| `bot` | Share one transcript across all chats for a bot profile | TODO — needs compaction + memory |
+| `account` | Share across all chats on a platform account | TODO — same, higher privacy risk |
+
+When `context_scope` is `bot` or `account`, runtime currently **falls back to `session`** and
+logs a warning. Enabling true shared context requires: rolling summarization, long-term
+memory (RAG/graph), and ACL-filtered retrieval — tracked in ROADMAP (shared-context mode).
 
 ### 5.1 Configuration store (source of truth)
 
@@ -288,7 +313,7 @@ bot_profiles(
   model_ref TEXT NOT NULL,           -- "my-llm/main-model" format; REQUIRED
   tools_allowlist_json TEXT NOT NULL,        -- [] = no tools
   skills_allowlist_json TEXT NOT NULL,
-  policy_json TEXT NOT NULL,
+  policy_json TEXT NOT NULL,          -- mention_required, context_scope, commands, …
   enabled INTEGER NOT NULL,
   json_ext TEXT,
   created_at, updated_at

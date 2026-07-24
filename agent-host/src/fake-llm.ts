@@ -94,7 +94,7 @@ export function createFakeStreamFn(messageSendText: string): StreamFn {
         const toolCall = {
           type: "toolCall" as const,
           id: "fake_call_001",
-          name: "message.send",
+          name: "message_send",
           arguments: { text: messageSendText },
         };
         const message = assistantMessage(

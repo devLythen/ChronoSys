@@ -8,6 +8,39 @@ export type PendingCall = {
   reject: (e: Error) => void;
 };
 
+/** Known platform tools that agent-host can register. */
+const KNOWN_TOOLS = ["message_send"] as const;
+export type KnownToolName = (typeof KNOWN_TOOLS)[number];
+
+/**
+ * Build the tool list for a bot profile.
+ * - empty allowlist → all known tools
+ * - non-empty allowlist → only those tools that exist in the registry
+ */
+export function createToolsForAllowlist(
+  allowlist: string[],
+  sessionKey: string,
+  pendingCalls: Map<string, PendingCall>,
+  signal?: AbortSignal,
+): AgentTool[] {
+  const names =
+    allowlist.length === 0
+      ? [...KNOWN_TOOLS]
+      : allowlist.filter((n): n is KnownToolName =>
+          (KNOWN_TOOLS as readonly string[]).includes(n),
+        );
+
+  const tools: AgentTool[] = [];
+  for (const name of names) {
+    switch (name) {
+      case "message_send":
+        tools.push(createMessageSendTool(sessionKey, pendingCalls, signal));
+        break;
+    }
+  }
+  return tools;
+}
+
 /**
  * The only M1 tool: writes tool.request to stdout and awaits tool.response
  * resolved by the main stdin read loop via `pendingCalls`.
@@ -18,7 +51,7 @@ export function createMessageSendTool(
   signal?: AbortSignal,
 ): AgentTool {
   return {
-    name: "message.send",
+    name: "message_send",
     label: "Send Message",
     description: "Send a text message to the current chat",
     parameters: Type.Object({ text: Type.String() }),
@@ -29,14 +62,14 @@ export function createMessageSendTool(
         !("text" in params) ||
         typeof params.text !== "string"
       ) {
-        throw new Error("message.send requires { text: string }");
+        throw new Error("message_send requires { text: string }");
       }
       const text = params.text;
       const request: ToolIpcMessage = {
         type: "tool.request",
         session_id: sessionKey,
         tool_call_id: toolCallId,
-        name: "message.send",
+        name: "message_send",
         args: { text },
         timeout_ms: 15000,
       };
