@@ -1,0 +1,6 @@
+{
+  "type": "tool.response",
+  "tool_call_id": "call_002",
+  "ok": false,
+  "error": { "code": "unsupported", "message": "platform cannot send" }
+}

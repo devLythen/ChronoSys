@@ -1,0 +1,11 @@
+# ChronoSys
+.chrono/
+target/
+**/node_modules/
+webui/dist/
+agent-host/dist/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example

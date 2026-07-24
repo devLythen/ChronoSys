@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chronosys.local/schemas/tool-ipc.schema.json",
+  "title": "ToolIpcMessage",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/tool.request" },
+    { "$ref": "#/$defs/tool.response" }
+  ],
+  "$defs": {
+    "tool.request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "session_id",
+        "tool_call_id",
+        "name",
+        "args",
+        "timeout_ms"
+      ],
+      "properties": {
+        "type": { "const": "tool.request" },
+        "session_id": { "type": "string" },
+        "tool_call_id": { "type": "string" },
+        "name": { "type": "string" },
+        "args": {},
+        "timeout_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tool.response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "tool_call_id", "ok"],
+      "properties": {
+        "type": { "const": "tool.response" },
+        "tool_call_id": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "result": {},
+        "error": { "$ref": "#/$defs/ToolError" }
+      }
+    },
+    "ToolError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

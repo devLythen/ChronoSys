@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chronosys.local/schemas/chrono-event.schema.json",
+  "title": "ChronoEvent",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/inbound.message" }
+  ],
+  "$defs": {
+    "inbound.message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "session_key",
+        "event_id",
+        "platform",
+        "chat",
+        "sender",
+        "message",
+        "received_at"
+      ],
+      "properties": {
+        "type": { "const": "inbound.message" },
+        "session_key": { "type": "string" },
+        "event_id": { "type": "string" },
+        "platform": { "type": "string" },
+        "chat": { "$ref": "#/$defs/ChatRef" },
+        "sender": { "$ref": "#/$defs/SenderRef" },
+        "message": { "$ref": "#/$defs/InboundMessageBody" },
+        "received_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ChatRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string", "enum": ["dm", "group", "channel"] },
+        "title": { "type": "string" }
+      }
+    },
+    "SenderRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "InboundMessageBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "attachments"],
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "reply_to": { "type": "string" },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AttachmentRef" }
+        }
+      }
+    },
+    "AttachmentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "mime"],
+      "properties": {
+        "id": { "type": "string" },
+        "mime": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    }
+  }
+}

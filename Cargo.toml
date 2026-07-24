@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/chrono-ipc",
+  "crates/chrono-cli",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/intro/ChronoSys"
+
+[workspace.dependencies]
+chrono-ipc = { path = "crates/chrono-ipc" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }

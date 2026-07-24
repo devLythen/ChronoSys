@@ -1,0 +1,8 @@
+{
+  "type": "tool.request",
+  "session_id": "sess_001",
+  "tool_call_id": "call_001",
+  "name": "message.send",
+  "args": { "text": "hi" },
+  "timeout_ms": 15000
+}

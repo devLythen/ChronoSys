@@ -1,0 +1,19 @@
+# M0 skeleton — image not packaged yet. Named volume only; no host path mounts.
+services:
+  chronosys:
+    image: chronosys:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      CHRONO_HOME: /var/lib/chronosys
+      CHRONO_NO_USER_PI: "1"
+    volumes:
+      - chrono-data:/var/lib/chronosys
+    ports:
+      - "127.0.0.1:8787:8787"
+    profiles:
+      - full
+
+volumes:
+  chrono-data:
