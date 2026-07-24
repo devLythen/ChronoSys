@@ -227,55 +227,46 @@ async function main() {
   });
 
   /**
-   * Persistent session store + small process cache.
-   * logicalKey = session_key + "#" + bot_id
+   * Persistent UUID sessions + process cache.
+   * routeKey = session_key + "#" + bot_id  (routing)
+   * sessionId = random UUID                 (conversation instance)
    */
   const chronoHome = process.env.CHRONO_HOME ?? ".chrono";
   const store = new SessionStore(sessionsDbPath(chronoHome));
-  const sessions = new Map<string, { messages: AgentMessage[]; generation: number }>();
-
-  function logicalKey(sessionKey: string, botId: string): string {
-    return `${sessionKey}#${botId}`;
-  }
+  type Bucket = { sessionId: string; messages: AgentMessage[] };
+  const sessions = new Map<string, Bucket>();
 
   function getOrCreateBucket(
-    logical: string,
+    route: string,
     sessionKey: string,
     botId: string,
-  ): { messages: AgentMessage[]; generation: number } {
-    let bucket = sessions.get(logical);
+  ): Bucket {
+    let bucket = sessions.get(route);
     if (!bucket) {
-      const rec = store.load(logical);
-      bucket = { messages: rec.messages, generation: rec.generation };
-      sessions.set(logical, bucket);
+      const rec = store.getOrCreateActive(route, sessionKey, botId);
+      bucket = { sessionId: rec.sessionId, messages: rec.messages };
+      sessions.set(route, bucket);
       logEvent({
         type: "host_info",
-        message: `session loaded logical=${logical} gen=${rec.generation} history=${rec.messages.length}`,
+        message: `session loaded route=${route} id=${rec.sessionId} history=${rec.messages.length}`,
       });
     }
-    // Keep store identity fields warm for first write if row was missing.
-    void sessionKey;
-    void botId;
     return bucket;
   }
 
-  function persistBucket(
-    logical: string,
-    sessionKey: string,
-    botId: string,
-    bucket: { messages: AgentMessage[]; generation: number },
-  ): void {
-    store.save(logical, sessionKey, botId, bucket.generation, bucket.messages);
+  function persistBucket(bucket: Bucket): void {
+    store.save(bucket.sessionId, bucket.messages);
   }
 
   function rotateSession(
-    logical: string,
+    route: string,
     sessionKey: string,
     botId: string,
-  ): number {
-    const gen = store.rotate(logical, sessionKey, botId);
-    sessions.set(logical, { messages: [], generation: gen });
-    return gen;
+  ): Bucket {
+    const rec = store.rotate(route, sessionKey, botId);
+    const bucket = { sessionId: rec.sessionId, messages: [] as AgentMessage[] };
+    sessions.set(route, bucket);
+    return bucket;
   }
 
   // ── Event loop ─────────────────────────────────────────────────
@@ -401,7 +392,7 @@ async function main() {
       });
     }
 
-    const logical = logicalKey(event.session_key, bot.id);
+    const route = `${event.session_key}#${bot.id}`;
 
     // ── Platform commands (Telegram /new etc.) ───────────────────
     if (isNewSessionCommand(event.message.text)) {
@@ -410,16 +401,14 @@ async function main() {
           type: "host_info",
           message: `session command disabled by policy for bot=${bot.id}`,
         });
-        // Still ack so gateway doesn't hang waiting for done
         writeControl({ type: "done" });
         continue;
       }
-      const gen = rotateSession(logical, event.session_key, bot.id);
+      const bucket = rotateSession(route, event.session_key, bot.id);
       logEvent({
         type: "host_info",
-        message: `session rotated logical=${logical} generation=${gen}`,
+        message: `session rotated route=${route} id=${bucket.sessionId}`,
       });
-      // Confirm via message_send so the user sees the reset.
       agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
       agent.state.model = bot.resolvedModel.model;
       agent.state.messages = [];
@@ -430,12 +419,11 @@ async function main() {
         agent.signal,
       );
       try {
-        // Direct tool path: avoid LLM for a deterministic command.
         const tools = agent.state.tools;
         const send = tools.find((t) => t.name === "message_send");
         if (send) {
           await send.execute(`cmd_new_${Date.now()}`, {
-            text: "已开启新会话，之前的对话上下文已清空。",
+            text: `已开启新会话（${bucket.sessionId.slice(0, 8)}…），之前的对话上下文已清空。`,
           });
         }
         writeControl({ type: "done" });
@@ -447,8 +435,8 @@ async function main() {
       continue;
     }
 
-    // ── Load isolated transcript for this session (disk-backed) ───
-    const bucket = getOrCreateBucket(logical, event.session_key, bot.id);
+    // ── Load active UUID session transcript ──────────────────────
+    const bucket = getOrCreateBucket(route, event.session_key, bot.id);
     agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     agent.state.model = bot.resolvedModel.model;
     agent.state.messages = bucket.messages;
@@ -461,21 +449,19 @@ async function main() {
 
     logEvent({
       type: "host_info",
-      message: `turn bot=${bot.id} model=${bot.modelRef} tools=${JSON.stringify(bot.toolsAllowlist)} session=${logical} gen=${bucket.generation} history=${bucket.messages.length}`,
+      message: `turn bot=${bot.id} model=${bot.modelRef} tools=${JSON.stringify(bot.toolsAllowlist)} route=${route} session_id=${bucket.sessionId} history=${bucket.messages.length}`,
     });
 
     try {
       await agent.prompt(event.message.text);
-      // Persist transcript after the full agentic loop.
       bucket.messages = agent.state.messages.slice();
-      persistBucket(logical, event.session_key, bot.id, bucket);
+      persistBucket(bucket);
       writeControl({ type: "done" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logEvent({ type: "host_error", message });
-      // Still snapshot whatever partial state we have.
       bucket.messages = agent.state.messages.slice();
-      persistBucket(logical, event.session_key, bot.id, bucket);
+      persistBucket(bucket);
       writeControl({ type: "error", message });
       process.exitCode = 1;
       break;

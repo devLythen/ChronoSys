@@ -197,10 +197,11 @@ PluginManifest name, version, capabilities, entry, resources
 Session key:
 
 ```text
-session_key = {account_id}:{chat_id}:{mode}
-// mode: "shared" (group one agent) | "dm" | "per_user" (group but private state)
-// runtime transcript key (agent-host) = session_key + "#" + bot_profile_id
-// generation is stored alongside messages in sessions.db (bumped by /new)
+session_key (route) = {account_id}:{chat_id}:{mode}     -- deterministic routing
+route_key           = {session_key}#{bot_profile_id}
+session_id          = UUID v4                           -- conversation instance
+// active_sessions[route_key] → session_id
+// /new allocates a new UUID and repoints active_sessions (old row kept as archive)
 ```
 
 **Default context policy: strong session isolation.** Each active transcript is scoped to one

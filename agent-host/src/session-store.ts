@@ -1,23 +1,29 @@
 /**
  * Persistent conversation transcripts under $CHRONO_HOME/state/sessions.db.
  *
- * Isolation key (logical_key):
- *   {session_key}#{bot_profile_id}
- * Active generation is stored per logical_key; /new bumps generation and
- * starts a fresh empty messages blob.
+ * Model:
+ * - route_key  = deterministic routing key: {session_key}#{bot_profile_id}
+ * - session_id = random UUID per conversation instance
+ * - active_sessions[route_key] → current session_id
+ * - /new allocates a new UUID and repoints active_sessions
+ *
+ * Each dialogue turn:
+ *   resolve active session for route → load messages → prompt → save messages
  */
 
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 export type SessionRecord = {
-  logicalKey: string;
+  sessionId: string;
+  routeKey: string;
   sessionKey: string;
   botProfileId: string;
-  generation: number;
   messages: AgentMessage[];
+  createdAt: string;
   updatedAt: string;
 };
 
@@ -29,19 +35,53 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 
 CREATE TABLE IF NOT EXISTS conversation_sessions (
-  logical_key     TEXT PRIMARY KEY,
+  session_id      TEXT PRIMARY KEY,
+  route_key       TEXT NOT NULL,
   session_key     TEXT NOT NULL,
   bot_profile_id  TEXT NOT NULL,
-  generation      INTEGER NOT NULL DEFAULT 0,
   messages_json   TEXT NOT NULL DEFAULT '[]',
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_conv_sessions_session
+CREATE INDEX IF NOT EXISTS idx_conv_sessions_route
+  ON conversation_sessions(route_key);
+CREATE INDEX IF NOT EXISTS idx_conv_sessions_session_key
   ON conversation_sessions(session_key);
-CREATE INDEX IF NOT EXISTS idx_conv_sessions_bot
-  ON conversation_sessions(bot_profile_id);
+
+CREATE TABLE IF NOT EXISTS active_sessions (
+  route_key   TEXT PRIMARY KEY,
+  session_id  TEXT NOT NULL REFERENCES conversation_sessions(session_id),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`;
+
+/** v2: UUID sessions + active pointer (replaces generation model). */
+const MIGRATION_002 = `
+-- Drop legacy generation-based table if present (dev-stage; no user migration).
+DROP TABLE IF EXISTS conversation_sessions;
+DROP TABLE IF EXISTS active_sessions;
+
+CREATE TABLE conversation_sessions (
+  session_id      TEXT PRIMARY KEY,
+  route_key       TEXT NOT NULL,
+  session_key     TEXT NOT NULL,
+  bot_profile_id  TEXT NOT NULL,
+  messages_json   TEXT NOT NULL DEFAULT '[]',
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_conv_sessions_route
+  ON conversation_sessions(route_key);
+CREATE INDEX IF NOT EXISTS idx_conv_sessions_session_key
+  ON conversation_sessions(session_key);
+
+CREATE TABLE active_sessions (
+  route_key   TEXT PRIMARY KEY,
+  session_id  TEXT NOT NULL REFERENCES conversation_sessions(session_id),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 export class SessionStore {
@@ -69,95 +109,125 @@ export class SessionStore {
     const row = this.db
       .query("SELECT COALESCE(MAX(version), 0) AS v FROM schema_migrations")
       .get() as { v: number };
+
     if (row.v < 1) {
       this.db.run(MIGRATION_001);
       this.db.run(
         "INSERT INTO schema_migrations (version, name) VALUES (1, '001_sessions')",
       );
     }
+    if (row.v < 2) {
+      this.db.run(MIGRATION_002);
+      this.db.run(
+        "INSERT INTO schema_migrations (version, name) VALUES (2, '002_uuid_sessions')",
+      );
+    }
   }
 
-  /** Load active session bucket; returns empty messages if none. */
-  load(logicalKey: string): SessionRecord {
+  /**
+   * Resolve the active session for a route, creating a new UUID session if none.
+   */
+  getOrCreateActive(
+    routeKey: string,
+    sessionKey: string,
+    botProfileId: string,
+  ): SessionRecord {
+    const active = this.db
+      .query(`SELECT session_id FROM active_sessions WHERE route_key = ?`)
+      .get(routeKey) as { session_id: string } | null;
+
+    if (active) {
+      const rec = this.loadById(active.session_id);
+      if (rec) return rec;
+      // Dangling pointer — create fresh.
+    }
+
+    return this.createSession(routeKey, sessionKey, botProfileId);
+  }
+
+  loadById(sessionId: string): SessionRecord | null {
     const row = this.db
       .query(
-        `SELECT logical_key, session_key, bot_profile_id, generation, messages_json, updated_at
-         FROM conversation_sessions WHERE logical_key = ?`,
+        `SELECT session_id, route_key, session_key, bot_profile_id,
+                messages_json, created_at, updated_at
+         FROM conversation_sessions WHERE session_id = ?`,
       )
-      .get(logicalKey) as
+      .get(sessionId) as
       | {
-          logical_key: string;
+          session_id: string;
+          route_key: string;
           session_key: string;
           bot_profile_id: string;
-          generation: number;
           messages_json: string;
+          created_at: string;
           updated_at: string;
         }
       | null;
 
-    if (!row) {
-      const [sessionKey, botProfileId] = splitLogical(logicalKey);
-      return {
-        logicalKey,
-        sessionKey,
-        botProfileId,
-        generation: 0,
-        messages: [],
-        updatedAt: "",
-      };
-    }
-
+    if (!row) return null;
     return {
-      logicalKey: row.logical_key,
+      sessionId: row.session_id,
+      routeKey: row.route_key,
       sessionKey: row.session_key,
       botProfileId: row.bot_profile_id,
-      generation: row.generation,
       messages: parseMessages(row.messages_json),
+      createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
   }
 
-  /** Upsert transcript for the active generation. */
-  save(
-    logicalKey: string,
-    sessionKey: string,
-    botProfileId: string,
-    generation: number,
-    messages: AgentMessage[],
-  ): void {
-    const messagesJson = JSON.stringify(messages);
+  /** Persist messages for an existing session_id. */
+  save(sessionId: string, messages: AgentMessage[]): void {
     this.db.run(
-      `INSERT INTO conversation_sessions
-         (logical_key, session_key, bot_profile_id, generation, messages_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(logical_key) DO UPDATE SET
-         generation = excluded.generation,
-         messages_json = excluded.messages_json,
-         updated_at = datetime('now')`,
-      [logicalKey, sessionKey, botProfileId, generation, messagesJson],
+      `UPDATE conversation_sessions
+       SET messages_json = ?, updated_at = datetime('now')
+       WHERE session_id = ?`,
+      [JSON.stringify(messages), sessionId],
     );
   }
 
   /**
-   * Rotate to a new generation: bump counter, clear messages.
-   * Returns the new generation number.
+   * /new: allocate a new UUID session and repoint active_sessions.
+   * Previous session row is kept (history archive).
    */
   rotate(
-    logicalKey: string,
+    routeKey: string,
     sessionKey: string,
     botProfileId: string,
-  ): number {
-    const current = this.load(logicalKey);
-    const next = current.generation + 1;
-    this.save(logicalKey, sessionKey, botProfileId, next, []);
-    return next;
+  ): SessionRecord {
+    return this.createSession(routeKey, sessionKey, botProfileId);
   }
-}
 
-function splitLogical(logicalKey: string): [string, string] {
-  const idx = logicalKey.lastIndexOf("#");
-  if (idx <= 0) return [logicalKey, ""];
-  return [logicalKey.slice(0, idx), logicalKey.slice(idx + 1)];
+  private createSession(
+    routeKey: string,
+    sessionKey: string,
+    botProfileId: string,
+  ): SessionRecord {
+    const sessionId = randomUUID();
+    this.db.run(
+      `INSERT INTO conversation_sessions
+         (session_id, route_key, session_key, bot_profile_id, messages_json)
+       VALUES (?, ?, ?, ?, '[]')`,
+      [sessionId, routeKey, sessionKey, botProfileId],
+    );
+    this.db.run(
+      `INSERT INTO active_sessions (route_key, session_id, updated_at)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT(route_key) DO UPDATE SET
+         session_id = excluded.session_id,
+         updated_at = datetime('now')`,
+      [routeKey, sessionId],
+    );
+    return {
+      sessionId,
+      routeKey,
+      sessionKey,
+      botProfileId,
+      messages: [],
+      createdAt: "",
+      updatedAt: "",
+    };
+  }
 }
 
 function parseMessages(raw: string): AgentMessage[] {
@@ -171,4 +241,8 @@ function parseMessages(raw: string): AgentMessage[] {
 
 export function sessionsDbPath(chronoHome: string): string {
   return `${chronoHome}/state/sessions.db`;
+}
+
+export function routeKey(sessionKey: string, botId: string): string {
+  return `${sessionKey}#${botId}`;
 }
