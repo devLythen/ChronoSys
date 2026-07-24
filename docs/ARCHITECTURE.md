@@ -199,7 +199,8 @@ Session key:
 ```text
 session_key = {account_id}:{chat_id}:{mode}
 // mode: "shared" (group one agent) | "dm" | "per_user" (group but private state)
-// runtime transcript key (agent-host) = session_key + "#" + bot_profile_id + "#gen" + generation
+// runtime transcript key (agent-host) = session_key + "#" + bot_profile_id
+// generation is stored alongside messages in sessions.db (bumped by /new)
 ```
 
 **Default context policy: strong session isolation.** Each active transcript is scoped to one
@@ -233,9 +234,10 @@ Runtime multi-entity state lives in a **local SQLite database** under `$CHRONO_H
 | Path | Role |
 |------|------|
 | `$CHRONO_HOME/state/chrono.db` | Config + binding + account metadata + model allowlist + grants index |
+| `$CHRONO_HOME/state/sessions.db` | Conversation transcripts (per session_key + bot + generation) |
 | `$CHRONO_HOME/secrets/` | Encrypted credential blobs (or OS keychain refs); never plaintext in DB by default |
 | `$CHRONO_HOME/config.toml` | **Process bootstrap only** (bind address, log level, db path override). Not the place for bots/models/accounts. |
-| `$CHRONO_HOME/sessions/` | pi session transcripts (orthogonal to config DB) |
+| `$CHRONO_HOME/sessions/` | Optional export / pi-native session files (orthogonal to sessions.db) |
 
 Why SQLite (not only TOML):
 

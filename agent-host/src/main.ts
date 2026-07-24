@@ -15,6 +15,7 @@ import {
   resolveBot,
   type ResolvedBot,
 } from "./resolve.ts";
+import { SessionStore, sessionsDbPath } from "./session-store.ts";
 
 const DEFAULT_SYSTEM_PROMPT =
   "You are an assistant in a chat platform. When asked to send a message, use the message_send tool.";
@@ -102,10 +103,6 @@ class BotProfileCache {
  * Per-conversation transcript bucket.
  * Keyed by session_key + bot_profile_id + generation (after /new).
  */
-type SessionBucket = {
-  messages: AgentMessage[];
-  generation: number;
-};
 
 function contextScopeOf(bot: ResolvedBot): ContextScope {
   const raw = bot.policy.context_scope;
@@ -230,33 +227,55 @@ async function main() {
   });
 
   /**
-   * Session isolation store.
-   * logicalKey = base session_key + bot id (generation tracked inside bucket)
+   * Persistent session store + small process cache.
+   * logicalKey = session_key + "#" + bot_id
    */
-  const sessions = new Map<string, SessionBucket>();
-  /** Active generation override after /new: logicalKey → generation */
-  const generationByLogical = new Map<string, number>();
+  const chronoHome = process.env.CHRONO_HOME ?? ".chrono";
+  const store = new SessionStore(sessionsDbPath(chronoHome));
+  const sessions = new Map<string, { messages: AgentMessage[]; generation: number }>();
 
   function logicalKey(sessionKey: string, botId: string): string {
     return `${sessionKey}#${botId}`;
   }
 
-  function getOrCreateBucket(logical: string): SessionBucket {
+  function getOrCreateBucket(
+    logical: string,
+    sessionKey: string,
+    botId: string,
+  ): { messages: AgentMessage[]; generation: number } {
     let bucket = sessions.get(logical);
     if (!bucket) {
-      const gen = generationByLogical.get(logical) ?? 0;
-      bucket = { messages: [], generation: gen };
+      const rec = store.load(logical);
+      bucket = { messages: rec.messages, generation: rec.generation };
       sessions.set(logical, bucket);
+      logEvent({
+        type: "host_info",
+        message: `session loaded logical=${logical} gen=${rec.generation} history=${rec.messages.length}`,
+      });
     }
+    // Keep store identity fields warm for first write if row was missing.
+    void sessionKey;
+    void botId;
     return bucket;
   }
 
-  function rotateSession(logical: string): number {
-    const prev = generationByLogical.get(logical) ?? 0;
-    const next = prev + 1;
-    generationByLogical.set(logical, next);
-    sessions.set(logical, { messages: [], generation: next });
-    return next;
+  function persistBucket(
+    logical: string,
+    sessionKey: string,
+    botId: string,
+    bucket: { messages: AgentMessage[]; generation: number },
+  ): void {
+    store.save(logical, sessionKey, botId, bucket.generation, bucket.messages);
+  }
+
+  function rotateSession(
+    logical: string,
+    sessionKey: string,
+    botId: string,
+  ): number {
+    const gen = store.rotate(logical, sessionKey, botId);
+    sessions.set(logical, { messages: [], generation: gen });
+    return gen;
   }
 
   // ── Event loop ─────────────────────────────────────────────────
@@ -395,7 +414,7 @@ async function main() {
         writeControl({ type: "done" });
         continue;
       }
-      const gen = rotateSession(logical);
+      const gen = rotateSession(logical, event.session_key, bot.id);
       logEvent({
         type: "host_info",
         message: `session rotated logical=${logical} generation=${gen}`,
@@ -428,8 +447,8 @@ async function main() {
       continue;
     }
 
-    // ── Load isolated transcript for this session ────────────────
-    const bucket = getOrCreateBucket(logical);
+    // ── Load isolated transcript for this session (disk-backed) ───
+    const bucket = getOrCreateBucket(logical, event.session_key, bot.id);
     agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     agent.state.model = bot.resolvedModel.model;
     agent.state.messages = bucket.messages;
@@ -449,12 +468,14 @@ async function main() {
       await agent.prompt(event.message.text);
       // Persist transcript after the full agentic loop.
       bucket.messages = agent.state.messages.slice();
+      persistBucket(logical, event.session_key, bot.id, bucket);
       writeControl({ type: "done" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logEvent({ type: "host_error", message });
       // Still snapshot whatever partial state we have.
       bucket.messages = agent.state.messages.slice();
+      persistBucket(logical, event.session_key, bot.id, bucket);
       writeControl({ type: "error", message });
       process.exitCode = 1;
       break;
