@@ -231,4 +231,124 @@ mod tests {
         assert_eq!(got.base_url.as_deref(), Some("https://proxy.example.com/v1"));
         assert_eq!(got.json_ext["default_headers"]["X-Region"], "us");
     }
+
+    #[test]
+    fn delete_account_bot_provider() {
+        let store = setup();
+        store.providers().insert_provider(&LlmProvider {
+            id: "p1".into(),
+            kind: "builtin".into(),
+            base_url: None,
+            display_name: "P".into(),
+            enabled: true,
+            json_ext: json!({}),
+            created_at: String::new(),
+            updated_at: String::new(),
+        }).unwrap();
+        store.providers().upsert_credential(&LlmCredential {
+            provider_id: "p1".into(),
+            auth_kind: "api_key".into(),
+            secret_ref: "env:KEY".into(),
+            json_ext: json!({}),
+            updated_at: String::new(),
+        }).unwrap();
+        store.providers().upsert_model(&LlmModel {
+            provider_id: "p1".into(),
+            model_id: "m1".into(),
+            display_name: None,
+            enabled: true,
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            extra_headers_json: None,
+            extra_body_json: None,
+            thinking_level: None,
+            json_ext: json!({}),
+            created_at: String::new(),
+            updated_at: String::new(),
+        }).unwrap();
+        store.accounts().insert_account(&PlatformAccount {
+            id: "a1".into(),
+            platform: "telegram".into(),
+            display_name: "A".into(),
+            adapter_id: "chrono.adapter.telegram".into(),
+            enabled: true,
+            secret_ref: "env:TG".into(),
+            adapter_config_json: json!({}),
+            json_ext: json!({}),
+            created_at: String::new(),
+            updated_at: String::new(),
+        }).unwrap();
+        store.bots().insert_bot(&BotProfile {
+            id: "b1".into(),
+            display_name: "B".into(),
+            system_prompt: "".into(),
+            model_ref: "p1/m1".into(),
+            tools_allowlist_json: json!([]),
+            skills_allowlist_json: json!([]),
+            policy_json: json!({}),
+            enabled: true,
+            json_ext: json!({}),
+            created_at: String::new(),
+            updated_at: String::new(),
+        }).unwrap();
+        store.bots().insert_binding(&Binding {
+            id: "bind1".into(),
+            account_id: "a1".into(),
+            chat_pattern: "*".into(),
+            bot_profile_id: "b1".into(),
+            session_mode: "shared".into(),
+            priority: 0,
+            enabled: true,
+            json_ext: json!({}),
+            created_at: String::new(),
+            updated_at: String::new(),
+        }).unwrap();
+
+        store.bots().delete_bot("b1").unwrap();
+        assert!(store.bots().get_bot("b1").is_err());
+        // binding cascaded via FK
+        assert!(store.bots().get_binding("bind1").is_err());
+
+        store.accounts().delete_account("a1").unwrap();
+        assert!(store.accounts().get_account("a1").is_err());
+
+        store.providers().delete_credential("p1").unwrap();
+        assert!(store.providers().get_credential("p1").is_err());
+
+        store.providers().delete_provider("p1").unwrap();
+        assert!(store.providers().get_provider("p1").is_err());
+        // models cascaded
+        assert!(store.providers().get_model("p1", "m1").is_err());
+
+        match store.accounts().delete_account("missing") {
+            Err(ConfigError::NotFound { .. }) => {}
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn settings_crud() {
+        let store = setup();
+        store.settings().set("feature.x", &json!(true)).unwrap();
+        store.settings().set("feature.y", &json!({"n": 1})).unwrap();
+
+        let got = store.settings().get("feature.x").unwrap().unwrap();
+        assert_eq!(got.key, "feature.x");
+        assert_eq!(got.value_json, json!(true));
+
+        let list = store.settings().list().unwrap();
+        assert_eq!(list.len(), 2);
+
+        store.settings().set("feature.x", &json!(false)).unwrap();
+        let got = store.settings().get("feature.x").unwrap().unwrap();
+        assert_eq!(got.value_json, json!(false));
+
+        store.settings().delete("feature.y").unwrap();
+        assert!(store.settings().get("feature.y").unwrap().is_none());
+        match store.settings().delete("nope") {
+            Err(ConfigError::NotFound { .. }) => {}
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
 }

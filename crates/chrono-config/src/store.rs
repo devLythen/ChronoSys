@@ -5,6 +5,7 @@ use thiserror::Error;
 use crate::providers::ProviderStore;
 use crate::accounts::AccountStore;
 use crate::bots::BotStore;
+use crate::settings::SettingStore;
 
 const MIGRATION_001: &str = include_str!("migrations/001_init.sql");
 
@@ -79,6 +80,10 @@ impl ConfigStore {
 
     pub fn bots(&self) -> BotStore<'_> {
         BotStore { conn: &self.conn }
+    }
+
+    pub fn settings(&self) -> SettingStore<'_> {
+        SettingStore { conn: &self.conn }
     }
 }
 

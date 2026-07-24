@@ -364,9 +364,74 @@ async function main() {
           continue;
         }
 
+        const controlType = messageTypeOf(msg);
+        if (controlType === "steer") {
+          const sessionId =
+            msg && typeof msg === "object" && "session_id" in msg
+              ? String((msg as { session_id: unknown }).session_id)
+              : "";
+          const text =
+            msg && typeof msg === "object" && "text" in msg
+              ? String((msg as { text: unknown }).text)
+              : "";
+          if (!text) {
+            logEvent({
+              type: "host_warn",
+              message: "steer missing text",
+            });
+            continue;
+          }
+          // If agent is mid-run, inject via steer(); otherwise queue as inbound user message.
+          if (agent.signal) {
+            agent.steer({
+              role: "user",
+              content: text,
+              timestamp: Date.now(),
+            } as AgentMessage);
+            logEvent({
+              type: "host_info",
+              message: `steer injected mid-run session_id=${sessionId}`,
+            });
+          } else {
+            // Idle: deliver as a synthetic inbound for the active session if we can map it.
+            // Without platform chat context we log and no-op for idle steer on unknown session.
+            logEvent({
+              type: "host_info",
+              message: `steer received while idle session_id=${sessionId}; queueing as follow-up if active`,
+            });
+            agent.followUp({
+              role: "user",
+              content: text,
+              timestamp: Date.now(),
+            } as AgentMessage);
+          }
+          continue;
+        }
+
+        if (controlType === "abort") {
+          const sessionId =
+            msg && typeof msg === "object" && "session_id" in msg
+              ? String((msg as { session_id: unknown }).session_id)
+              : "";
+          agent.abort();
+          logEvent({
+            type: "host_info",
+            message: `abort requested session_id=${sessionId}`,
+          });
+          continue;
+        }
+
+        if (controlType === "config.reload") {
+          logEvent({
+            type: "host_info",
+            message: "config.reload received (profiles already hot-read each turn)",
+          });
+          continue;
+        }
+
         logEvent({
           type: "host_warn",
-          message: `unknown stdin message type: ${JSON.stringify(messageTypeOf(msg))}`,
+          message: `unknown stdin message type: ${JSON.stringify(controlType)}`,
         });
       }
       closeInbound();

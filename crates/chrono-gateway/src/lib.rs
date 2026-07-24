@@ -1,5 +1,8 @@
 pub mod adapter;
+pub mod adapters;
+pub mod http;
 pub mod runner;
+pub mod secrets;
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -33,7 +36,7 @@ pub enum GatewayError {
 /// Manages the lifecycle of a spawned agent-host child process.
 /// stdin and stdout are independently locked for concurrent read/write.
 pub struct GatewayChild {
-    child: Child,
+    child: Mutex<Child>,
     stdin: Mutex<ChildStdin>,
     stdout: Mutex<ChildStdout>,
 }
@@ -83,7 +86,7 @@ impl GatewayChild {
             .ok_or_else(|| GatewayError::Child("failed to take child stdout".into()))?;
 
         Ok(Self {
-            child,
+            child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             stdout: Mutex::new(stdout),
         })
@@ -117,12 +120,24 @@ impl GatewayChild {
         let (payload, _) = decode_frame(&full)?;
         Ok(payload)
     }
+
+    /// Non-blocking check: true while the agent-host process is still running.
+    pub fn is_alive(&self) -> bool {
+        let mut child = self.child.lock().unwrap();
+        match child.try_wait() {
+            Ok(None) => true,
+            Ok(Some(_)) => false,
+            Err(_) => false,
+        }
+    }
 }
 
 impl Drop for GatewayChild {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 

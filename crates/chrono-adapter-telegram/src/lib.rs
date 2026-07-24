@@ -53,13 +53,17 @@ impl PlatformAdapter for TelegramAdapter {
         let username = me.username.as_deref().unwrap_or("unknown");
         eprintln!("[telegram] connected as @{username} (id: {})", me.id.0);
 
-        // Manual long-polling loop
+        // Manual long-polling loop — cooperative cancel via task abort / drop.
         let mut offset: i32 = 0;
         loop {
+            // Yield so AbortHandle can land between poll iterations.
+            tokio::task::yield_now().await;
+
             let start = std::time::Instant::now();
             let updates = match bot.get_updates().offset(offset).timeout(1).send().await {
                 Ok(updates) => updates,
                 Err(e) => {
+                    // Cancellation surfaces as a join error on the JoinHandle, not here.
                     eprintln!("[telegram] getUpdates error: {e}, retrying in 5s...");
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     continue;

@@ -80,6 +80,17 @@ impl ProviderStore<'_> {
         let rows = stmt.query_map([], row_to_provider)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
+
+    pub fn delete_provider(&self, id: &str) -> Result<()> {
+        let rows = self.conn.execute("DELETE FROM llm_providers WHERE id=?1", params![id])?;
+        if rows == 0 {
+            return Err(ConfigError::NotFound {
+                entity: "llm_providers",
+                id: id.into(),
+            });
+        }
+        Ok(())
+    }
 }
 
 fn row_to_provider(row: &rusqlite::Row) -> std::result::Result<LlmProvider, rusqlite::Error> {
@@ -138,6 +149,20 @@ impl ProviderStore<'_> {
                 },
                 other => ConfigError::Sqlite(other),
             })
+    }
+
+    pub fn delete_credential(&self, provider_id: &str) -> Result<()> {
+        let rows = self.conn.execute(
+            "DELETE FROM llm_credentials WHERE provider_id=?1",
+            params![provider_id],
+        )?;
+        if rows == 0 {
+            return Err(ConfigError::NotFound {
+                entity: "llm_credentials",
+                id: provider_id.into(),
+            });
+        }
+        Ok(())
     }
 }
 

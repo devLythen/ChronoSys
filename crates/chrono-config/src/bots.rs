@@ -82,6 +82,17 @@ impl BotStore<'_> {
         let rows = stmt.query_map([], row_to_bot)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
+
+    pub fn delete_bot(&self, id: &str) -> Result<()> {
+        let rows = self.conn.execute("DELETE FROM bot_profiles WHERE id=?1", params![id])?;
+        if rows == 0 {
+            return Err(ConfigError::NotFound {
+                entity: "bot_profiles",
+                id: id.into(),
+            });
+        }
+        Ok(())
+    }
 }
 
 fn row_to_bot(row: &rusqlite::Row) -> std::result::Result<BotProfile, rusqlite::Error> {

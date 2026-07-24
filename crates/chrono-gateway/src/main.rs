@@ -1,15 +1,10 @@
 // Gateway binary — thin entry point.
-// For real adapter-driven operation, use `chrono up` (chrono-cli).
-// This binary exists for direct `cargo run -p chrono-gateway` testing.
-//
-// Running without adapters: the gateway starts but has nothing to poll.
-// Use chrono-cli (`chrono up`) for full Telegram adapter support.
+// Prefer `chrono up` (chrono-cli). Same boot path: control plane only;
+// adapters attach from config DB / WebUI.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use chrono_gateway::adapter::PlatformAdapter;
+use chrono_config::ConfigStore;
 use chrono_gateway::runner::run_gateway;
 use chrono_gateway::{find_bun, resolve_agent_host_dir};
 
@@ -33,9 +28,9 @@ fn main() {
         }
     };
 
-    let adapters: HashMap<String, Arc<dyn PlatformAdapter>> = HashMap::new();
-    let bindings: HashMap<String, Vec<chrono_config::Binding>> = HashMap::new();
-    let bot_profiles: HashMap<String, chrono_config::BotProfile> = HashMap::new();
+    let db_path = chrono_home.join("state/chrono.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).expect("create state dir");
+    let store = ConfigStore::open(&db_path).expect("open config DB");
 
     let rt = tokio::runtime::Runtime::new().expect("create tokio runtime");
     rt.block_on(run_gateway(
@@ -43,9 +38,7 @@ fn main() {
         fake_llm,
         bun_path,
         agent_host_dir,
-        adapters,
-        bindings,
-        bot_profiles,
+        store,
     ))
     .expect("gateway failed");
 }
