@@ -55,17 +55,22 @@
 
 **Deliverable:** real bot replies in a private chat **using config DB accounts/bindings**.
 
-- [ ] `chrono.adapter.telegram` (Bot API, long poll or webhook)
-- [ ] Load enabled `platform_accounts` + `bindings` from DB (no hardcoded token)
-- [ ] media download to sandbox workspace
-- [ ] `sandbox.exec` / `sandbox.read` / `sandbox.write` with bubblewrap or platform fallback
-- [ ] rate limit + mention-only policy (from bot `policy_json`)
-- [ ] basic audit log
-- [x] **Session-strong isolation** in agent-host (per `session_key` + bot + generation)
-- [x] Telegram `/new` command: rotate generation → fresh transcript for current chat
+- [x] `chrono.adapter.telegram` (Bot API, long poll)
+- [x] Load enabled `platform_accounts` + `bindings` from DB (no hardcoded token)
+- [ ] media download to sandbox workspace *(deferred)*
+- [ ] `sandbox.exec` / `sandbox.read` / `sandbox.write` *(deferred)*
+- [x] rate limit + mention-only policy (from bot `policy_json`)
+- [x] basic audit log
+- [x] **Session-strong isolation** in agent-host (per route + UUID session_id)
+- [x] Telegram `/new` command: new UUID session; archive previous transcript
 - [x] `policy_json.context_scope` reserved (`session` default; `bot`/`account` TODO)
+- [x] UUID session persistence (`$CHRONO_HOME/state/sessions.db`)
+- [x] `message_send` supports optional `chat_id` (cross-chat); body-text fallback current-only
+- [x] `policy_json.max_context_messages` hard refuse + error log (compaction/memory later)
+- [x] Bot profile hot-read from config DB each turn
 
 **Exit:** support bot answers in DM; cannot touch host FS; token only via account secret_ref.
+Sandbox/media intentionally deferred to a later hardening pass.
 
 ### M3 — Control plane + WebUI MVP (week 5–7)
 
@@ -94,9 +99,9 @@
 
 ### M5 — Multi-platform & hardening (week 9–12)
 
-- [ ] QQ / WeChat adapters (as protocols allow; stubs earlier)
-- [ ] binding pattern language advanced (regex, mention gates, multi-bot priority edge cases)
 - [ ] compaction + memory scopes
+- [ ] replace hard `max_context_messages` refuse with: rolling summary → long-term memory
+      (RAG and/or graph) → inject retrieved snippets under ACL
 - [ ] **Shared-context mode** (`policy_json.context_scope = bot|account`): platform-wide or
       bot-wide transcript **only** after compaction + long-term memory (RAG/graph) + ACL
       retrieval land; until then runtime stays session-isolated

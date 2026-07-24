@@ -207,26 +207,42 @@ session_id          = UUID v4                           -- conversation instance
 **Default context policy: strong session isolation.** Each active transcript is scoped to one
 chat binding + bot profile (+ optional generation after `/new`). Cross-chat / platform-wide
 shared context is **not** the default and must not be enabled by accident.
-
-`bot_profiles.policy_json` reserved fields (forward-compatible):
+`bot_profiles.policy_json` reserved / implemented fields:
 
 ```json
 {
   "mention_required": false,
   "context_scope": "session",
-  "commands": { "new_session": true }
+  "commands": { "new_session": true },
+  "max_context_messages": 0
 }
 ```
 
+| Field | Meaning | Status |
+|-------|---------|--------|
+| `mention_required` | Groups require @bot | Implemented (gateway) |
+| `context_scope` | `session` \| `bot` \| `account` | `session` implemented; others fall back |
+| `commands.new_session` | Allow `/new` rotation | Implemented |
+| `max_context_messages` | Hard cap on transcript length; `0` = unlimited | Implemented (refuse + log; compaction/memory later) |
+
 | `context_scope` | Meaning | Status |
 |-----------------|---------|--------|
-| `session` (default) | Isolate transcript per `session_key` (+ bot + generation) | **Implemented** |
+| `session` (default) | Isolate transcript per route (`session_key#bot`) with UUID `session_id` | **Implemented** |
 | `bot` | Share one transcript across all chats for a bot profile | TODO — needs compaction + memory |
 | `account` | Share across all chats on a platform account | TODO — same, higher privacy risk |
 
 When `context_scope` is `bot` or `account`, runtime currently **falls back to `session`** and
 logs a warning. Enabling true shared context requires: rolling summarization, long-term
 memory (RAG/graph), and ACL-filtered retrieval — tracked in ROADMAP (shared-context mode).
+
+**Outbound delivery policy**
+
+| Path | Target | Notes |
+|------|--------|-------|
+| `message_send` tool | Current chat if `chat_id` omitted; any chat if `chat_id` set | Preferred intentional send / forward |
+| Assistant body text (no tool) | **Current chat only** | Fallback when model does not call the tool; cannot cross chats |
+
+**Profile hot-read:** each turn re-resolves `bot_profiles` from the config DB (prompt / model / tools / policy). No restart required for profile edits.
 
 ### 5.1 Configuration store (source of truth)
 

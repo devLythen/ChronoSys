@@ -3,7 +3,11 @@ import type { Model, Api, MutableModels } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { ChronoEvent, ToolIpcMessage } from "./ipc/types.ts";
 import { createFakeStreamFn, FAKE_MODEL } from "./fake-llm.ts";
-import { createToolsForAllowlist, type PendingCall } from "./tools.ts";
+import {
+  createToolsForAllowlist,
+  sendBodyTextToCurrentChat,
+  type PendingCall,
+} from "./tools.ts";
 import {
   readFrames,
   stdinAsWebStream,
@@ -18,7 +22,7 @@ import {
 import { SessionStore, sessionsDbPath } from "./session-store.ts";
 
 const DEFAULT_SYSTEM_PROMPT =
-  "You are an assistant in a chat platform. When asked to send a message, use the message_send tool.";
+  "You are an assistant on a chat platform. Prefer the message_send tool for all intentional outbound messages (optionally set chat_id to reach another chat). Plain body text without the tool only falls back to the current chat.";
 
 const FAKE_SEND_TEXT = "Hello from ChronoSys!";
 
@@ -71,10 +75,12 @@ type InboundWaiter = {
   reject: (e: Error) => void;
 };
 
-/** Cache of resolved bot profiles for the lifetime of this process. */
-class BotProfileCache {
-  private cache = new Map<string, ResolvedBot>();
-
+/**
+ * Resolve bot profiles from the config DB on each lookup (hot-read).
+ * No long-lived stale cache: DB edits apply without restarting agent-host.
+ * (Still one open SQLite handle; cheap SELECT per turn.)
+ */
+class BotProfileResolver {
   constructor(
     private config: ChronoConfig | null,
     private models: MutableModels | null,
@@ -83,8 +89,6 @@ class BotProfileCache {
 
   get(botId: string | undefined): ResolvedBot | null {
     if (!botId) return this.fallback;
-    const hit = this.cache.get(botId);
-    if (hit) return hit;
     if (!this.config || !this.models) return this.fallback;
     const bot = resolveBot(this.config, this.models, botId);
     if (!bot) {
@@ -94,20 +98,23 @@ class BotProfileCache {
       });
       return this.fallback;
     }
-    this.cache.set(botId, bot);
     return bot;
   }
 }
-
-/**
- * Per-conversation transcript bucket.
- * Keyed by session_key + bot_profile_id + generation (after /new).
- */
 
 function contextScopeOf(bot: ResolvedBot): ContextScope {
   const raw = bot.policy.context_scope;
   if (raw === "bot" || raw === "account" || raw === "session") return raw;
   return "session";
+}
+
+/** Max transcript messages allowed before refusing a new prompt. 0 / missing = unlimited. */
+function maxContextMessages(bot: ResolvedBot): number {
+  const raw = bot.policy.max_context_messages;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
+    return Math.floor(raw);
+  }
+  return 0;
 }
 
 function newSessionCommandEnabled(bot: ResolvedBot): boolean {
@@ -133,6 +140,20 @@ function normalizeCommand(text: string): string {
 function isNewSessionCommand(text: string): boolean {
   const n = normalizeCommand(text).toLowerCase();
   return n === "/new" || n === "/newsession" || n === "/reset";
+}
+
+/** Collect plain text blocks from an assistant message (ignore toolCall parts). */
+function extractAssistantText(message: AgentMessage | undefined): string {
+  if (!message || message.role !== "assistant") return "";
+  if (!Array.isArray(message.content)) return "";
+  const parts: string[] = [];
+  for (const c of message.content) {
+    if (c && typeof c === "object" && "type" in c && c.type === "text" && "text" in c) {
+      const t = c.text;
+      if (typeof t === "string" && t.trim()) parts.push(t);
+    }
+  }
+  return parts.join("\n").trim();
 }
 
 async function main() {
@@ -207,7 +228,7 @@ async function main() {
     });
   }
 
-  const profiles = new BotProfileCache(config, models, fallbackBot);
+  const profiles = new BotProfileResolver(config, models, fallbackBot);
 
   // One Agent instance; transcript isolation is done by swapping state.messages.
   const agent = new Agent({
@@ -370,6 +391,7 @@ async function main() {
 
     if (!event) break;
 
+    // Hot-read bot profile from config DB each turn (no stale process cache).
     const bot = profiles.get(event.bot_profile_id);
     if (!bot) {
       logEvent({
@@ -383,7 +405,6 @@ async function main() {
       continue;
     }
 
-    // Reserved: bot/account shared context is not implemented yet.
     const scope = contextScopeOf(bot);
     if (scope !== "session") {
       logEvent({
@@ -437,6 +458,32 @@ async function main() {
 
     // ── Load active UUID session transcript ──────────────────────
     const bucket = getOrCreateBucket(route, event.session_key, bot.id);
+
+    // Context limit (bot policy). Refuse before LLM if over cap.
+    // Future: compaction + long-term memory should replace hard refuse.
+    const maxMsgs = maxContextMessages(bot);
+    if (maxMsgs > 0 && bucket.messages.length >= maxMsgs) {
+      logEvent({
+        type: "host_error",
+        message: `context overflow refused bot=${bot.id} session_id=${bucket.sessionId} history=${bucket.messages.length} max_context_messages=${maxMsgs}`,
+      });
+      try {
+        await sendBodyTextToCurrentChat(
+          event.session_key,
+          `上下文已满（${bucket.messages.length}/${maxMsgs} 条消息），本轮请求已拒绝。请发送 /new 开启新会话，或提高 bot policy.max_context_messages。`,
+          pendingCalls,
+          agent.signal,
+        );
+      } catch (err) {
+        logEvent({
+          type: "host_warn",
+          message: `failed to notify context overflow: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+      writeControl({ type: "done" });
+      continue;
+    }
+
     agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     agent.state.model = bot.resolvedModel.model;
     agent.state.messages = bucket.messages;
@@ -453,9 +500,40 @@ async function main() {
     });
 
     try {
+      const historyBefore = bucket.messages.length;
       await agent.prompt(event.message.text);
       bucket.messages = agent.state.messages.slice();
       persistBucket(bucket);
+
+      // Fallback: plain assistant body → current chat only (no cross-chat).
+      // Prefer message_send (optional chat_id) for intentional / cross-chat delivery.
+      const usedTool = bucket.messages.slice(historyBefore).some((m) => {
+        if (m.role === "toolResult") return true;
+        if (m.role !== "assistant" || !Array.isArray(m.content)) return false;
+        return m.content.some(
+          (c) => c && typeof c === "object" && "type" in c && c.type === "toolCall",
+        );
+      });
+
+      if (!usedTool) {
+        const lastAssistant = [...bucket.messages]
+          .reverse()
+          .find((m) => m.role === "assistant");
+        const body = extractAssistantText(lastAssistant);
+        if (body) {
+          logEvent({
+            type: "host_info",
+            message: `body-text fallback to current chat only (${body.length} chars)`,
+          });
+          await sendBodyTextToCurrentChat(
+            event.session_key,
+            body,
+            pendingCalls,
+            agent.signal,
+          );
+        }
+      }
+
       writeControl({ type: "done" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
