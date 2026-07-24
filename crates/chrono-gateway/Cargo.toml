@@ -1,15 +1,12 @@
 [package]
-name = "chrono-cli"
+name = "chrono-gateway"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[[bin]]
-name = "chrono"
-path = "src/main.rs"
-
 [dependencies]
-clap = { workspace = true }
 chrono-ipc = { workspace = true }
-chrono-gateway = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 anyhow = { workspace = true }

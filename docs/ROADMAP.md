@@ -36,30 +36,48 @@
 
 **Exit:** end-to-end demo script without real Telegram.
 
-### M2 — Telegram adapter + sandbox (week 2–4)
+### M1.5 — Configuration store + pi-ai provider wiring (week 2–3)
 
-**Deliverable:** real bot replies in a private chat.
+**Deliverable:** multi-entity config DB; real LLM path uses only configured provider/model; no silent defaults.
+
+- [ ] SQLite at `$CHRONO_HOME/state/chrono.db` + schema migrations
+- [ ] Tables: `llm_providers`, `llm_credentials`, `llm_models`, `platform_accounts`, `bot_profiles`, `bindings`, `settings`
+- [ ] Secrets by reference under `$CHRONO_HOME/secrets/` (or keychain)
+- [ ] agent-host: build `createModels` + `CredentialStore` from DB; resolve `BotProfile.model_ref` only
+- [ ] Remove M1 env fallbacks (`CHRONO_MODEL` / first-available model) from the non-fake path
+- [ ] CLI: `chrono init`, `chrono llm …`, `chrono account …`, `chrono bot …`, `chrono bind …`, `chrono config doctor`
+- [ ] `chrono config doctor` prints missing links (credential/model/binding) and exits non-zero if not live-ready
+- [ ] Fail closed: empty DB ⇒ control plane may start; agent sessions and adapters refuse until configured
+
+**Exit:** with only env vars and no DB rows, live path errors clearly; after CLI setup, `createModels` + `streamSimple` work for a configured model; fake-llm demo still works without DB.
+
+### M2 — Telegram adapter + sandbox (week 3–5)
+
+**Deliverable:** real bot replies in a private chat **using config DB accounts/bindings**.
 
 - [ ] `chrono.adapter.telegram` (Bot API, long poll or webhook)
+- [ ] Load enabled `platform_accounts` + `bindings` from DB (no hardcoded token)
 - [ ] media download to sandbox workspace
 - [ ] `sandbox.exec` / `sandbox.read` / `sandbox.write` with bubblewrap or platform fallback
-- [ ] rate limit + mention-only policy
+- [ ] rate limit + mention-only policy (from bot `policy_json`)
 - [ ] basic audit log
 
-**Exit:** support bot answers in DM; cannot touch host FS.
+**Exit:** support bot answers in DM; cannot touch host FS; token only via account secret_ref.
 
-### M3 — Control plane + WebUI MVP (week 4–6)
+### M3 — Control plane + WebUI MVP (week 5–7)
 
-**Deliverable:** operators manage bots/sessions in browser.
+**Deliverable:** operators manage bots/sessions/providers/accounts in browser against the config DB.
 
-- [ ] REST + WS API on gateway
+- [ ] REST + WS API on gateway (CRUD for config entities; no raw secret read-back)
 - [ ] WebUI: overview, sessions detail (transcript + tool trace), bot editor
-- [ ] bearer token auth (localhost)
+- [ ] WebUI: `/providers`, `/accounts`, `/bots`, `/bindings` backed by state DB
+- [ ] bearer token auth (localhost); refuse if auth token unset in non-dev
 - [ ] live steer/abort from UI
+- [ ] config hot-reload notification to agent-host
 
-**Exit:** no need for log diving for normal ops.
+**Exit:** no need for log diving for normal ops; multi-entity state editable without hand-editing TOML.
 
-### M4 — Plugin system (week 6–8)
+### M4 — Plugin system (week 7–9)
 
 **Deliverable:** install external tool plugin + skill.
 
@@ -71,14 +89,14 @@
 
 **Exit:** example weather plugin works offline with mock HTTP.
 
-### M5 — Multi-platform & hardening (week 8–12)
+### M5 — Multi-platform & hardening (week 9–12)
 
 - [ ] QQ / WeChat adapters (as protocols allow; stubs earlier)
-- [ ] bindings (pattern → bot profile)
+- [ ] binding pattern language advanced (regex, mention gates, multi-bot priority edge cases)
 - [ ] compaction + memory scopes
 - [ ] human approval queue for dangerous tools
 - [ ] container image + systemd unit
-- [ ] backup/restore of `$CHRONO_HOME`
+- [ ] backup/restore of `$CHRONO_HOME` (includes state DB + secrets)
 
 **Exit:** production-ready single-node checklist complete.
 
@@ -131,8 +149,9 @@ Python is **never** required for core install.
 | Path | Purpose |
 |------|---------|
 | `$CHRONO_HOME` | Single root (default: `$XDG_DATA_HOME/chronosys` or `~/.local/share/chronosys`) |
-| `$CHRONO_HOME/config.toml` | Config |
-| `$CHRONO_HOME/accounts/` | Encrypted credentials |
+| `$CHRONO_HOME/config.toml` | Bootstrap only (bind, workers, sandbox backend) |
+| `$CHRONO_HOME/state/chrono.db` | Config DB: providers, models, accounts, bots, bindings |
+| `$CHRONO_HOME/secrets/` | Encrypted credential blobs / keychain refs |
 | `$CHRONO_HOME/sessions/` | pi-compatible session stores |
 | `$CHRONO_HOME/plugins/` | installed plugins + grants |
 | `$CHRONO_HOME/venvs/` | per-plugin Python envs |
@@ -206,34 +225,78 @@ chrono dev
 
 ---
 
-## 5. Config sketch (`config.toml`)
+## 5. Config: bootstrap TOML vs state DB
+
+**Principle: no business defaults.** A fresh `$CHRONO_HOME` is not a working bot. Operators must create providers, credentials, models, accounts, bot profiles, and bindings (CLI or WebUI) before live traffic.
+
+### 5.1 Bootstrap only (`$CHRONO_HOME/config.toml` or `CHRONO_CONFIG`)
+
+Process-level knobs. Safe to ship a minimal sample. Does **not** define bots or models.
 
 ```toml
-home = "/var/lib/chronosys"  # optional override
-
+# Bootstrap only — not product state.
 [gateway]
 bind = "127.0.0.1:8787"
-auth_token_env = "CHRONO_TOKEN"
+auth_token_env = "CHRONO_TOKEN"   # if unset, control plane requires explicit setup
+
+[paths]
+# optional overrides; default under CHRONO_HOME
+# state_db = "state/chrono.db"
+# secrets_dir = "secrets"
 
 [agent]
-runtime = "bun"              # bun | node
+runtime = "bun"   # bun | node
 workers = 2
-default_model = { provider = "anthropic", id = "claude-sonnet-4-6" }
 
 [sandbox]
-backend = "bwrap"
+backend = "bwrap" # none | bwrap | docker
 default_network = false
-workspace_quota_mb = 512
-idle_ttl_secs = 3600
 
 [pi]
-# packages come from node_modules (npm pins); no packages_root path dep
 import_user_skills = false
-
-[platforms.telegram]
-enabled = true
-# secrets via env or accounts store
+# packages from node_modules only; never packages_root path dep
 ```
+
+There is **no** `default_model` in bootstrap. Model selection is always `bot_profiles.model_ref` → `llm_models` → pi-ai `getModel(provider, id)`.
+
+### 5.2 State database (`$CHRONO_HOME/state/chrono.db`)
+
+See ARCHITECTURE §5.1. Owns:
+
+- multi LLM providers + credentials (refs) + allowlisted models
+- multi platform accounts + adapter config
+- multi bot profiles + bindings
+- feature flags in `settings` (still explicit rows, not code defaults for safety-critical paths)
+
+### 5.3 Operator flows (target UX)
+
+```bash
+# 1) init home (creates empty DB + dirs; still not runnable for live chat)
+chrono init
+
+# 2) LLM provider + credential
+chrono llm provider add anthropic --kind builtin
+chrono llm credential set anthropic --api-key-env ANTHROPIC_API_KEY
+
+# 3) Refresh model catalogue from pi-ai → operator selects models in WebUI/CLI
+chrono llm provider refresh anthropic
+chrono llm model select anthropic claude-sonnet-4-6 --temperature 0.7
+chrono llm model select anthropic claude-haiku-4-5
+
+# 4) Platform account
+chrono account add tg1 --platform telegram --token-env TELEGRAM_BOT_TOKEN
+
+# 5) Bot profile (model_ref = provider_id/model_id)
+chrono bot add greeter --model anthropic/claude-sonnet-4-6 --system-prompt-file ./prompts/greeter.md
+chrono bot tools greeter --allow message.send,chat.history
+chrono bind add --account tg1 --pattern 'dm:*' --bot greeter --mode dm
+
+
+Missing any required link → start fails with a structured checklist (provider / credential / model / account / binding), not a silent fallback.
+
+### 5.4 Demo / CI exception
+
+`CHRONO_FAKE_LLM=1` / `chrono dev --fake-llm` is the **only** path that may run without real credentials. It does not create production defaults and must not write a default bot into the DB unless the operator runs an explicit `chrono init --demo` (optional later).
 
 ---
 

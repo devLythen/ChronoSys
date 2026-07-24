@@ -7,6 +7,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
+    "start": "bun run src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test src/ipc/fixtures.test.ts"
   },

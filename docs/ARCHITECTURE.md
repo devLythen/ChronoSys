@@ -179,8 +179,11 @@ See [WEBUI.md](./WEBUI.md).
 ## 5. Data model (core)
 
 ```text
-Account        platform + credentials + adapter config
-BotProfile     system prompt, model prefs, default tools/skills, policies
+LlmProvider    logical provider slot (anthropic | openai | custom id)
+LlmCredential  secret material for a provider (encrypted / env-ref / oauth)
+LlmModelRef    allowlisted model (provider_id + model_id); no implicit catalog use
+Account        platform + credentials + adapter config (one login identity)
+BotProfile     system prompt, model_ref, tools/skills allowlist, policies
 Binding        Account × ChatPattern → BotProfile + plugin set
 Session        durable agent conversation tree (pi Session semantics)
 ChronoEvent    normalized inbound (message, reaction, member, …)
@@ -189,12 +192,229 @@ MemoryItem     scoped K/V with TTL
 PluginManifest name, version, capabilities, entry, resources
 ```
 
-Session key (default):
+**Fail closed / no business defaults:** entities that gate runtime must be **explicitly created**. There is no built-in default bot, default model, default account, or “first available provider”. Missing config → refuse to start the affected path (clear error), never invent a fallback.
+
+Session key:
 
 ```text
 session_key = hash(account_id, chat_id, thread_id?, mode)
 // mode: "shared" (group one agent) | "dm" | "per_user" (group but private state)
 ```
+
+### 5.1 Configuration store (source of truth)
+
+Runtime multi-entity state lives in a **local SQLite database** under `$CHRONO_HOME`, not scattered env vars.
+
+| Path | Role |
+|------|------|
+| `$CHRONO_HOME/state/chrono.db` | Config + binding + account metadata + model allowlist + grants index |
+| `$CHRONO_HOME/secrets/` | Encrypted credential blobs (or OS keychain refs); never plaintext in DB by default |
+| `$CHRONO_HOME/config.toml` | **Process bootstrap only** (bind address, log level, db path override). Not the place for bots/models/accounts. |
+| `$CHRONO_HOME/sessions/` | pi session transcripts (orthogonal to config DB) |
+
+Why SQLite (not only TOML):
+
+- Multi-row entities: many accounts, many bots, many providers, many bindings.
+- Atomic updates + migrations; WebUI / CLI / gateway share one store.
+- Easy backups (`chrono backup` = copy `CHRONO_HOME`).
+- Extensible: versioned schema + `json_ext` column per row for forward-compatible fields without rewriting core tables every feature.
+
+**TOML is bootstrap, DB is product state.** Shipping a sample `config.toml` must not imply a runnable bot without `chrono config` / WebUI setup.
+
+#### Schema (logical tables)
+
+```text
+schema_migrations(version, applied_at)
+
+llm_providers(
+  id TEXT PK,                 -- "anthropic" | "openai" | "my-proxy"
+  kind TEXT NOT NULL,         -- "builtin" | "openai_compat" | "anthropic_compat" | ...
+  base_url TEXT,              -- required for custom; null = pi builtin default for kind
+  display_name TEXT NOT NULL,
+  enabled INTEGER NOT NULL,   -- 0/1
+  json_ext TEXT,              -- headers, routing prefs, …
+  created_at, updated_at
+)
+
+llm_credentials(
+  provider_id TEXT PK → llm_providers,
+  auth_kind TEXT NOT NULL,     -- "api_key" | "oauth" | "env_ref"
+  secret_ref TEXT NOT NULL,   -- path under secrets/ or keychain id or env name
+  -- NEVER store raw API keys in this row when auth_kind=api_key; store ref only
+  json_ext TEXT,
+  updated_at
+)
+
+--- Per-model allowlist: only rows explicitly selected by the operator are loaded.
+--- Discovery: after registering a provider, the operator refreshes the model
+--- catalogue from pi-ai → presented in WebUI → checks desired models →
+--- each checked row is INSERTed here with optional per-model overrides.
+llm_models(
+  provider_id TEXT NOT NULL → llm_providers,   -- composite PK
+  model_id TEXT NOT NULL,     -- pi catalog id, e.g. "claude-sonnet-4-6"
+  display_name TEXT,          -- optional alias shown in WebUI
+  enabled INTEGER NOT NULL,
+  -- Per-model overrides (all optional; null = provider / bot default):
+  temperature REAL,
+  max_tokens INTEGER,
+  top_p REAL,
+  extra_headers_json TEXT,    -- extra HTTP headers appended to provider defaults
+  extra_body_json TEXT,       -- extra JSON body fields merged into each request
+  thinking_level TEXT,        -- default thinking level for this model
+  json_ext TEXT,              -- future extensions without schema churn
+  created_at, updated_at,
+  PRIMARY KEY (provider_id, model_id)
+)
+
+platform_accounts(
+  id TEXT PK,
+  platform TEXT NOT NULL,     -- "telegram" | "qq" | …
+  display_name TEXT NOT NULL,
+  adapter_id TEXT NOT NULL,   -- plugin / builtin adapter id
+  enabled INTEGER NOT NULL,
+  secret_ref TEXT NOT NULL,   -- bot token etc.
+  adapter_config_json TEXT NOT NULL,  -- non-secret adapter knobs (webhook url, …)
+  json_ext TEXT,
+  created_at, updated_at
+)
+
+--- Model reference: "provider_id/model_id" string, resolved at runtime
+--- against llm_models. No foreign key — the string is self-describing
+--- and portable; missing rows surface as clear error, not silent null.
+bot_profiles(
+  id TEXT PK,
+  display_name TEXT NOT NULL,
+  system_prompt TEXT NOT NULL,       -- empty string allowed only if explicitly set
+  model_ref TEXT NOT NULL,           -- "anthropic/claude-sonnet-4-6" format; REQUIRED
+  tools_allowlist_json TEXT NOT NULL,        -- [] = no tools
+  skills_allowlist_json TEXT NOT NULL,
+  policy_json TEXT NOT NULL,
+  enabled INTEGER NOT NULL,
+  json_ext TEXT,
+  created_at, updated_at
+)
+
+bindings(
+  id TEXT PK,
+  account_id TEXT NOT NULL → platform_accounts,
+  chat_pattern TEXT NOT NULL,  -- exact id | glob | "dm:*" | …
+  bot_profile_id TEXT NOT NULL → bot_profiles,
+  session_mode TEXT NOT NULL,  -- shared | dm | per_user
+  priority INTEGER NOT NULL,  -- higher wins
+  enabled INTEGER NOT NULL,
+  json_ext TEXT,
+  UNIQUE(account_id, chat_pattern, bot_profile_id)
+)
+
+settings(
+  key TEXT PK,                -- process/feature flags only
+  value_json TEXT NOT NULL,
+  updated_at
+)
+```
+
+#### Model discovery & selection flow
+
+```text
+1. Operator: chrono llm provider add anthropic --kind builtin
+   → INSERT llm_providers row; llm_models is empty
+
+2. Operator: chrono llm provider refresh anthropic   (or WebUI "Refresh models" button)
+   → agent-host calls pi-ai getModels("anthropic") → returns all known model ids
+   → WebUI presents checklist: ☐ claude-sonnet-4-6, ☐ claude-haiku-4-5, …
+   → checked models → INSERT llm_models rows with operator's per-model overrides
+
+3. Operator creates a bot:
+   chrono bot add greeter --model anthropic/claude-sonnet-4-6 --system-prompt-file …
+   → model_ref = "anthropic/claude-sonnet-4-6"
+
+4. Runtime: agent-host parses model_ref → looks up llm_models WHERE provider_id='anthropic' AND model_id='claude-sonnet-4-6'
+   → not found or disabled → hard error
+   → build pi Model<Api> + apply per-model overrides (temperature, extra_headers, …)
+```
+
+Per-model overrides merge order (later wins):
+
+```text
+provider defaults (base_url, headers)
+   → llm_models overrides (temperature, max_tokens, extra_headers, …)
+      → bot_profiles.json_ext per-bot overrides (if any in future)
+         → runtime signal (abort timeout, …)
+```
+
+Rules:
+
+1. **No row ⇒ no capability.** Empty `llm_models` ⇒ agent-host refuses non-fake runs. Empty `platform_accounts` ⇒ gateway starts control plane only (or `chrono dev --fake-llm` demo path).
+2. **`bot_profiles.model_ref` is mandatory** and must resolve to an enabled `llm_models` row. Format: `"provider_id/model_id"` (e.g. `"anthropic/claude-sonnet-4-6"`, `"my-proxy/my-fine-tune"`).
+3. **Model catalogue is pi-ai's job.** ChronoSys does not maintain its own model directory. Discovery calls pi-ai; selection is stored in `llm_models`.
+4. **Secrets by reference.** Gateway / agent-host load secrets through a vault interface; audit who resolved what.
+5. **`json_ext` + migrations** for evolution; do not fork the core entity set for every new knob.
+6. **IDs are stable strings** (ULID/UUID or user-chosen slugs); WebUI and CLI share the same IDs.
+```
+
+Rules:
+
+1. **No row ⇒ no capability.** Empty `llm_models` ⇒ agent-host refuses non-fake runs. Empty `platform_accounts` ⇒ gateway starts control plane only (or `chrono dev --fake-llm` demo path).
+2. **`bot_profiles.model_ref` is mandatory.** Profiles without a resolvable enabled model are invalid and cannot be bound.
+3. **Secrets by reference.** Gateway / agent-host load secrets through a vault interface; audit who resolved what.
+4. **`json_ext` + migrations** for evolution; do not fork the core entity set for every new knob.
+5. **IDs are stable strings** (ULID/UUID or user-chosen slugs); WebUI and CLI share the same IDs.
+
+#### LLM runtime: reuse `@earendil-works/pi-ai` (not a parallel provider stack)
+
+ChronoSys **does not** reimplement multi-provider HTTP. Configuration DB → pi `Models` at process start (and on hot-reload):
+
+```ts
+import { createModels, createProvider } from "@earendil-works/pi-ai";
+
+// 1. Build CredentialStore from llm_credentials + vault adapter
+// 2. For each enabled llm_providers row:
+//    - builtin → models already have stream; just resolve credential
+//    - custom (openai_compat / anthropic_compat) → createProvider({ id, baseUrl, api }) + setProvider
+// 3. Per-bot resolution at prompt time:
+//    const [providerId, modelId] = bot.model_ref.split("/");
+//    const piModel = models.getModel(providerId, modelId);
+//    if (!piModel) throw error("model not configured");
+//    // Fetch per-model overrides from llm_models row:
+//    const overrides = db.getModelOverrides(providerId, modelId);
+//    // Pass to streamSimple as options: { temperature: overrides.temperature, ... }
+// 4. streamFn = models.streamSimple.bind(models)
+```
+
+| Concern | Owner |
+|---------|--------|
+| Provider HTTP, streaming, retries, cost, model catalogue | **pi-ai** |
+| Which providers/credentials exist | **Chrono config DB** |
+| Which models from a provider are selected + per-model tuning | **Chrono `llm_models`** |
+| Auth material storage | **Chrono secrets/** + thin `CredentialStore` adapter |
+| Per-bot model choice | **BotProfile.model_ref** |
+| Demo without keys | Explicit `CHRONO_FAKE_LLM=1` / `--fake-llm` only |
+
+M1 temporary wiring (`CHRONO_MODEL` env + "first available model") is **not** the product model and must be removed once the config store lands.
+
+#### Platform accounts & adapters
+
+```text
+platform_accounts.adapter_id  →  PlatformAdapter implementation
+platform_accounts.secret_ref  →  bot token / cookie / device session
+platform_accounts.adapter_config_json → non-secret knobs
+bindings                     →  which BotProfile handles which chats
+```
+
+- Adding a platform = new adapter plugin + optional JSON Schema for `adapter_config_json` (validated on write).
+- Adding an account = insert row + secret; **no auto-bind**. Operator must create a `bindings` row or traffic is dropped with audit reason `no_binding`.
+- Adding an LLM = provider row + credential + **explicit** `llm_models` allowlist entry + bot profile pointing at it.
+
+#### Lifecycle / multi-state
+
+| State | Meaning |
+|-------|---------|
+| `enabled=0` | Soft-disabled; retained for audit; not loaded into runtime |
+| missing secret | Config present but **unhealthy**; surface in WebUI; refuse sessions using it |
+| binding conflict | Highest `priority` wins; ties → deterministic id order; log warning |
+| config reload | Gateway watches DB version / notifies agent-host; in-flight sessions keep old snapshot until idle (document cutover) |
+
+Control plane APIs (CLI + WebUI later) are the only writers; agent tools never mutate provider credentials.
 
 ---
 

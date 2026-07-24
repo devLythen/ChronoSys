@@ -28,7 +28,7 @@ Avoid heavy component kits that look generic; custom shell with clear density fo
 ```text
 /                     Overview (status, throughput, errors)
 /accounts             Platform accounts + health
-/bots                 Bot profiles (prompt, model, tools)
+/bots                 Bot profiles (prompt, model_ref, tools)
 /bindings             Account × chat pattern → bot
 /sessions             Live & historical agent sessions
 /sessions/:id         Session detail (transcript + tool trace)
@@ -36,7 +36,8 @@ Avoid heavy component kits that look generic; custom shell with clear density fo
 /sandbox              Active sandboxes, quotas
 /memory               Scoped memory browser
 /audit                Tool & adapter audit log
-/settings             Models, providers, home dir, theme
+/providers            LLM providers, credential status, allowlisted models
+/settings             Bootstrap knobs + feature flags (not model catalog)
 ```
 
 Mobile: collapse nav; sessions + overview first.
