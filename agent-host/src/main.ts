@@ -1,10 +1,4 @@
 import { Agent } from "@earendil-works/pi-agent-core";
-import {
-  createModels,
-  type Api,
-  type Model,
-  type MutableModels,
-} from "@earendil-works/pi-ai";
 import type { ChronoEvent, ToolIpcMessage } from "./ipc/types.ts";
 import { createFakeStreamFn, FAKE_MODEL } from "./fake-llm.ts";
 import { createMessageSendTool, type PendingCall } from "./tools.ts";
@@ -13,8 +7,10 @@ import {
   stdinAsWebStream,
   writeFrameStdout,
 } from "./transport.ts";
+import { openConfig } from "./config.ts";
+import { buildModels, resolveBot } from "./resolve.ts";
 
-const SYSTEM_PROMPT =
+const DEFAULT_SYSTEM_PROMPT =
   "You are an assistant in a chat platform. When asked to send a message, use the message.send tool.";
 
 const FAKE_SEND_TEXT = "Hello from ChronoSys!";
@@ -53,22 +49,6 @@ function messageTypeOf(msg: unknown): string | undefined {
   return typeof msg.type === "string" ? msg.type : undefined;
 }
 
-function resolveModel(models: MutableModels): Model<Api> {
-  const modelId = process.env.CHRONO_MODEL ?? "claude-sonnet-4-6";
-  const anthropic = models.getModel("anthropic", modelId);
-  if (anthropic) return anthropic;
-
-  for (const m of models.getModels()) {
-    if (m.id === modelId) return m;
-  }
-
-  const all = models.getModels();
-  if (all.length > 0) return all[0]!;
-  throw new Error(
-    `No model found for "${modelId}". Set CHRONO_MODEL or configure provider auth.`,
-  );
-}
-
 type InboundWaiter = {
   resolve: (v: ChronoEvent | null) => void;
   reject: (e: Error) => void;
@@ -78,7 +58,70 @@ async function main() {
   const fakeLlm = process.env.CHRONO_FAKE_LLM === "1";
   const pendingCalls = new Map<string, PendingCall>();
 
-  // Concurrent stdin reader: must run while agent.prompt() awaits tool IPC.
+  // ── Resolve model + streamFn + system prompt ──────────────────
+  let streamFn;
+  let model;
+  let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+
+  if (fakeLlm) {
+    streamFn = createFakeStreamFn(FAKE_SEND_TEXT);
+    model = FAKE_MODEL;
+  } else {
+    const chronoHome = process.env.CHRONO_HOME ?? ".chrono";
+    const dbPath = `${chronoHome}/state/chrono.db`;
+    const config = openConfig(dbPath);
+    const models = buildModels(config);
+    if (!models) {
+      throw new Error(
+        "No enabled LLM providers in config DB. " +
+          "INSERT INTO llm_providers (id, kind, display_name, enabled) VALUES (...);",
+      );
+    }
+
+    const botId = process.env.CHRONO_BOT;
+    if (botId) {
+      const bot = resolveBot(config, models, botId);
+      if (!bot) {
+        throw new Error(`Bot "${botId}" not found or disabled in config DB.`);
+      }
+      systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+      model = bot.resolvedModel.model;
+    } else {
+      const bots = config.listBots();
+      const enabled = bots.filter((b) => b.enabled !== 0);
+      if (enabled.length === 0) {
+        throw new Error(
+          "No enabled bot profiles in config DB. " +
+            "INSERT INTO bot_profiles (id, display_name, model_ref, enabled) VALUES (...);",
+        );
+      }
+      const bot = resolveBot(config, models, enabled[0]!.id);
+      if (!bot) {
+        throw new Error(`Failed to resolve bot "${enabled[0]!.id}".`);
+      }
+      systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+      model = bot.resolvedModel.model;
+    }
+    streamFn = models.streamSimple.bind(models);
+  }
+
+  const agent = new Agent({
+    initialState: {
+      systemPrompt,
+      model,
+      tools: [],
+      thinkingLevel: "minimal",
+    },
+    streamFn,
+    toolExecution: "sequential",
+    sessionId: "chrono-m1",
+  });
+
+  agent.subscribe((event) => {
+    logEvent(event);
+  });
+
+  // ── Event loop ─────────────────────────────────────────────────
   const inboundQueue: ChronoEvent[] = [];
   const inboundWaiters: InboundWaiter[] = [];
   let stdinClosed = false;
@@ -165,34 +208,6 @@ async function main() {
     }
   })();
 
-  let streamFn;
-  let model: Model<Api>;
-
-  if (fakeLlm) {
-    streamFn = createFakeStreamFn(FAKE_SEND_TEXT);
-    model = FAKE_MODEL;
-  } else {
-    const models = createModels();
-    model = resolveModel(models);
-    streamFn = models.streamSimple.bind(models);
-  }
-
-  const agent = new Agent({
-    initialState: {
-      systemPrompt: SYSTEM_PROMPT,
-      model,
-      tools: [],
-      thinkingLevel: "minimal",
-    },
-    streamFn,
-    toolExecution: "sequential",
-    sessionId: "chrono-m1",
-  });
-
-  agent.subscribe((event) => {
-    logEvent(event);
-  });
-
   while (true) {
     let event: ChronoEvent | null;
     try {
@@ -207,9 +222,8 @@ async function main() {
 
     if (!event) break;
 
-    const sessionKey = event.session_key;
     agent.state.tools = [
-      createMessageSendTool(sessionKey, pendingCalls, agent.signal),
+      createMessageSendTool(event.session_key, pendingCalls, agent.signal),
     ];
 
     try {

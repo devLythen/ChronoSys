@@ -71,5 +71,5 @@ export function writeFrameStdout(payload: Uint8Array): void {
 
 /** Convert Node Readable (stdin) to a web ReadableStream. */
 export function stdinAsWebStream(): ReadableStream<Uint8Array> {
-  return Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
+  return Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>;
 }
