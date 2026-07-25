@@ -12,4 +12,3 @@ thiserror = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 teloxide = { workspace = true }
-futures = { workspace = true }

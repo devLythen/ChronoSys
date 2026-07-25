@@ -9,17 +9,12 @@ chrono-config = { workspace = true }
 chrono-ipc = { workspace = true }
 axum = { workspace = true }
 tower-http = { workspace = true }
-tower = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 rusqlite = { workspace = true }
-thiserror = { workspace = true }
-http = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
 uuid = { workspace = true }
 
-[build-dependencies]
-serde_json = { workspace = true }

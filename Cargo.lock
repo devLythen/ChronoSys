@@ -205,7 +205,6 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "chrono-ipc",
- "futures",
  "serde",
  "serde_json",
  "teloxide",
@@ -222,14 +221,11 @@ dependencies = [
  "chrono-config",
  "chrono-ipc",
  "futures",
- "http 1.4.2",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
  "serde_json",
- "thiserror 2.0.19",
  "tokio",
- "tower",
  "tower-http",
  "uuid",
 ]
@@ -249,7 +245,6 @@ name = "chrono-gateway"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "async-trait",
  "axum",
  "chrono-adapter-telegram",
  "chrono-api",
@@ -260,7 +255,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
- "uuid",
 ]
 
 [[package]]

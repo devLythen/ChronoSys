@@ -15,7 +15,5 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
-async-trait = { workspace = true }
 axum = { workspace = true }
 futures = { workspace = true }
-uuid = { workspace = true }
