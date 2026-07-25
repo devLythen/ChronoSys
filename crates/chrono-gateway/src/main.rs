@@ -1,6 +1,6 @@
-// Gateway binary — thin entry point.
-// Prefer `chrono up` (chrono-cli). Same boot path: control plane only;
-// adapters attach from config DB / WebUI.
+// ChronoSys control plane — single binary entry point.
+// Start with: cargo run -p chrono-gateway
+// Or after install: chrono
 
 use std::path::PathBuf;
 
