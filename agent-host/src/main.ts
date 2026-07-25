@@ -161,8 +161,8 @@ async function main() {
   const pendingCalls = new Map<string, PendingCall>();
 
   // ── Resolve model + streamFn + default bot profile ────────────
-  let streamFn: StreamFn;
-  let defaultModel: Model<Api>;
+  let streamFn: StreamFn = createFakeStreamFn("unconfigured");
+  let defaultModel: Model<Api> = FAKE_MODEL;
   let defaultSystemPrompt = DEFAULT_SYSTEM_PROMPT;
   let defaultToolsAllowlist: string[] = [];
   let config: ChronoConfig | null = null;
@@ -188,44 +188,55 @@ async function main() {
     config = openConfig(dbPath);
     models = buildModels(config);
     if (!models) {
-      throw new Error(
-        "No enabled LLM providers in config DB. " +
-          "INSERT INTO llm_providers (id, kind, display_name, enabled) VALUES (...);",
-      );
+      logEvent({
+        type: "host_info",
+        message: "No enabled LLM providers yet — configure via WebUI",
+      });
     }
 
-    const botId = process.env.CHRONO_BOT;
-    let bot: ResolvedBot | null = null;
-    if (botId) {
-      bot = resolveBot(config, models, botId);
-      if (!bot) {
-        throw new Error(`Bot "${botId}" not found or disabled in config DB.`);
+    if (models) {
+      const botId = process.env.CHRONO_BOT;
+      let bot: ResolvedBot | null = null;
+      if (botId) {
+        bot = resolveBot(config, models, botId);
+        if (!bot) {
+          logEvent({
+            type: "host_info",
+            message: `Bot "${botId}" not found or disabled — configure via WebUI`,
+          });
+        }
+      } else {
+        const bots = config.listBots();
+        const enabled = bots.filter((b) => b.enabled !== 0);
+        if (enabled.length > 0) {
+          bot = resolveBot(config, models, enabled[0]!.id);
+          if (!bot) {
+            logEvent({
+              type: "host_info",
+              message: `Failed to resolve bot "${enabled[0]!.id}"`,
+            });
+          }
+        } else {
+          logEvent({
+            type: "host_info",
+            message: "No enabled bot profiles yet — configure via WebUI",
+          });
+        }
       }
-    } else {
-      const bots = config.listBots();
-      const enabled = bots.filter((b) => b.enabled !== 0);
-      if (enabled.length === 0) {
-        throw new Error(
-          "No enabled bot profiles in config DB. " +
-            "INSERT INTO bot_profiles (id, display_name, model_ref, enabled) VALUES (...);",
-        );
-      }
-      bot = resolveBot(config, models, enabled[0]!.id);
-      if (!bot) {
-        throw new Error(`Failed to resolve bot "${enabled[0]!.id}".`);
+
+      if (bot) {
+        fallbackBot = bot;
+        defaultSystemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+        defaultModel = bot.resolvedModel.model;
+        defaultToolsAllowlist = bot.toolsAllowlist;
+        streamFn = models.streamSimple.bind(models);
+
+        logEvent({
+          type: "host_info",
+          message: `default bot profile: id=${bot.id} model=${bot.modelRef} tools=${JSON.stringify(bot.toolsAllowlist)} scope=${contextScopeOf(bot)}`,
+        });
       }
     }
-
-    fallbackBot = bot;
-    defaultSystemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
-    defaultModel = bot.resolvedModel.model;
-    defaultToolsAllowlist = bot.toolsAllowlist;
-    streamFn = models.streamSimple.bind(models);
-
-    logEvent({
-      type: "host_info",
-      message: `default bot profile: id=${bot.id} model=${bot.modelRef} tools=${JSON.stringify(bot.toolsAllowlist)} scope=${contextScopeOf(bot)}`,
-    });
   }
 
   const profiles = new BotProfileResolver(config, models, fallbackBot);
@@ -360,6 +371,13 @@ async function main() {
         }
 
         if (isInboundMessage(msg)) {
+          if (!models || !fallbackBot) {
+            writeControl({
+              type: "host_error",
+              message: "Agent not configured. Add providers + bot profiles via WebUI.",
+            });
+            continue;
+          }
           deliverInbound(msg);
           continue;
         }
@@ -422,10 +440,34 @@ async function main() {
         }
 
         if (controlType === "config.reload") {
-          logEvent({
-            type: "host_info",
-            message: "config.reload received (profiles already hot-read each turn)",
-          });
+          if (config) {
+            const newModels = buildModels(config);
+            if (newModels) {
+              models = newModels;
+              streamFn = models.streamSimple.bind(models);
+              // Re-resolve default bot
+              const bots = config.listBots();
+              const enabled = bots.filter((b) => b.enabled !== 0);
+              if (enabled.length > 0) {
+                const bot = resolveBot(config, models, enabled[0]!.id);
+                if (bot) {
+                  fallbackBot = bot;
+                  defaultSystemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+                  defaultModel = bot.resolvedModel.model;
+                  defaultToolsAllowlist = bot.toolsAllowlist;
+                  logEvent({
+                    type: "host_info",
+                    message: `config.reload: bot=${bot.id} model=${bot.modelRef} providers=${models.getProviders().length}`,
+                  });
+                }
+              }
+            } else {
+              logEvent({
+                type: "host_warn",
+                message: "config.reload: still no enabled providers",
+              });
+            }
+          }
           continue;
         }
 
