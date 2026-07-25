@@ -6,6 +6,7 @@ pub mod health;
 pub mod providers;
 pub mod sessions;
 pub mod settings;
+pub mod tools;
 pub mod ws;
 
 /// Validate secret_ref format: `env:*`, `file:*`, or non-empty literal.
