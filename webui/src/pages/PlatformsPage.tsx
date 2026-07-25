@@ -90,7 +90,6 @@ export default function PlatformsPage() {
       const body: AccountBody = {
         id: acctForm.id,
         platform: acctForm.platform,
-        display_name: acctForm.id,
         adapter_id: acctForm.mode,
         enabled: acctForm.enabled,
         adapter_config_json: {},
@@ -131,7 +130,6 @@ export default function PlatformsPage() {
       await api.updateAccount(a.id, {
         id: a.id,
         platform: a.platform,
-        display_name: a.id,
         adapter_id: a.adapter_id,
         enabled: !a.enabled,
         adapter_config_json: a.adapter_config_json,
@@ -257,11 +255,9 @@ export default function PlatformsPage() {
                         {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                       </span>
                       <div className="min-w-0">
-                        <h3 className="t-headline truncate">{a.display_name || a.id}</h3>
+                        <h3 className="t-headline truncate">{a.id}</h3>
                         <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
-                          {a.display_name !== a.id && (
-                            <code className="t-mono text-[11px] text-muted-fg">{a.id}</code>
-                          )}
+                          <code className="t-mono text-[11px] text-muted-fg">{a.id}</code>
                         </div>
                       </div>
                     </button>
@@ -288,7 +284,7 @@ export default function PlatformsPage() {
                         size="sm"
                         className="text-destructive hover:text-destructive"
                         onClick={() => {
-                          if (window.confirm(`Delete bot "${a.display_name || a.id}"?`)) {
+                          if (window.confirm(`Delete bot "${a.id}"?`)) {
                             deleteAcct.mutate(a.id);
                           }
                         }}
@@ -310,7 +306,7 @@ export default function PlatformsPage() {
                               to={`/config/${attached.bot_profile_id}`}
                               className="t-headline !text-sm hover:underline truncate"
                             >
-                              {botsById.get(attached.bot_profile_id)?.display_name ?? attached.bot_profile_id}
+                              {attached.bot_profile_id}
                             </Link>
                           </div>
                           <Button
@@ -417,13 +413,10 @@ export default function PlatformsPage() {
             onChange={(e) => setAttachConfigId(e.target.value)}
             options={[
               { value: "", label: "Select a config…" },
-              ...bots.map((b) => ({ value: b.id, label: b.display_name || b.id })),
+              ...bots.map((b) => ({ value: b.id, label: b.id })),
             ]}
           />
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setAttachModalOpen(false)}>
-              Cancel
-            </Button>
             <Button
               disabled={!attachConfigId || attachMut.isPending}
               onClick={() => attachMut.mutate(attachAcct)}

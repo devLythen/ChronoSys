@@ -22,7 +22,6 @@ pub fn router() -> Router<Arc<AppState>> {
 #[derive(Deserialize)]
 pub struct BotBody {
     pub id: Option<String>,
-    pub display_name: String,
     pub model_ref: String,
     #[serde(default)]
     pub persona_id: Option<String>,
@@ -60,7 +59,6 @@ async fn create_bot(
         .ok_or_else(|| ApiError::bad_request("id is required"))?;
     let bot = BotProfile {
         id: id.clone(),
-        display_name: body.display_name,
         model_ref: body.model_ref,
         persona_id: body.persona_id,
         policy_json: body.policy_json,
@@ -83,7 +81,6 @@ async fn update_bot(
 ) -> ApiResult<Json<BotProfile>> {
     let bot = BotProfile {
         id: id.clone(),
-        display_name: body.display_name,
         model_ref: body.model_ref,
         persona_id: body.persona_id,
         policy_json: body.policy_json,

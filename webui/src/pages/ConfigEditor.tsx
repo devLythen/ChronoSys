@@ -49,15 +49,13 @@ export default function ConfigEditor() {
   }, [bot]);
 
   const modelOptions = (() => {
-    if (!providers) return [];
     const opts: { value: string; label: string }[] = [];
+    if (!providers) return opts;
     for (const pv of providers) {
       for (const m of pv.models) {
+        if (!m.model_id) continue;
         const ref = `${pv.id}/${m.model_id}`;
-        opts.push({
-          value: ref,
-          label: ref,
-        });
+        opts.push({ value: ref, label: ref });
       }
     }
     return opts;
@@ -65,14 +63,7 @@ export default function ConfigEditor() {
 
   const personaOptions = (() => {
     if (!personas) return [];
-    const opts: { value: string; label: string }[] = [{ value: "", label: "— None —" }];
-    for (const p of personas) {
-      opts.push({
-        value: p.id,
-        label: p.display_name || p.id,
-      });
-    }
-    return opts;
+    return personas.map((p) => ({ value: p.id, label: p.id }));
   })();
 
   const selectedPersona = personaId ? personas?.find((p: Persona) => p.id === personaId) : null;
@@ -161,7 +152,7 @@ export default function ConfigEditor() {
 
       {/* Hero header */}
       <div>
-        <h1 className="t-display">{bot.display_name || bot.id}</h1>
+        <h1 className="t-display">{bot.id}</h1>
         <p className="t-mono text-muted-fg mt-2">{bot.id}</p>
       </div>
       <div className="rule-heavy" />

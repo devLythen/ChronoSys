@@ -23,7 +23,6 @@ pub fn router() -> Router<Arc<AppState>> {
 pub struct AccountView {
     pub id: String,
     pub platform: String,
-    pub display_name: String,
     pub adapter_id: String,
     pub enabled: bool,
     pub secret_ref: String,
@@ -37,7 +36,6 @@ pub struct AccountView {
 pub struct AccountBody {
     pub id: Option<String>,
     pub platform: String,
-    pub display_name: String,
     pub adapter_id: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -56,7 +54,6 @@ fn mask(a: PlatformAccount) -> AccountView {
     AccountView {
         id: a.id,
         platform: a.platform,
-        display_name: a.display_name,
         adapter_id: a.adapter_id,
         enabled: a.enabled,
         secret_ref: a.secret_ref,
@@ -99,7 +96,6 @@ async fn create_account(
     let account = PlatformAccount {
         id: id.clone(),
         platform: body.platform,
-        display_name: body.display_name,
         adapter_id: body.adapter_id,
         enabled: body.enabled,
         secret_ref,
@@ -134,7 +130,6 @@ async fn update_account(
     let account = PlatformAccount {
         id: id.clone(),
         platform: body.platform,
-        display_name: body.display_name,
         adapter_id: body.adapter_id,
         enabled: body.enabled,
         secret_ref,

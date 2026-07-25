@@ -72,7 +72,6 @@ export default function PersonaEditor() {
     mutationFn: async () => {
       if (!id) throw new Error("Missing persona id");
       return api.updatePersona(id, {
-        display_name: persona?.display_name || id,
         system_prompt: systemPrompt,
         tools_allowlist_json: selectedTools,
         skills_allowlist_json: skills,
@@ -125,7 +124,7 @@ export default function PersonaEditor() {
 
       {/* Hero header */}
       <div>
-        <h1 className="t-display">Persona: {persona.display_name || persona.id}</h1>
+        <h1 className="t-display">Persona: {persona.id}</h1>
         <p className="t-mono text-muted-fg mt-2">{persona.id}</p>
       </div>
       <div className="rule-heavy" />

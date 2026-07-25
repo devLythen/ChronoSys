@@ -4,7 +4,6 @@ export interface LlmProvider {
   id: string;
   kind: string;
   base_url: string | null;
-  display_name: string;
   json_ext: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -48,9 +47,17 @@ export interface ModelInfo {
   name: string;
   reasoning: boolean;
   thinkingLevels: string[];
+  /** Full provider-level mapping of thinking levels. New in M3. */
+  thinkingLevelMap?: Record<string, string | null>;
   maxTokens: number;
   contextWindow: number;
   input: string[];
+  /** Provider ID. New in M3. */
+  provider?: string;
+  /** API identifier. New in M3. */
+  api?: string;
+  /** Per-token cost rates. New in M3. */
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 }
 
 export interface RefreshedModel {
@@ -60,7 +67,6 @@ export interface RefreshedModel {
 
 export interface Persona {
   id: string;
-  display_name: string;
   system_prompt: string;
   tools_allowlist_json: string[];
   skills_allowlist_json: string[];
@@ -73,7 +79,6 @@ export interface Persona {
 
 export interface BotProfile {
   id: string;
-  display_name: string;
   model_ref: string;
   persona_id: string | null;
   policy_json: BotPolicy;
@@ -95,7 +100,6 @@ export interface BotPolicy {
 export interface PlatformAccount {
   id: string;
   platform: string;
-  display_name: string;
   adapter_id: string;
   enabled: boolean;
   secret_ref: string;
@@ -108,7 +112,6 @@ export interface PlatformAccount {
 export interface AccountView {
   id: string;
   platform: string;
-  display_name: string;
   adapter_id: string;
   enabled: boolean;
   secret_ref: string;
@@ -117,8 +120,6 @@ export interface AccountView {
   created_at: string;
   updated_at: string;
 }
-
-// ── Bindings (Attachments) ─────────────────────────────────────
 
 export interface Binding {
   id: string;
@@ -204,9 +205,8 @@ export interface ApiError {
 
 export interface ProviderBody {
   id?: string;
-  kind: string;
+  kind?: string;
   base_url?: string | null;
-  display_name: string;
   json_ext?: Record<string, unknown>;
 }
 
@@ -228,7 +228,6 @@ export interface ModelBody {
 
 export interface BotBody {
   id?: string;
-  display_name?: string;
   model_ref?: string;
   persona_id?: string | null;
   policy_json?: BotPolicy;
@@ -237,7 +236,6 @@ export interface BotBody {
 
 export interface PersonaBody {
   id?: string;
-  display_name?: string;
   system_prompt?: string;
   tools_allowlist_json?: string[];
   skills_allowlist_json?: string[];
@@ -247,7 +245,6 @@ export interface PersonaBody {
 export interface AccountBody {
   id?: string;
   platform: string;
-  display_name: string;
   adapter_id: string;
   enabled?: boolean;
   secret_ref?: string;

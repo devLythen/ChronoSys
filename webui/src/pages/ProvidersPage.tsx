@@ -34,7 +34,7 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 // ── Empty form state ──────────────────────────────────────────
 
 function emptyProviderBody(): ProviderBody {
-  return { id: "", kind: "openai", display_name: "", base_url: DEFAULT_BASE_URLS["openai"] };
+  return { id: "", kind: "openai", base_url: DEFAULT_BASE_URLS["openai"] };
 }
 
 function emptyModelBody(): ModelBody {
@@ -137,7 +137,6 @@ export default function ProvidersPage() {
       const body: ProviderBody = {
         id: selected.id,
         kind: editKind,
-        display_name: selected.display_name || selected.id,
         base_url: editBaseUrl || null,
       };
       await api.updateProvider(selected.id, body);
@@ -314,13 +313,12 @@ export default function ProvidersPage() {
                         : "hover:bg-muted text-fg")
                     }
                   >
-                    <span className="truncate">{pv.display_name || pv.id}</span>
-                    <span className="ml-2 w-1.5 h-1.5 rounded-full shrink-0 bg-green-500" />
+                    <span className="truncate">{pv.id}</span>
                   </button>
                   <button
                     onClick={() => {
-                      if (window.confirm(`Delete provider "${pv.display_name || pv.id}"?`)) {
                         deleteProvMutation.mutate(pv.id);
+                      if (window.confirm(`Delete provider "${pv.id}"?`)) {
                       }
                     }}
                     className={
@@ -355,7 +353,7 @@ export default function ProvidersPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <h2 className="t-headline">
-                      Provider: {selected.display_name || selected.id}
+                      Provider: {selected.id}
                     </h2>
                     <span className="t-mono text-sm text-muted-fg">{selected.id}</span>
                   </div>
@@ -495,7 +493,7 @@ export default function ProvidersPage() {
             e.preventDefault();
             provCreateMutation.mutate({
               ...provForm,
-              display_name: provForm.id || provForm.display_name || "",
+              
             });
           }}
           className="flex flex-col gap-5"

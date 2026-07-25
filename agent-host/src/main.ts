@@ -1,5 +1,5 @@
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Model, Api, MutableModels } from "@earendil-works/pi-ai";
+import type { Model, Api, MutableModels, ThinkingLevel } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { ChronoEvent, ToolIpcMessage } from "./ipc/types.ts";
 import {
@@ -13,10 +13,15 @@ import {
   writeFrameStdout,
 } from "./transport.ts";
 import { openConfig, type ChronoConfig } from "./config.ts";
+import type { LlmModel } from "./config-types.ts";
 import {
   buildModels,
   resolveBot,
+  queryModelCaps,
+  resolveThinkingLevel,
+  buildStreamOverrides,
   type ResolvedBot,
+  type ModelCaps,
 } from "./resolve.ts";
 import { SessionStore, sessionsDbPath } from "./session-store.ts";
 
@@ -82,26 +87,6 @@ function writeControl(msg: Record<string, unknown>) {
   writeFrameStdout(new TextEncoder().encode(JSON.stringify(msg)));
 }
 
-async function pushModelCapabilities(models: MutableModels | null) {
-  const caps: Record<string, unknown> = {};
-  if (models) {
-    for (const provider of models.getProviders()) {
-      for (const model of provider.getModels()) {
-        const key = `${provider.id}/${model.id}`;
-        caps[key] = {
-          name: model.name, reasoning: model.reasoning,
-          thinkingLevels: model.thinkingLevelMap ? Object.keys(model.thinkingLevelMap) : [],
-          maxTokens: model.maxTokens, contextWindow: model.contextWindow,
-          input: model.input,
-        };
-      }
-    }
-  }
-  await fetch("http://127.0.0.1:8787/api/v1/internal/model-capabilities", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ models: caps }),
-  });
-}
 
 function isToolResponse(
   msg: unknown,
@@ -150,15 +135,23 @@ class BotProfileResolver {
   get(botId: string | undefined): ResolvedBot | null {
     if (!botId) return this.fallback;
     if (!this.config || !this.models) return this.fallback;
-    const bot = resolveBot(this.config, this.models, botId);
-    if (!bot) {
+    try {
+      const bot = resolveBot(this.config, this.models, botId);
+      if (!bot) {
+        logEvent({
+          type: "host_warn",
+          message: `bot profile "${botId}" not found; using fallback`,
+        });
+        return this.fallback;
+      }
+      return bot;
+    } catch (err) {
       logEvent({
         type: "host_warn",
-        message: `bot profile "${botId}" not found; using fallback`,
+        message: `bot profile "${botId}" resolution error: ${err instanceof Error ? err.message : String(err)}`,
       });
       return this.fallback;
     }
-    return bot;
   }
 }
 
@@ -224,6 +217,16 @@ async function main() {
   const PLACEHOLDER_STREAM: StreamFn = () => { throw new Error("Agent not configured"); };
 
   let streamFn: StreamFn = PLACEHOLDER_STREAM;
+  /** Mutable cell for current DB model overrides — read by wrapped streamFn. */
+  const currentOverrides: { v: LlmModel | null } = { v: null };
+
+  function makeStreamFn(models: MutableModels): StreamFn {
+    const base = models.streamSimple.bind(models);
+    return (model, ctx, options) => {
+      const ov = buildStreamOverrides(currentOverrides.v);
+      return base(model, ctx, { ...options, ...ov });
+    };
+  }
   let defaultModel: Model<Api> = PLACEHOLDER_MODEL;
   let defaultSystemPrompt = DEFAULT_SYSTEM_PROMPT;
   let defaultToolsAllowlist: string[] = [];
@@ -246,7 +249,14 @@ async function main() {
       const botId = process.env.CHRONO_BOT;
       let bot: ResolvedBot | null = null;
       if (botId) {
-        bot = resolveBot(config, models, botId);
+        try {
+          bot = resolveBot(config, models, botId);
+        } catch (err) {
+          logEvent({
+            type: "host_warn",
+            message: `Bot "${botId}" resolution failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
         if (!bot) {
           logEvent({
             type: "host_info",
@@ -256,7 +266,14 @@ async function main() {
       } else {
         const bots = config.listBots();
         if (bots.length > 0) {
-          bot = resolveBot(config, models, bots[0]!.id);
+          try {
+            bot = resolveBot(config, models, bots[0]!.id);
+          } catch (err) {
+            logEvent({
+              type: "host_warn",
+              message: `Bot "${bots[0]!.id}" resolution failed: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
           if (!bot) {
             logEvent({
               type: "host_info",
@@ -276,7 +293,8 @@ async function main() {
         defaultSystemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
         defaultModel = bot.resolvedModel.model;
         defaultToolsAllowlist = bot.toolsAllowlist;
-        streamFn = models.streamSimple.bind(models);
+        streamFn = makeStreamFn(models);
+        currentOverrides.v = bot.resolvedModel.overrides;
 
         logEvent({
           type: "host_info",
@@ -285,15 +303,6 @@ async function main() {
       }
 
     }
-  // Push capabilities to gateway via HTTP (retry until success)
-  (async () => {
-    for (let i = 0; i < 30; i++) {
-      try {
-        await pushModelCapabilities(models);
-        return;
-      } catch { await new Promise(r => setTimeout(r, 1000)); }
-    }
-  })();
 
   // One Agent instance; transcript isolation is done by swapping state.messages.
 
@@ -499,20 +508,27 @@ async function main() {
             const newModels = buildModels(config);
             if (newModels) {
               models = newModels;
-              streamFn = models.streamSimple.bind(models);
-              pushModelCapabilities(models);
+              streamFn = makeStreamFn(models);
               // Re-resolve default bot
               const bots = config.listBots();
               if (bots.length > 0) {
-                const bot = resolveBot(config, models, bots[0]!.id);
-                if (bot) {
-                  fallbackBot = bot;
-                  defaultSystemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
-                  defaultModel = bot.resolvedModel.model;
-                  defaultToolsAllowlist = bot.toolsAllowlist;
+                try {
+                  const bot = resolveBot(config, models, bots[0]!.id);
+                  if (bot) {
+                    fallbackBot = bot;
+                    defaultSystemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+                    defaultModel = bot.resolvedModel.model;
+                    defaultToolsAllowlist = bot.toolsAllowlist;
+                    currentOverrides.v = bot.resolvedModel.overrides;
+                    logEvent({
+                      type: "host_info",
+                      message: `config.reload: bot=${bot.id} model=${bot.modelRef} providers=${models.getProviders().length}`,
+                    });
+                  }
+                } catch (err) {
                   logEvent({
-                    type: "host_info",
-                    message: `config.reload: bot=${bot.id} model=${bot.modelRef} providers=${models.getProviders().length}`,
+                    type: "host_warn",
+                    message: `config.reload: bot "${bots[0]!.id}" resolution failed: ${err instanceof Error ? err.message : String(err)}`,
                   });
                 }
               }
@@ -523,6 +539,24 @@ async function main() {
               });
             }
           }
+          continue;
+        }
+
+        if (controlType === "model.caps") {
+          const providerId =
+            msg && typeof msg === "object" && "provider_id" in msg
+              ? String(msg.provider_id)
+              : "";
+          const modelId =
+            msg && typeof msg === "object" && "model_id" in msg
+              ? String(msg.model_id)
+              : "";
+          const queryId =
+            msg && typeof msg === "object" && "query_id" in msg
+              ? String(msg.query_id)
+              : "";
+          const caps: ModelCaps | null = queryModelCaps(providerId, modelId);
+          writeControl({ type: "model.caps", query_id: queryId, ...(caps ? caps : { error: "model not found" }) });
           continue;
         }
 
@@ -566,6 +600,7 @@ async function main() {
       });
       continue;
     }
+    currentOverrides.v = bot.resolvedModel.overrides;
 
     const scope = contextScopeOf(bot);
     if (scope !== "session") {
@@ -594,6 +629,10 @@ async function main() {
       });
       agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
       agent.state.model = bot.resolvedModel.model;
+      agent.state.thinkingLevel = resolveThinkingLevel(
+        bot.resolvedModel.model,
+        bot.resolvedModel.overrides,
+      ) as ThinkingLevel;
       agent.state.messages = [];
       agent.state.tools = createToolsForAllowlist(
         bot.toolsAllowlist.length > 0 ? bot.toolsAllowlist : defaultToolsAllowlist,
@@ -648,6 +687,10 @@ async function main() {
 
     agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     agent.state.model = bot.resolvedModel.model;
+    agent.state.thinkingLevel = resolveThinkingLevel(
+      bot.resolvedModel.model,
+      bot.resolvedModel.overrides,
+    ) as ThinkingLevel;
     agent.state.messages = bucket.messages;
     agent.state.tools = createToolsForAllowlist(
       bot.toolsAllowlist.length > 0 ? bot.toolsAllowlist : defaultToolsAllowlist,

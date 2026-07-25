@@ -13,12 +13,11 @@ pub struct BotStore<'a> {
 impl BotStore<'_> {
     pub fn insert_bot(&self, b: &BotProfile) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO bot_profiles (id, display_name, model_ref, persona_id,
+            "INSERT INTO bot_profiles (id, model_ref, persona_id,
                     policy_json, json_ext)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 b.id,
-                b.display_name,
                 b.model_ref,
                 b.persona_id,
                 serde_json::to_string(&b.policy_json).unwrap_or_default(),
@@ -30,12 +29,11 @@ impl BotStore<'_> {
 
     pub fn update_bot(&self, b: &BotProfile) -> Result<()> {
         let rows = self.conn.execute(
-            "UPDATE bot_profiles SET display_name=?2, model_ref=?3, persona_id=?4,
-                    policy_json=?5, json_ext=?6, updated_at=datetime('now')
+            "UPDATE bot_profiles SET model_ref=?2, persona_id=?3,
+                    policy_json=?4, json_ext=?5, updated_at=datetime('now')
              WHERE id=?1",
             params![
                 b.id,
-                b.display_name,
                 b.model_ref,
                 b.persona_id,
                 serde_json::to_string(&b.policy_json).unwrap_or_default(),
@@ -47,11 +45,10 @@ impl BotStore<'_> {
         }
         Ok(())
     }
-
     pub fn get_bot(&self, id: &str) -> Result<BotProfile> {
         self.conn
             .query_row(
-                "SELECT id, display_name, model_ref, persona_id,
+                "SELECT id, model_ref, persona_id,
                         policy_json, json_ext, created_at, updated_at
                  FROM bot_profiles WHERE id=?1",
                 params![id],
@@ -68,7 +65,7 @@ impl BotStore<'_> {
 
     pub fn list_bots(&self) -> Result<Vec<BotProfile>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, display_name, model_ref, persona_id,
+            "SELECT id, model_ref, persona_id,
                     policy_json, json_ext, created_at, updated_at
              FROM bot_profiles ORDER BY id"
         )?;
@@ -91,13 +88,12 @@ impl BotStore<'_> {
 fn row_to_bot(row: &rusqlite::Row) -> std::result::Result<BotProfile, rusqlite::Error> {
     Ok(BotProfile {
         id: row.get(0)?,
-        display_name: row.get(1)?,
-        model_ref: row.get(2)?,
-        persona_id: row.get(3)?,
-        policy_json: parse_json_or_empty(row.get::<_, String>(4)?),
-        json_ext: parse_json_or_empty(row.get::<_, String>(5)?),
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        model_ref: row.get(1)?,
+        persona_id: row.get(2)?,
+        policy_json: parse_json_or_empty(row.get::<_, String>(3)?),
+        json_ext: parse_json_or_empty(row.get::<_, String>(4)?),
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }
 

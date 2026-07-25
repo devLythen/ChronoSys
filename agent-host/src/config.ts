@@ -31,7 +31,7 @@ export class ChronoConfig {
   getProvider(id: string): LlmProvider | null {
     const row = this.db
       .query(
-        `SELECT id, kind, base_url, display_name, json_ext, created_at, updated_at
+        `SELECT id, kind, base_url, json_ext, created_at, updated_at
          FROM llm_providers WHERE id = ?`,
       )
       .get(id);
@@ -41,7 +41,7 @@ export class ChronoConfig {
   listProviders(): LlmProvider[] {
     return this.db
       .query(
-        `SELECT id, kind, base_url, display_name, json_ext, created_at, updated_at
+        `SELECT id, kind, base_url, json_ext, created_at, updated_at
          FROM llm_providers ORDER BY id`,
       )
       .all() as LlmProvider[];
@@ -87,7 +87,7 @@ export class ChronoConfig {
   getAccount(id: string): PlatformAccount | null {
     const row = this.db
       .query(
-        `SELECT id, platform, display_name, adapter_id, enabled, secret_ref,
+        `SELECT id, platform, adapter_id, enabled, secret_ref,
                 adapter_config_json, json_ext, created_at, updated_at
          FROM platform_accounts WHERE id = ?`,
       )
@@ -98,7 +98,7 @@ export class ChronoConfig {
   listEnabledAccounts(): PlatformAccount[] {
     return this.db
       .query(
-        `SELECT id, platform, display_name, adapter_id, enabled, secret_ref,
+        `SELECT id, platform, adapter_id, enabled, secret_ref,
                 adapter_config_json, json_ext, created_at, updated_at
          FROM platform_accounts WHERE enabled = 1 ORDER BY id`,
       )
@@ -110,7 +110,7 @@ export class ChronoConfig {
   getBot(id: string): BotProfile | null {
     const row = this.db
       .query(
-        `SELECT id, display_name, persona_id, model_ref,
+        `SELECT id, persona_id, model_ref,
                 policy_json, json_ext, created_at, updated_at
          FROM bot_profiles WHERE id = ?`,
       )
@@ -121,7 +121,7 @@ export class ChronoConfig {
   listBots(): BotProfile[] {
     return this.db
       .query(
-        `SELECT id, display_name, persona_id, model_ref,
+        `SELECT id, persona_id, model_ref,
                 policy_json, json_ext, created_at, updated_at
          FROM bot_profiles ORDER BY id`,
       )
@@ -133,7 +133,7 @@ export class ChronoConfig {
   getPersona(id: string): Persona | null {
     const row = this.db
       .query(
-        `SELECT id, display_name, system_prompt, tools_allowlist_json,
+        `SELECT id, system_prompt, tools_allowlist_json,
                 skills_allowlist_json, json_ext, created_at, updated_at
          FROM personas WHERE id = ?`,
       )

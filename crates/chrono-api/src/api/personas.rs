@@ -22,7 +22,6 @@ pub fn router() -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 pub struct PersonaView {
     pub id: String,
-    pub display_name: String,
     pub system_prompt: String,
     pub tools_allowlist_json: Value,
     pub skills_allowlist_json: Value,
@@ -34,7 +33,6 @@ pub struct PersonaView {
 #[derive(Deserialize)]
 pub struct PersonaBody {
     pub id: Option<String>,
-    pub display_name: String,
     #[serde(default)]
     pub system_prompt: String,
     #[serde(default = "default_obj")]
@@ -52,7 +50,6 @@ fn default_obj() -> Value {
 fn view(p: Persona) -> PersonaView {
     PersonaView {
         id: p.id,
-        display_name: p.display_name,
         system_prompt: p.system_prompt,
         tools_allowlist_json: p.tools_allowlist_json,
         skills_allowlist_json: p.skills_allowlist_json,
@@ -88,7 +85,6 @@ async fn create_persona(
 
     let persona = Persona {
         id: id.clone(),
-        display_name: body.display_name,
         system_prompt: body.system_prompt,
         tools_allowlist_json: normalize_obj(body.tools_allowlist_json),
         skills_allowlist_json: normalize_obj(body.skills_allowlist_json),
@@ -111,7 +107,6 @@ async fn update_persona(
 ) -> ApiResult<Json<PersonaView>> {
     let persona = Persona {
         id: id.clone(),
-        display_name: body.display_name,
         system_prompt: body.system_prompt,
         tools_allowlist_json: normalize_obj(body.tools_allowlist_json),
         skills_allowlist_json: normalize_obj(body.skills_allowlist_json),

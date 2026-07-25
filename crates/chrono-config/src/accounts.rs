@@ -11,13 +11,12 @@ pub struct AccountStore<'a> {
 impl AccountStore<'_> {
     pub fn insert_account(&self, a: &PlatformAccount) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO platform_accounts (id, platform, display_name, adapter_id, enabled,
+            "INSERT INTO platform_accounts (id, platform, adapter_id, enabled,
                     secret_ref, adapter_config_json, json_ext)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 a.id,
                 a.platform,
-                a.display_name,
                 a.adapter_id,
                 a.enabled as i32,
                 a.secret_ref,
@@ -30,14 +29,13 @@ impl AccountStore<'_> {
 
     pub fn update_account(&self, a: &PlatformAccount) -> Result<()> {
         let rows = self.conn.execute(
-            "UPDATE platform_accounts SET platform=?2, display_name=?3, adapter_id=?4,
-                    enabled=?5, secret_ref=?6, adapter_config_json=?7, json_ext=?8,
+            "UPDATE platform_accounts SET platform=?2, adapter_id=?3,
+                    enabled=?4, secret_ref=?5, adapter_config_json=?6, json_ext=?7,
                     updated_at=datetime('now')
              WHERE id=?1",
             params![
                 a.id,
                 a.platform,
-                a.display_name,
                 a.adapter_id,
                 a.enabled as i32,
                 a.secret_ref,
@@ -50,11 +48,10 @@ impl AccountStore<'_> {
         }
         Ok(())
     }
-
     pub fn get_account(&self, id: &str) -> Result<PlatformAccount> {
         self.conn
             .query_row(
-                "SELECT id, platform, display_name, adapter_id, enabled, secret_ref,
+                "SELECT id, platform, adapter_id, enabled, secret_ref,
                         adapter_config_json, json_ext, created_at, updated_at
                  FROM platform_accounts WHERE id=?1",
                 params![id],
@@ -71,7 +68,7 @@ impl AccountStore<'_> {
 
     pub fn list_accounts(&self) -> Result<Vec<PlatformAccount>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, platform, display_name, adapter_id, enabled, secret_ref,
+            "SELECT id, platform, adapter_id, enabled, secret_ref,
                     adapter_config_json, json_ext, created_at, updated_at
              FROM platform_accounts ORDER BY id"
         )?;
@@ -81,7 +78,7 @@ impl AccountStore<'_> {
 
     pub fn list_enabled_accounts(&self) -> Result<Vec<PlatformAccount>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, platform, display_name, adapter_id, enabled, secret_ref,
+            "SELECT id, platform, adapter_id, enabled, secret_ref,
                     adapter_config_json, json_ext, created_at, updated_at
              FROM platform_accounts WHERE enabled=1 ORDER BY id"
         )?;
@@ -105,13 +102,12 @@ fn row_to_account(row: &rusqlite::Row) -> std::result::Result<PlatformAccount, r
     Ok(PlatformAccount {
         id: row.get(0)?,
         platform: row.get(1)?,
-        display_name: row.get(2)?,
-        adapter_id: row.get(3)?,
-        enabled: row.get::<_, i32>(4)? != 0,
-        secret_ref: row.get(5)?,
-        adapter_config_json: parse_json_or_empty(row.get::<_, String>(6)?),
-        json_ext: parse_json_or_empty(row.get::<_, String>(7)?),
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        adapter_id: row.get(2)?,
+        enabled: row.get::<_, i32>(3)? != 0,
+        secret_ref: row.get(4)?,
+        adapter_config_json: parse_json_or_empty(row.get::<_, String>(5)?),
+        json_ext: parse_json_or_empty(row.get::<_, String>(6)?),
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }

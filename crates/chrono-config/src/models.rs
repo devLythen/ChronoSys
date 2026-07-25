@@ -7,7 +7,6 @@ pub struct LlmProvider {
     pub id: String,
     pub kind: String,
     pub base_url: Option<String>,
-    pub display_name: String,
     pub json_ext: serde_json::Value,
     pub created_at: String,
     pub updated_at: String,
@@ -44,7 +43,6 @@ pub struct LlmModel {
 pub struct PlatformAccount {
     pub id: String,
     pub platform: String,
-    pub display_name: String,
     pub adapter_id: String,
     pub enabled: bool,
     pub secret_ref: String,
@@ -59,7 +57,6 @@ pub struct PlatformAccount {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Persona {
     pub id: String,
-    pub display_name: String,
     pub system_prompt: String,
     pub tools_allowlist_json: serde_json::Value,
     pub skills_allowlist_json: serde_json::Value,
@@ -73,7 +70,6 @@ pub struct Persona {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BotProfile {
     pub id: String,
-    pub display_name: String,
     pub model_ref: String,
     pub persona_id: Option<String>,
     pub policy_json: serde_json::Value,

@@ -13,6 +13,7 @@ const MIGRATION_003: &str = include_str!("migrations/003_drop_bot_enabled.sql");
 const MIGRATION_004: &str = include_str!("migrations/004_drop_provider_enabled.sql");
 const MIGRATION_005: &str = include_str!("migrations/005_cleanup_llm_models.sql");
 const MIGRATION_006: &str = include_str!("migrations/006_model_params.sql");
+const MIGRATION_007: &str = include_str!("migrations/007_drop_display_name.sql");
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -106,6 +107,14 @@ impl ConfigStore {
             self.conn.execute_batch(MIGRATION_006)?;
             self.conn.execute(
                 "INSERT INTO schema_migrations (version, name) VALUES (6, '006_model_params')",
+                [],
+            )?;
+        }
+
+        if current < 7 {
+            self.conn.execute_batch(MIGRATION_007)?;
+            self.conn.execute(
+                "INSERT INTO schema_migrations (version, name) VALUES (7, '007_drop_display_name')",
                 [],
             )?;
         }

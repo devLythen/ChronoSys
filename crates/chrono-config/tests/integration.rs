@@ -25,7 +25,6 @@ mod tests {
             id: "my-llm".into(),
             kind: "builtin".into(),
             base_url: None,
-            display_name: "My LLM".into(),
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -51,7 +50,6 @@ mod tests {
             id: "my-llm".into(),
             kind: "builtin".into(),
             base_url: None,
-            display_name: "My LLM".into(),
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -89,7 +87,6 @@ mod tests {
         let a = PlatformAccount {
             id: "tg1".into(),
             platform: "telegram".into(),
-            display_name: "Main TG".into(),
             adapter_id: "chrono.adapter.telegram".into(),
             enabled: true,
             secret_ref: "test-token-123".into(),
@@ -111,7 +108,6 @@ mod tests {
             id: "my-llm".into(),
             kind: "builtin".into(),
             base_url: None,
-            display_name: "My LLM".into(),
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -131,7 +127,6 @@ mod tests {
         store.accounts().insert_account(&PlatformAccount {
             id: "tg1".into(),
             platform: "telegram".into(),
-            display_name: "TG".into(),
             adapter_id: "chrono.adapter.telegram".into(),
             enabled: true,
             secret_ref: "env:TG_TOKEN".into(),
@@ -143,7 +138,6 @@ mod tests {
 
         let bot = BotProfile {
             id: "greeter".into(),
-            display_name: "Greeter".into(),
             model_ref: "my-llm/main-model".into(),
             persona_id: None,
             policy_json: json!({}),
@@ -177,10 +171,9 @@ mod tests {
 
     #[test]
     fn bot_without_model_ref_fails_later() {
-        let store = setup();
-        let bot = BotProfile {
+        let _store = setup();
+        let _bot = BotProfile {
             id: "orphan".into(),
-            display_name: "Orphan".into(),
             model_ref: "nonexistent/gpt-99".into(),
             persona_id: None,
             policy_json: json!({}),
@@ -189,7 +182,6 @@ mod tests {
             updated_at: String::new(),
         };
     }
-
     #[test]
     fn custom_provider_with_base_url() {
         let store = setup();
@@ -197,7 +189,6 @@ mod tests {
             id: "my-proxy".into(),
             kind: "openai_compat".into(),
             base_url: Some("https://proxy.example.com/v1".into()),
-            display_name: "My Proxy".into(),
             json_ext: json!({"default_headers": {"X-Region": "us"}}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -217,7 +208,6 @@ mod tests {
             id: "p1".into(),
             kind: "builtin".into(),
             base_url: None,
-            display_name: "P".into(),
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -244,7 +234,6 @@ mod tests {
         store.accounts().insert_account(&PlatformAccount {
             id: "a1".into(),
             platform: "telegram".into(),
-            display_name: "A".into(),
             adapter_id: "chrono.adapter.telegram".into(),
             enabled: true,
             secret_ref: "test-tg-token".into(),
@@ -255,7 +244,6 @@ mod tests {
         }).unwrap();
         store.bots().insert_bot(&BotProfile {
             id: "b1".into(),
-            display_name: "B".into(),
             model_ref: "p1/m1".into(),
             persona_id: None,
             policy_json: json!({}),

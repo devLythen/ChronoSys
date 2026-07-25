@@ -10,8 +10,7 @@ export interface LlmProvider {
   id: string;
   kind: string;
   base_url: string | null;
-  display_name: string;
-  json_ext: string; // JSON string from DB
+  json_ext: string;
   created_at: string;
   updated_at: string;
 }
@@ -40,7 +39,6 @@ export interface LlmModel {
 export interface PlatformAccount {
   id: string;
   platform: string;
-  display_name: string;
   adapter_id: string;
   enabled: number;
   secret_ref: string;
@@ -52,7 +50,6 @@ export interface PlatformAccount {
 
 export interface Persona {
   id: string;
-  display_name: string;
   system_prompt: string;
   tools_allowlist_json: string;
   skills_allowlist_json: string;
@@ -63,7 +60,6 @@ export interface Persona {
 
 export interface BotProfile {
   id: string;
-  display_name: string;
   persona_id: string | null;
   model_ref: string;
   policy_json: string;
@@ -71,7 +67,6 @@ export interface BotProfile {
   created_at: string;
   updated_at: string;
 }
-
 export interface Binding {
   id: string;
   account_id: string;

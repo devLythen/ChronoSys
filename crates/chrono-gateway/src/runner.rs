@@ -3,7 +3,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -232,7 +232,6 @@ pub async fn run_gateway(
     let child = Arc::new(child);
 
     let pending_queries = Arc::new(Mutex::new(HashMap::new()));
-    let model_caps = Arc::new(RwLock::new(Value::Null));
 
     // 2. Audit log
     let audit = AuditLog::open(&chrono_home).context("open audit log")?;
@@ -251,7 +250,7 @@ pub async fn run_gateway(
         mut agent_ctrl_rx,
         agent_alive,
         adapter_count,
-    } = http::start_http_server(&chrono_home, config_store, child.clone(), pending_queries.clone(), model_caps.clone())
+    } = http::start_http_server(&chrono_home, config_store, child.clone(), pending_queries.clone())
         .await
         .context("start control plane")?;
 

@@ -12,13 +12,12 @@ pub struct ProviderStore<'a> {
 impl ProviderStore<'_> {
     pub fn insert_provider(&self, p: &LlmProvider) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO llm_providers (id, kind, base_url, display_name, json_ext)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO llm_providers (id, kind, base_url, json_ext)
+             VALUES (?1, ?2, ?3, ?4)",
             params![
                 p.id,
                 p.kind,
                 p.base_url,
-                p.display_name,
                 serde_json::to_string(&p.json_ext).unwrap_or_default(),
             ],
         )?;
@@ -27,14 +26,13 @@ impl ProviderStore<'_> {
 
     pub fn update_provider(&self, p: &LlmProvider) -> Result<()> {
         let rows = self.conn.execute(
-            "UPDATE llm_providers SET kind=?2, base_url=?3, display_name=?4, json_ext=?5,
+            "UPDATE llm_providers SET kind=?2, base_url=?3, json_ext=?4,
                     updated_at=datetime('now')
              WHERE id=?1",
             params![
                 p.id,
                 p.kind,
                 p.base_url,
-                p.display_name,
                 serde_json::to_string(&p.json_ext).unwrap_or_default(),
             ],
         )?;
@@ -43,11 +41,10 @@ impl ProviderStore<'_> {
         }
         Ok(())
     }
-
     pub fn get_provider(&self, id: &str) -> Result<LlmProvider> {
         self.conn
             .query_row(
-                "SELECT id, kind, base_url, display_name, json_ext, created_at, updated_at
+                "SELECT id, kind, base_url, json_ext, created_at, updated_at
                  FROM llm_providers WHERE id=?1",
                 params![id],
                 row_to_provider,
@@ -63,7 +60,7 @@ impl ProviderStore<'_> {
 
     pub fn list_providers(&self) -> Result<Vec<LlmProvider>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, kind, base_url, display_name, json_ext, created_at, updated_at
+            "SELECT id, kind, base_url, json_ext, created_at, updated_at
              FROM llm_providers ORDER BY id"
         )?;
         let rows = stmt.query_map([], row_to_provider)?;
@@ -82,16 +79,14 @@ impl ProviderStore<'_> {
         Ok(())
     }
 }
-
 fn row_to_provider(row: &rusqlite::Row) -> std::result::Result<LlmProvider, rusqlite::Error> {
     Ok(LlmProvider {
         id: row.get(0)?,
         kind: row.get(1)?,
         base_url: row.get(2)?,
-        display_name: row.get(3)?,
-        json_ext: parse_json_or_empty(row.get::<_, String>(4)?),
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        json_ext: parse_json_or_empty(row.get::<_, String>(3)?),
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
     })
 }
 

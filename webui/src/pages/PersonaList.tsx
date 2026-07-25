@@ -32,7 +32,6 @@ export default function PersonaList() {
     mutationFn: () =>
       api.createPersona({
         id: newId.trim(),
-        display_name: newId.trim(),
         system_prompt: "",
         tools_allowlist_json: ["message_send"],
         skills_allowlist_json: [],
@@ -117,7 +116,7 @@ export default function PersonaList() {
               <div className="p-4 flex-1">
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="t-headline !text-xl truncate">
-                    {persona.display_name || persona.id}
+                    {persona.id}
                   </h3>
                 </div>
 

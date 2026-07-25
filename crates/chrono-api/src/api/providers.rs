@@ -46,7 +46,6 @@ pub struct ProviderBody {
     pub id: Option<String>,
     pub kind: String,
     pub base_url: Option<String>,
-    pub display_name: String,
     #[serde(default)]
     pub json_ext: Value,
 }
@@ -141,7 +140,6 @@ async fn create_provider(
         id: id.clone(),
         kind: body.kind,
         base_url: body.base_url,
-        display_name: body.display_name,
         json_ext: if body.json_ext.is_null() {
             empty_obj()
         } else {
@@ -157,7 +155,6 @@ async fn create_provider(
     state.notify_reload();
     get_provider(State(state), Path(id)).await
 }
-
 async fn update_provider(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -167,7 +164,6 @@ async fn update_provider(
         id: id.clone(),
         kind: body.kind,
         base_url: body.base_url,
-        display_name: body.display_name,
         json_ext: if body.json_ext.is_null() {
             empty_obj()
         } else {
@@ -382,10 +378,20 @@ async fn get_model_info(
     State(state): State<Arc<AppState>>,
     Path((provider_id, model_id)): Path<(String, String)>,
 ) -> ApiResult<Json<Value>> {
-    let key = format!("{provider_id}/{model_id}");
-    let caps = state.model_caps.read().unwrap();
-    let info = caps.get(&key).cloned().unwrap_or(Value::Null);
-    Ok(Json(info))
+    let msg = json!({
+        "type": "model.caps",
+        "provider_id": provider_id,
+        "model_id": model_id,
+    });
+    let mut response = state.query_agent(&msg).await.map_err(|e| {
+        ApiError::internal(format!("agent-host query failed: {e}"))
+    })?;
+    // Strip IPC framing fields from the response
+    if let Value::Object(map) = &mut response {
+        map.remove("type");
+        map.remove("query_id");
+    }
+    Ok(Json(response))
 }
 fn resolve_secret(secret_ref: &str) -> ApiResult<String> {
     let trimmed = secret_ref.trim();

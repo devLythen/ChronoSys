@@ -4,6 +4,7 @@ target/
 **/node_modules/
 webui/dist/
 agent-host/dist/
+*.tsbuildinfo
 *.log
 .DS_Store
 .env

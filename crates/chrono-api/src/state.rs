@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -37,8 +37,6 @@ pub struct AppState {
     pub agent_alive: Arc<AtomicBool>,
     pub child: Arc<dyn AgentQuery>,
     pub pending_queries: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
-    /// In-memory cache of model capabilities, keyed by "provider_id/model_id".
-    pub model_caps: Arc<RwLock<Value>>,
 }
 
 impl AppState {

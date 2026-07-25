@@ -9,11 +9,8 @@ pub use state::{AgentControl, AgentQuery, AppState};
 
 use std::sync::Arc;
 
-use axum::extract::State;
-use axum::http::StatusCode;
-use axum::routing::{get, post};
-use axum::{Json, Router};
-use serde_json::{json, Value};
+use axum::routing::get;
+use axum::Router;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -30,8 +27,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .nest("/audit", api::audit::router())
         .route("/health", get(api::health::health))
         .nest("/tools", api::tools::router())
-        .route("/ws", get(api::ws::handler))
-        .route("/internal/model-capabilities", post(update_model_caps));
+        .route("/ws", get(api::ws::handler));
 
     let ui_dir = state.webui_dist_path.clone();
     let index = ui_dir.join("index.html");
@@ -48,13 +44,3 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-/// Accept model capabilities pushed by agent-host on startup and config reload.
-async fn update_model_caps(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, StatusCode> {
-    if let Some(models) = body.get("models").cloned() {
-        *state.model_caps.write().unwrap() = models;
-    }
-    Ok(Json(json!({"ok": true})))
-}

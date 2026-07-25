@@ -34,7 +34,6 @@ export default function ConfigList() {
     mutationFn: () =>
       api.createBot({
         id: form.id,
-        display_name: form.id,
 
         model_ref: "",
         persona_id: null,
@@ -61,7 +60,7 @@ export default function ConfigList() {
   });
 
   const handleDelete = (bot: BotProfile) => {
-    if (window.confirm(`Delete config "${bot.display_name || bot.id}"? This cannot be undone.`)) {
+    if (window.confirm(`Delete config "${bot.id}"? This cannot be undone.`)) {
       deleteMut.mutate(bot.id);
     }
   };
@@ -141,7 +140,7 @@ export default function ConfigList() {
               >
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="t-headline !text-xl truncate">
-                    {bot.display_name || bot.id}
+                    {bot.id}
                   </h3>
                 </div>
 

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
@@ -56,7 +56,6 @@ pub async fn start_http_server(
     config: ConfigStore,
     child: Arc<GatewayChild>,
     pending_queries: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
-    model_caps: Arc<RwLock<Value>>,
 ) -> Result<HttpServer> {
     let (addr, auth_token) = resolve_bind_and_auth()?;
     let (agent_tx, agent_ctrl_rx) = tokio_mpsc::unbounded_channel::<AgentControl>();
@@ -86,7 +85,6 @@ pub async fn start_http_server(
         agent_alive: agent_alive.clone(),
         child,
         pending_queries,
-        model_caps,
     });
 
     let app = build_router(state);

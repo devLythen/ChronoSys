@@ -1,4 +1,10 @@
 import {
+  getSupportedThinkingLevels,
+  clampThinkingLevel,
+} from "@earendil-works/pi-ai";
+import type { ThinkingLevel, ModelThinkingLevel } from "@earendil-works/pi-ai";
+
+import {
   builtinModels,
 } from "@earendil-works/pi-ai/providers/all";
 import {
@@ -133,4 +139,78 @@ function parseJsonArray(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+// ── Model capabilities query ──────────────────────────────────────
+
+/** Full model capabilities returned to the Rust gateway / WebUI. */
+export interface ModelCaps {
+  name: string;
+  provider: string;
+  api: string;
+  reasoning: boolean;
+  thinkingLevels: string[];
+  thinkingLevelMap: Record<string, string | null>;
+  maxTokens: number;
+  contextWindow: number;
+  input: string[];
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+}
+
+/**
+ * Query pi-ai builtin model catalog for a specific model's capabilities.
+ * Returns null when the provider or model is not in the builtin catalog.
+ */
+export function queryModelCaps(
+  providerId: string,
+  modelId: string,
+): ModelCaps | null {
+  const models = builtinModels();
+  const model = models.getModel(providerId, modelId);
+  if (!model) return null;
+  return {
+    name: model.name,
+    provider: model.provider,
+    api: model.api,
+    reasoning: model.reasoning,
+    thinkingLevels: getSupportedThinkingLevels(model),
+    thinkingLevelMap: model.thinkingLevelMap ?? {},
+    maxTokens: model.maxTokens,
+    contextWindow: model.contextWindow,
+    input: [...model.input],
+    cost: { ...model.cost },
+  };
+}
+
+// ── Override application ──────────────────────────────────────────
+
+/**
+ * Validate and clamp a thinking_level string against what the model supports.
+ * Returns the clamped thinking level, or null if overrides is null.
+ */
+export function resolveThinkingLevel(
+  model: Model<Api>,
+  overrides: LlmModel | null,
+): ModelThinkingLevel {
+  if (!overrides?.thinking_level) return "off";
+  const clamped = clampThinkingLevel(
+    model,
+    overrides.thinking_level as ModelThinkingLevel,
+  );
+  return clamped;
+}
+
+/**
+ * Build stream-option overrides from DB model config.
+ * Returns fields that should be merged into stream options.
+ */
+export function buildStreamOverrides(
+  overrides: LlmModel | null,
+): Partial<{ temperature: number; maxTokens: number; topP: number }> {
+  if (!overrides) return {};
+  const result: Record<string, number> = {};
+  if (overrides.temperature != null) result.temperature = overrides.temperature;
+  if (overrides.max_tokens != null) result.maxTokens = overrides.max_tokens;
+  if (overrides.top_p != null) result.topP = overrides.top_p;
+  return result;
 }
