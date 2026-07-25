@@ -254,6 +254,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "chrono-sys"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "chrono-config",
+ "chrono-gateway",
+ "tokio",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

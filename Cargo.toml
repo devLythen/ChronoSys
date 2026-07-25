@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "crates/chrono-ipc",
   "crates/chrono-gateway",
+  "crates/chrono-sys",
   "crates/chrono-config",
   "crates/chrono-adapter-telegram",
   "crates/chrono-api",
@@ -18,6 +19,7 @@ repository = "https://github.com/intro/ChronoSys"
 chrono-ipc = { path = "crates/chrono-ipc" }
 chrono-gateway = { path = "crates/chrono-gateway" }
 chrono-config = { path = "crates/chrono-config" }
+chrono-sys = { path = "crates/chrono-sys" }
 chrono-adapter-telegram = { path = "crates/chrono-adapter-telegram" }
 chrono-api = { path = "crates/chrono-api" }
 serde = { version = "1", features = ["derive"] }

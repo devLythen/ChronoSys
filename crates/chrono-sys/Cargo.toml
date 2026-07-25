@@ -1,0 +1,15 @@
+[package]
+name = "chrono-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "chrono"
+path = "src/main.rs"
+
+[dependencies]
+chrono-gateway = { workspace = true }
+chrono-config = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
