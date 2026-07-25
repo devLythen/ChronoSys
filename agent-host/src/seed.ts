@@ -29,7 +29,7 @@ db.run(`
   );
   CREATE TABLE IF NOT EXISTS llm_providers (
     id TEXT PRIMARY KEY, kind TEXT NOT NULL, base_url TEXT,
-    display_name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+    display_name TEXT NOT NULL,
     json_ext TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -42,9 +42,12 @@ db.run(`
   );
   CREATE TABLE IF NOT EXISTS llm_models (
     provider_id TEXT NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
-    model_id TEXT NOT NULL, display_name TEXT, enabled INTEGER NOT NULL DEFAULT 1,
-    temperature REAL, max_tokens INTEGER, top_p REAL,
-    extra_headers_json TEXT, extra_body_json TEXT, thinking_level TEXT,
+    model_id TEXT NOT NULL,
+    temperature REAL,
+    max_tokens INTEGER,
+    top_p REAL,
+    thinking_level TEXT,
+    extra_body_json TEXT,
     json_ext TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -58,14 +61,20 @@ db.run(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
-  CREATE TABLE IF NOT EXISTS bot_profiles (
+  CREATE TABLE IF NOT EXISTS personas (
     id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
     system_prompt TEXT NOT NULL DEFAULT '',
-    model_ref TEXT NOT NULL,
     tools_allowlist_json TEXT NOT NULL DEFAULT '[]',
     skills_allowlist_json TEXT NOT NULL DEFAULT '[]',
+    json_ext TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS bot_profiles (
+    id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
+    persona_id TEXT REFERENCES personas(id) ON DELETE SET NULL,
+    model_ref TEXT NOT NULL,
     policy_json TEXT NOT NULL DEFAULT '{}',
-    enabled INTEGER NOT NULL DEFAULT 1,
     json_ext TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -93,8 +102,8 @@ const modelId = process.env.CHRONO_SEED_MODEL ?? "main-model";
 const credentialEnv = process.env.CHRONO_SEED_CREDENTIAL_ENV ?? "MY_LLM_API_KEY";
 
 db.run(
-  `INSERT OR IGNORE INTO llm_providers (id, kind, display_name, enabled)
-   VALUES (?, 'builtin', ?, 1)`,
+  `INSERT OR IGNORE INTO llm_providers (id, kind, display_name)
+   VALUES (?, 'builtin', ?)`,
   [providerId, providerId],
 );
 
@@ -103,19 +112,17 @@ db.run(
    VALUES (?, 'env_ref', ?)`,
   [providerId, credentialEnv],
 );
-
 db.run(
-  `INSERT OR REPLACE INTO llm_models (provider_id, model_id, display_name, enabled, temperature)
-   VALUES (?, ?, ?, 1, 0.7)`,
-  [providerId, modelId, modelId],
+  `INSERT OR REPLACE INTO personas (id, display_name, system_prompt,
+          tools_allowlist_json)
+   VALUES ('greeter', 'Greeter',
+           'You are a helpful assistant. When asked to send a message, use message_send.',
+           '["message_send"]')`,
 );
 
 db.run(
-  `INSERT OR REPLACE INTO bot_profiles (id, display_name, system_prompt, model_ref,
-          tools_allowlist_json, enabled)
-   VALUES ('greeter', 'Greeter',
-           'You are a helpful assistant. When asked to send a message, use message_send.',
-           ?, '["message_send"]', 1)`,
+  `INSERT OR REPLACE INTO bot_profiles (id, display_name, persona_id, model_ref)
+   VALUES ('greeter', 'Greeter', 'greeter', ?)`,
   [`${providerId}/${modelId}`],
 );
 

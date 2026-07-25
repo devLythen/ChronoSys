@@ -7,7 +7,6 @@ use chrono_config::PlatformAccount;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::api::validate_secret_ref;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -27,7 +26,7 @@ pub struct AccountView {
     pub display_name: String,
     pub adapter_id: String,
     pub enabled: bool,
-    pub has_secret: bool,
+    pub secret_ref: String,
     pub adapter_config_json: Value,
     pub json_ext: Value,
     pub created_at: String,
@@ -60,7 +59,7 @@ fn mask(a: PlatformAccount) -> AccountView {
         display_name: a.display_name,
         adapter_id: a.adapter_id,
         enabled: a.enabled,
-        has_secret: !a.secret_ref.is_empty(),
+        secret_ref: a.secret_ref,
         adapter_config_json: a.adapter_config_json,
         json_ext: a.json_ext,
         created_at: a.created_at,
@@ -96,7 +95,6 @@ async fn create_account(
         .clone()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ApiError::bad_request("secret_ref is required"))?;
-    validate_secret_ref(&secret_ref).map_err(ApiError::bad_request)?;
 
     let account = PlatformAccount {
         id: id.clone(),
@@ -129,7 +127,6 @@ async fn update_account(
     };
     let secret_ref = match body.secret_ref {
         Some(s) if !s.is_empty() => {
-            validate_secret_ref(&s).map_err(ApiError::bad_request)?;
             s
         }
         _ => existing.secret_ref,

@@ -3,61 +3,41 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Plus, ChevronDown, ChevronRight, X, Trash2, Link2 } from "lucide-react";
 import { api } from "../api/client";
-import type { AccountView, Binding, BotProfile, AccountBody, BindingBody } from "../api/types";
+import type { AccountView, Binding, BotProfile, AccountBody } from "../api/types";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
 import Input from "../components/ui/Input";
 import Select from "../components/ui/Select";
+import { cn } from "../lib/utils";
 import { useToast } from "../components/ui/Toast";
 
 type AccountForm = {
   id: string;
   platform: string;
-  display_name: string;
-  adapter_id: string;
+  mode: string;
   enabled: boolean;
   secret_ref: string;
-  bot_username: string;
 };
 
 const emptyForm: AccountForm = {
   id: "",
   platform: "telegram",
-  display_name: "",
-  adapter_id: "",
+  mode: "telegram",
   enabled: true,
   secret_ref: "",
-  bot_username: "",
 };
 
 function accountToForm(a: AccountView): AccountForm {
-  const cfg = a.adapter_config_json as Record<string, unknown> | undefined;
   return {
     id: a.id,
     platform: a.platform,
-    display_name: a.display_name,
-    adapter_id: a.adapter_id,
+    mode: a.adapter_id,
     enabled: a.enabled,
-    secret_ref: "",
-    bot_username: (cfg?.bot_username as string) ?? "",
+    secret_ref: a.secret_ref,
   };
 }
-
-type AttachForm = {
-  bot_profile_id: string;
-  chat_pattern: string;
-  session_mode: string;
-  priority: number;
-};
-
-const emptyAttach: AttachForm = {
-  bot_profile_id: "",
-  chat_pattern: "dm:*",
-  session_mode: "dm",
-  priority: 10,
-};
 
 export default function PlatformsPage() {
   const qc = useQueryClient();
@@ -83,7 +63,8 @@ export default function PlatformsPage() {
   const toggleExpanded = useCallback((id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }, []);
@@ -109,28 +90,28 @@ export default function PlatformsPage() {
       const body: AccountBody = {
         id: acctForm.id,
         platform: acctForm.platform,
-        display_name: acctForm.display_name,
-        adapter_id: acctForm.adapter_id,
+        display_name: acctForm.id,
+        adapter_id: acctForm.mode,
         enabled: acctForm.enabled,
-        adapter_config_json: acctForm.bot_username
-          ? { bot_username: acctForm.bot_username }
-          : undefined,
-        json_ext: undefined,
+        adapter_config_json: {},
+        json_ext: {},
       };
+
       if (editing) {
-        // Only send secret_ref if provided
         if (acctForm.secret_ref) {
           body.secret_ref = acctForm.secret_ref;
         }
-        return api.updateAccount(editing.id, body);
+        await api.updateAccount(editing.id, body);
+      } else {
+        body.secret_ref = acctForm.secret_ref || undefined;
+        await api.createAccount(body);
       }
-      body.secret_ref = acctForm.secret_ref || undefined;
-      return api.createAccount(body);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["bindings"] });
       setAcctModal(false);
-      toast.add("success", editing ? "Account updated." : "Account created.");
+      toast.add("success", editing ? "Bot updated." : "Bot created.");
     },
     onError: (e: Error) => toast.add("error", e.message),
   });
@@ -139,39 +120,51 @@ export default function PlatformsPage() {
     mutationFn: (id: string) => api.deleteAccount(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["accounts"] });
-      toast.add("success", "Account deleted.");
+      qc.invalidateQueries({ queryKey: ["bindings"] });
+      toast.add("success", "Bot deleted.");
     },
     onError: (e: Error) => toast.add("error", e.message),
   });
 
-  // -- attach modal --
-  const [attachModal, setAttachModal] = useState(false);
-  const [attachAccountId, setAttachAccountId] = useState("");
-  const [attachForm, setAttachForm] = useState<AttachForm>(emptyAttach);
+  const toggleEnabled = useMutation({
+    mutationFn: async (a: AccountView) => {
+      await api.updateAccount(a.id, {
+        id: a.id,
+        platform: a.platform,
+        display_name: a.id,
+        adapter_id: a.adapter_id,
+        enabled: !a.enabled,
+        adapter_config_json: a.adapter_config_json,
+        json_ext: a.json_ext,
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+    onError: (e: Error) => toast.add("error", e.message),
+  });
 
-  const openAttach = (accountId: string) => {
-    setAttachAccountId(accountId);
-    setAttachForm(emptyAttach);
-    setAttachModal(true);
-  };
+
+  // -- attach modal --
+  const [attachModalOpen, setAttachModalOpen] = useState(false);
+  const [attachAcct, setAttachAcct] = useState<string>("");
+  const [attachConfigId, setAttachConfigId] = useState("");
 
   const attachMut = useMutation({
-    mutationFn: async () => {
-      const id = `${attachAccountId}-${attachForm.bot_profile_id}-${Date.now().toString(36)}`;
-      const body: BindingBody = {
-        id,
-        account_id: attachAccountId,
-        bot_profile_id: attachForm.bot_profile_id,
-        chat_pattern: attachForm.chat_pattern || undefined,
-        session_mode: attachForm.session_mode || undefined,
-        priority: attachForm.priority,
+    mutationFn: async (accountId: string) => {
+      const bindingId = `${accountId}-${attachConfigId}-${Date.now().toString(36)}`;
+      await api.createBinding({
+        id: bindingId,
+        account_id: accountId,
+        bot_profile_id: attachConfigId,
+        chat_pattern: "dm:*",
+        session_mode: "dm",
+        priority: 10,
         enabled: true,
-      };
-      return api.createBinding(body);
+      });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["bindings"] });
-      setAttachModal(false);
+      setAttachModalOpen(false);
+      setAttachConfigId("");
       toast.add("success", "Config attached.");
     },
     onError: (e: Error) => toast.add("error", e.message),
@@ -192,8 +185,8 @@ export default function PlatformsPage() {
     }
   };
 
-  const accountBindings = (accountId: string): Binding[] =>
-    bindings.filter((b) => b.account_id === accountId);
+  const accountBinding = (accountId: string): Binding | undefined =>
+    bindings.find((b) => b.account_id === accountId);
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -210,11 +203,11 @@ export default function PlatformsPage() {
       {/* ── Action bar ── */}
       <div className="flex items-center justify-between">
         <span className="t-label text-muted-fg">
-          {accounts.length} account{accounts.length !== 1 ? "s" : ""}
+          {accounts.length} bot{accounts.length !== 1 ? "s" : ""}
         </span>
         <Button onClick={openNew} size="lg">
           <Plus size={15} />
-          New Account
+          New Bot
         </Button>
       </div>
 
@@ -234,7 +227,7 @@ export default function PlatformsPage() {
       {!acctsLoading && !acctsError && accounts.length === 0 && (
         <div className="halftone-light py-20 px-8 text-center border border-border rounded-sm">
           <p className="t-body text-muted-fg">
-            No accounts yet. Create one to get started.
+            No bots yet. Create one to get started.
           </p>
         </div>
       )}
@@ -249,7 +242,7 @@ export default function PlatformsPage() {
         <div className="space-y-4">
           {accounts.map((a) => {
             const isOpen = expanded.has(a.id);
-            const attached = accountBindings(a.id);
+            const attached = accountBinding(a.id);
 
             return (
               <div key={a.id}>
@@ -264,20 +257,29 @@ export default function PlatformsPage() {
                         {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                       </span>
                       <div className="min-w-0">
-                        <h3 className="t-headline truncate">{a.display_name}</h3>
+                        <h3 className="t-headline truncate">{a.display_name || a.id}</h3>
                         <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
-                          <code className="t-mono text-[11px] text-muted-fg">{a.id}</code>
-                          <Badge variant="default" className="text-[10px]">{a.platform}</Badge>
-                          <Badge variant={a.enabled ? "success" : "default"} className="text-[10px]">
-                            {a.enabled ? "enabled" : "disabled"}
-                          </Badge>
-                          {a.has_secret && (
-                            <Badge variant="info" className="text-[10px]">has secret</Badge>
+                          {a.display_name !== a.id && (
+                            <code className="t-mono text-[11px] text-muted-fg">{a.id}</code>
                           )}
                         </div>
                       </div>
                     </button>
                     <div className="flex items-center gap-1 shrink-0 ml-4">
+                      <button
+                        onClick={() => toggleEnabled.mutate(a)}
+                        className={cn(
+                          "relative w-8 h-5 rounded-full transition-colors duration-200",
+                          a.enabled ? "bg-fg" : "bg-border"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "absolute top-[3px] left-0 w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm",
+                            a.enabled ? "translate-x-[15px]" : "translate-x-[2px]"
+                          )}
+                        />
+                      </button>
                       <Button variant="ghost" size="sm" onClick={() => openEdit(a)}>
                         Edit
                       </Button>
@@ -286,7 +288,7 @@ export default function PlatformsPage() {
                         size="sm"
                         className="text-destructive hover:text-destructive"
                         onClick={() => {
-                          if (window.confirm(`Delete account "${a.display_name}"?`)) {
+                          if (window.confirm(`Delete bot "${a.display_name || a.id}"?`)) {
                             deleteAcct.mutate(a.id);
                           }
                         }}
@@ -296,64 +298,41 @@ export default function PlatformsPage() {
                     </div>
                   </div>
 
-                  {/* ── Expanded: Attached configs ── */}
+                  {/* ── Expanded: Attached config ── */}
                   {isOpen && (
                     <div className="border-t border-border px-5 py-4 space-y-3 bg-muted/20">
-                      <div className="flex items-center justify-between">
-                        <span className="t-label text-muted-fg">Attached configs</span>
-                        <Button variant="secondary" size="sm" onClick={() => openAttach(a.id)}>
-                          <Link2 size={13} />
-                          Attach Config
-                        </Button>
-                      </div>
+                      <span className="t-label text-muted-fg">Attached Config</span>
 
-                      {attached.length === 0 ? (
-                        <p className="t-body text-muted-fg py-3 text-center halftone-light">
-                          No configs attached
-                        </p>
+                      {attached ? (
+                        <div className="flex items-center justify-between py-2 px-3 border border-border rounded-sm bg-card text-xs">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <Link
+                              to={`/config/${attached.bot_profile_id}`}
+                              className="t-headline !text-sm hover:underline truncate"
+                            >
+                              {botsById.get(attached.bot_profile_id)?.display_name ?? attached.bot_profile_id}
+                            </Link>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive shrink-0 ml-2"
+                            onClick={() => confirmDetach(attached.id)}
+                          >
+                            <X size={14} />
+                            Detach
+                          </Button>
+                        </div>
                       ) : (
-                        <div className="space-y-1">
-                          {attached.map((b) => {
-                            const bot = botsById.get(b.bot_profile_id);
-                            return (
-                              <div
-                                key={b.id}
-                                className="flex items-center justify-between py-2 px-3 border border-border rounded-sm bg-card text-xs"
-                              >
-                                <div className="flex items-center gap-3 min-w-0 flex-1">
-                                  <Link
-                                    to={`/config/${b.bot_profile_id}`}
-                                    className="t-headline !text-sm hover:underline truncate"
-                                  >
-                                    {bot?.display_name ?? b.bot_profile_id}
-                                  </Link>
-                                  {bot && (
-                                    <code className="t-mono text-[10px] text-muted-fg truncate max-w-[160px]">
-                                      {bot.model_ref}
-                                    </code>
-                                  )}
-                                  <Badge variant="default" className="text-[10px]">
-                                    {b.chat_pattern}
-                                  </Badge>
-                                  <Badge variant="default" className="text-[10px]">
-                                    {b.session_mode}
-                                  </Badge>
-                                  <span className="t-mono text-[10px] text-muted-fg">
-                                    pri:{b.priority}
-                                  </span>
-                                </div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-destructive hover:text-destructive shrink-0 ml-2"
-                                  onClick={() => confirmDetach(b.id)}
-                                >
-                                  <X size={14} />
-                                  Detach
-                                </Button>
-                              </div>
-                            );
-                          })}
+                        <div className="py-3 text-center halftone-light rounded-sm">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => { setAttachAcct(a.id); setAttachConfigId(""); setAttachModalOpen(true); }}
+                          >
+                            <Link2 size={14} />
+                            Attach Config
+                          </Button>
                         </div>
                       )}
                     </div>
@@ -369,10 +348,11 @@ export default function PlatformsPage() {
       <Modal
         open={acctModal}
         onClose={() => setAcctModal(false)}
-        title={editing ? "Edit Account" : "New Account"}
+        title={editing ? "Edit Bot" : "New Bot"}
         size="lg"
       >
         <div className="space-y-5">
+          {/* Row 1: ID + Platform */}
           <div className="grid grid-cols-2 gap-4">
             <Input
               label="ID"
@@ -388,53 +368,36 @@ export default function PlatformsPage() {
               options={[{ value: "telegram", label: "Telegram" }]}
             />
           </div>
+
+          {/* Row 2: Mode + Secret Ref */}
           <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Display Name"
-              value={acctForm.display_name}
-              onChange={(e) => setAcctForm({ ...acctForm, display_name: e.target.value })}
-            />
-            <Input
-              label="Adapter ID"
-              value={acctForm.adapter_id}
-              onChange={(e) => setAcctForm({ ...acctForm, adapter_id: e.target.value })}
-              placeholder="e.g. telegram-webhook"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Bot Username"
-              value={acctForm.bot_username}
-              onChange={(e) => setAcctForm({ ...acctForm, bot_username: e.target.value })}
-              placeholder="@mybot"
-              hint="Stored in adapter_config_json"
+            <Select
+              label="Connection Mode"
+              value={acctForm.mode}
+              onChange={(e) => setAcctForm({ ...acctForm, mode: e.target.value })}
+              options={[
+                { value: "telegram", label: "Long Polling (getUpdates)" },
+              ]}
             />
             <Input
               label="Secret Ref"
               value={acctForm.secret_ref}
               onChange={(e) => setAcctForm({ ...acctForm, secret_ref: e.target.value })}
-              placeholder="vault:tg-token"
-              hint={editing ? "Leave blank to keep existing secret" : undefined}
+              placeholder="Bot token from @BotFather"
             />
+
           </div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={acctForm.enabled}
-              onChange={(e) => setAcctForm({ ...acctForm, enabled: e.target.checked })}
-              className="rounded-sm border-border"
-            />
-            <span className="t-body text-muted-fg">Enabled</span>
-          </label>
+
+          {/* Actions */}
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <Button variant="secondary" onClick={() => setAcctModal(false)}>
               Cancel
             </Button>
             <Button
               onClick={() => acctMut.mutate()}
-              disabled={acctMut.isPending || !acctForm.id || !acctForm.display_name}
+              disabled={acctMut.isPending || !acctForm.id}
             >
-              {acctMut.isPending ? "Saving…" : editing ? "Save Changes" : "Create Account"}
+              {acctMut.isPending ? "Saving…" : editing ? "Save Changes" : "Create Bot"}
             </Button>
           </div>
         </div>
@@ -442,55 +405,35 @@ export default function PlatformsPage() {
 
       {/* ── Attach Config Modal ── */}
       <Modal
-        open={attachModal}
-        onClose={() => setAttachModal(false)}
+        open={attachModalOpen}
+        onClose={() => setAttachModalOpen(false)}
         title="Attach Config"
         size="sm"
       >
-        <div className="space-y-5">
+        <div className="space-y-4">
           <Select
             label="Config"
-            value={attachForm.bot_profile_id}
-            onChange={(e) => setAttachForm({ ...attachForm, bot_profile_id: e.target.value })}
-            placeholder="Select a config…"
-            options={bots.map((b) => ({ value: b.id, label: b.display_name || b.id }))}
-          />
-          <Input
-            label="Chat Pattern"
-            value={attachForm.chat_pattern}
-            onChange={(e) => setAttachForm({ ...attachForm, chat_pattern: e.target.value })}
-          />
-          <Select
-            label="Session Mode"
-            value={attachForm.session_mode}
-            onChange={(e) => setAttachForm({ ...attachForm, session_mode: e.target.value })}
+            value={attachConfigId}
+            onChange={(e) => setAttachConfigId(e.target.value)}
             options={[
-              { value: "dm", label: "dm" },
-              { value: "group", label: "group" },
-              { value: "shared", label: "shared" },
+              { value: "", label: "Select a config…" },
+              ...bots.map((b) => ({ value: b.id, label: b.display_name || b.id })),
             ]}
           />
-          <Input
-            label="Priority"
-            type="number"
-            value={String(attachForm.priority)}
-            onChange={(e) =>
-              setAttachForm({ ...attachForm, priority: Number(e.target.value) || 0 })
-            }
-          />
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <Button variant="secondary" onClick={() => setAttachModal(false)}>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setAttachModalOpen(false)}>
               Cancel
             </Button>
             <Button
-              onClick={() => attachMut.mutate()}
-              disabled={attachMut.isPending || !attachForm.bot_profile_id}
+              disabled={!attachConfigId || attachMut.isPending}
+              onClick={() => attachMut.mutate(attachAcct)}
             >
               {attachMut.isPending ? "Attaching…" : "Attach"}
             </Button>
           </div>
         </div>
       </Modal>
+
     </div>
   );
 }

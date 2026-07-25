@@ -1,35 +1,21 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { BotProfile, ProviderView } from "../api/types";
+import type { BotProfile } from "../api/types";
 import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
-import Select from "../components/ui/Select";
 import Modal from "../components/ui/Modal";
-import { cn, truncate } from "../lib/utils";
-import {
-  Plus,
-  Trash2,
-  Cpu,
-  Wrench,
-  ExternalLink,
-} from "lucide-react";
+import { Plus, Trash2, Cpu, ExternalLink } from "lucide-react";
 
 interface CreateForm {
   id: string;
-  display_name: string;
-  model_ref: string;
-  enabled: boolean;
 }
 
 const emptyForm: CreateForm = {
   id: "",
-  display_name: "",
-  model_ref: "",
-  enabled: true,
 };
 
 export default function ConfigList() {
@@ -44,35 +30,16 @@ export default function ConfigList() {
     queryFn: () => api.listBots(),
   });
 
-  const { data: providers } = useQuery({
-    queryKey: ["providers"],
-    queryFn: () => api.listProviders(),
-  });
-
-  const modelOptions = useMemo(() => {
-    if (!providers) return [];
-    const opts: { value: string; label: string }[] = [];
-    for (const pv of providers) {
-      if (!pv.enabled) continue;
-      for (const m of pv.models) {
-        if (!m.enabled) continue;
-        const ref = `${pv.id}/${m.model_id}`;
-        opts.push({
-          value: ref,
-          label: m.display_name ? `${m.display_name} (${ref})` : ref,
-        });
-      }
-    }
-    return opts;
-  }, [providers]);
-
   const createMut = useMutation({
     mutationFn: () =>
       api.createBot({
         id: form.id,
-        display_name: form.display_name || undefined,
-        model_ref: form.model_ref || undefined,
-        enabled: form.enabled,
+        display_name: form.id,
+
+        model_ref: "",
+        persona_id: null,
+        policy_json: {},
+        json_ext: {},
       }),
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["bots"] });
@@ -176,9 +143,6 @@ export default function ConfigList() {
                   <h3 className="t-headline !text-xl truncate">
                     {bot.display_name || bot.id}
                   </h3>
-                  <Badge variant={bot.enabled ? "success" : "default"} className="shrink-0 ml-3">
-                    {bot.enabled ? "Enabled" : "Disabled"}
-                  </Badge>
                 </div>
 
                 <p className="t-mono text-muted-fg mb-3 truncate">
@@ -189,28 +153,6 @@ export default function ConfigList() {
                   <Cpu size={14} />
                   <span className="t-mono truncate font-medium">{bot.model_ref || "—"}</span>
                 </div>
-
-                <div className="mb-4 min-h-[3em]">
-                  {bot.system_prompt ? (
-                    <p className="t-body text-muted-fg line-clamp-2">
-                      {truncate(bot.system_prompt, 120)}
-                    </p>
-                  ) : (
-                    <p className="t-body text-muted-fg/50 italic">No system prompt</p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Badge variant="info">
-                    <Wrench size={11} className="mr-1" />
-                    {bot.tools_allowlist_json?.length ?? 0} tools
-                  </Badge>
-                  {bot.skills_allowlist_json != null && bot.skills_allowlist_json.length > 0 && (
-                    <Badge variant="info">
-                      {bot.skills_allowlist_json.length} skills
-                    </Badge>
-                  )}
-                </div>
               </div>
 
               <div className="flex items-center gap-1 px-4 py-2 border-t border-border bg-muted/30">
@@ -219,7 +161,7 @@ export default function ConfigList() {
                   size="sm"
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigate(`/persona/${bot.id}`);
+                    if (bot.persona_id) navigate(`/persona/${bot.persona_id}`);
                   }}
                   title="Edit persona"
                 >
@@ -263,28 +205,6 @@ export default function ConfigList() {
             error={formErrors.id}
             hint="Unique identifier — cannot be changed later"
           />
-          <Input
-            label="Display Name"
-            placeholder="My Assistant"
-            value={form.display_name}
-            onChange={(e) => setForm({ ...form, display_name: e.target.value })}
-          />
-          <Select
-            label="Model"
-            options={modelOptions}
-            placeholder="Select a model…"
-            value={form.model_ref}
-            onChange={(e) => setForm({ ...form, model_ref: e.target.value })}
-          />
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-              className="w-4 h-4 border-border accent-fg"
-            />
-            <span className="text-sm">Enabled</span>
-          </label>
           <div className="rule-thin" />
           <div className="flex justify-end gap-2">
             <Button

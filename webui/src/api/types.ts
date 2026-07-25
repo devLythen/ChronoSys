@@ -5,7 +5,6 @@ export interface LlmProvider {
   kind: string;
   base_url: string | null;
   display_name: string;
-  enabled: boolean;
   json_ext: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -22,29 +21,52 @@ export interface LlmCredential {
 export interface CredentialView {
   provider_id: string;
   auth_kind: string;
-  has_secret: boolean;
+  secret_ref: string;
   updated_at: string;
 }
 
 export interface LlmModel {
   provider_id: string;
   model_id: string;
-  display_name: string | null;
-  enabled: boolean;
   temperature: number | null;
   max_tokens: number | null;
   top_p: number | null;
-  extra_headers_json: Record<string, unknown> | null;
-  extra_body_json: Record<string, unknown> | null;
   thinking_level: string | null;
+  extra_body_json: Record<string, unknown> | null;
   json_ext: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
 
 export interface ProviderView extends LlmProvider {
-  has_credential: boolean;
+  secret_ref?: string | null;
   models: LlmModel[];
+}
+
+
+export interface ModelInfo {
+  name: string;
+  reasoning: boolean;
+  thinkingLevels: string[];
+  maxTokens: number;
+  contextWindow: number;
+  input: string[];
+}
+
+export interface RefreshedModel {
+  id: string;
+}
+// ── Personas ────────────────────────────────────────────────────
+
+export interface Persona {
+  id: string;
+  display_name: string;
+  system_prompt: string;
+  tools_allowlist_json: string[];
+  skills_allowlist_json: string[];
+  json_ext: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 // ── Bot Profiles (Configs) ─────────────────────────────────────
@@ -52,12 +74,9 @@ export interface ProviderView extends LlmProvider {
 export interface BotProfile {
   id: string;
   display_name: string;
-  system_prompt: string;
   model_ref: string;
-  tools_allowlist_json: string[];
-  skills_allowlist_json: string[];
+  persona_id: string | null;
   policy_json: BotPolicy;
-  enabled: boolean;
   json_ext: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -92,7 +111,7 @@ export interface AccountView {
   display_name: string;
   adapter_id: string;
   enabled: boolean;
-  has_secret: boolean;
+  secret_ref: string;
   adapter_config_json: Record<string, unknown>;
   json_ext: Record<string, unknown>;
   created_at: string;
@@ -188,25 +207,21 @@ export interface ProviderBody {
   kind: string;
   base_url?: string | null;
   display_name: string;
-  enabled?: boolean;
   json_ext?: Record<string, unknown>;
 }
 
 export interface CredentialBody {
   auth_kind: string;
-  secret_ref: string;
+  secret_ref?: string | null;
   json_ext?: Record<string, unknown>;
 }
 
 export interface ModelBody {
   model_id: string;
-  display_name?: string | null;
-  enabled?: boolean;
   temperature?: number | null;
   max_tokens?: number | null;
   top_p?: number | null;
   thinking_level?: string | null;
-  extra_headers_json?: Record<string, unknown> | null;
   extra_body_json?: Record<string, unknown> | null;
   json_ext?: Record<string, unknown>;
 }
@@ -214,12 +229,18 @@ export interface ModelBody {
 export interface BotBody {
   id?: string;
   display_name?: string;
-  system_prompt?: string;
   model_ref?: string;
+  persona_id?: string | null;
+  policy_json?: BotPolicy;
+  json_ext?: Record<string, unknown>;
+}
+
+export interface PersonaBody {
+  id?: string;
+  display_name?: string;
+  system_prompt?: string;
   tools_allowlist_json?: string[];
   skills_allowlist_json?: string[];
-  policy_json?: BotPolicy;
-  enabled?: boolean;
   json_ext?: Record<string, unknown>;
 }
 

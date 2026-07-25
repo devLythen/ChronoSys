@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { type ChronoConfig } from "./config.ts";
 import type { LlmModel } from "./config-types.ts";
+import { ChronoCredentialStore } from "./credential-store.ts";
 export interface ResolvedModel {
   model: Model<Api>;
   overrides: LlmModel | null;
@@ -31,15 +32,16 @@ export interface ResolvedBot {
  * (anthropic, openai, google, …). Custom providers with base_url need
  * `createProvider` with proper `api` mappings — deferred.
  *
- * Returns null if no enabled builtin providers exist in the config DB.
+ * Returns null if no providers exist in the config DB.
  */
 export function buildModels(config: ChronoConfig): MutableModels | null {
-  const providers = config.listEnabledProviders();
+  const providers = config.listProviders();
   if (providers.length === 0) return null;
 
   // builtinModels() registers all builtin providers and returns a
-  // MutableModels collection with them pre-loaded.
-  return builtinModels();
+  // MutableModels collection with them pre-loaded, using credentials
+  // from the config DB for auth resolution.
+  return builtinModels({ credentials: new ChronoCredentialStore(config) });
 }
 
 /**
@@ -63,10 +65,10 @@ export function resolveModelRef(
   const modelId = modelRef.slice(slash + 1);
 
   const dbModel = config.getModel(providerId, modelId);
-  if (!dbModel || dbModel.enabled === 0) {
+  if (!dbModel) {
     throw new Error(
       `model "${modelRef}" is not in the allowlist. ` +
-        `Add it: INSERT INTO llm_models (provider_id, model_id, enabled) VALUES ('${providerId}', '${modelId}', 1);`,
+        `Add it via the Providers page in the web UI.`,
     );
   }
 
@@ -84,7 +86,7 @@ export function resolveModelRef(
 /**
  * Resolve a bot profile by id.
  *
- * Returns null if not found or disabled. Throws if the model_ref cannot be resolved.
+ * Returns null if not found. Throws if the model_ref cannot be resolved.
  */
 export function resolveBot(
   config: ChronoConfig,
@@ -92,17 +94,19 @@ export function resolveBot(
   botId: string,
 ): ResolvedBot | null {
   const bot = config.getBot(botId);
-  if (!bot || bot.enabled === 0) return null;
+  if (!bot) return null;
 
   const resolved = resolveModelRef(config, models, bot.model_ref);
+
+  const persona = bot.persona_id ? config.getPersona(bot.persona_id) : null;
 
   return {
     id: bot.id,
     modelRef: bot.model_ref,
     resolvedModel: resolved,
-    systemPrompt: bot.system_prompt || "",
-    toolsAllowlist: parseJsonArray(bot.tools_allowlist_json),
-    skillsAllowlist: parseJsonArray(bot.skills_allowlist_json),
+    systemPrompt: persona?.system_prompt || "",
+    toolsAllowlist: persona ? parseJsonArray(persona.tools_allowlist_json) : ["message_send"],
+    skillsAllowlist: persona ? parseJsonArray(persona.skills_allowlist_json) : [],
     policy: parseJsonObject(bot.policy_json),
   };
 }

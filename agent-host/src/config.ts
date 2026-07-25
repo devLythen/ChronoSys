@@ -5,6 +5,7 @@ import type {
   LlmModel,
   PlatformAccount,
   BotProfile,
+  Persona,
   Binding,
 } from "./config-types.ts";
 
@@ -30,18 +31,18 @@ export class ChronoConfig {
   getProvider(id: string): LlmProvider | null {
     const row = this.db
       .query(
-        `SELECT id, kind, base_url, display_name, enabled, json_ext, created_at, updated_at
+        `SELECT id, kind, base_url, display_name, json_ext, created_at, updated_at
          FROM llm_providers WHERE id = ?`,
       )
       .get(id);
     return row as LlmProvider | null;
   }
 
-  listEnabledProviders(): LlmProvider[] {
+  listProviders(): LlmProvider[] {
     return this.db
       .query(
-        `SELECT id, kind, base_url, display_name, enabled, json_ext, created_at, updated_at
-         FROM llm_providers WHERE enabled = 1 ORDER BY id`,
+        `SELECT id, kind, base_url, display_name, json_ext, created_at, updated_at
+         FROM llm_providers ORDER BY id`,
       )
       .all() as LlmProvider[];
   }
@@ -61,8 +62,8 @@ export class ChronoConfig {
   getModel(providerId: string, modelId: string): LlmModel | null {
     const row = this.db
       .query(
-        `SELECT provider_id, model_id, display_name, enabled, temperature, max_tokens,
-                top_p, extra_headers_json, extra_body_json, thinking_level, json_ext,
+        `SELECT provider_id, model_id, temperature, max_tokens, top_p,
+                thinking_level, extra_body_json, json_ext,
                 created_at, updated_at
          FROM llm_models WHERE provider_id = ? AND model_id = ?`,
       )
@@ -70,13 +71,13 @@ export class ChronoConfig {
     return row as LlmModel | null;
   }
 
-  listEnabledModels(providerId: string): LlmModel[] {
+  listModels(providerId: string): LlmModel[] {
     return this.db
       .query(
-        `SELECT provider_id, model_id, display_name, enabled, temperature, max_tokens,
-                top_p, extra_headers_json, extra_body_json, thinking_level, json_ext,
+        `SELECT provider_id, model_id, temperature, max_tokens, top_p,
+                thinking_level, extra_body_json, json_ext,
                 created_at, updated_at
-         FROM llm_models WHERE provider_id = ? AND enabled = 1 ORDER BY model_id`,
+         FROM llm_models WHERE provider_id = ? ORDER BY model_id`,
       )
       .all(providerId) as LlmModel[];
   }
@@ -109,8 +110,8 @@ export class ChronoConfig {
   getBot(id: string): BotProfile | null {
     const row = this.db
       .query(
-        `SELECT id, display_name, system_prompt, model_ref, tools_allowlist_json,
-                skills_allowlist_json, policy_json, enabled, json_ext, created_at, updated_at
+        `SELECT id, display_name, persona_id, model_ref,
+                policy_json, json_ext, created_at, updated_at
          FROM bot_profiles WHERE id = ?`,
       )
       .get(id);
@@ -120,11 +121,24 @@ export class ChronoConfig {
   listBots(): BotProfile[] {
     return this.db
       .query(
-        `SELECT id, display_name, system_prompt, model_ref, tools_allowlist_json,
-                skills_allowlist_json, policy_json, enabled, json_ext, created_at, updated_at
+        `SELECT id, display_name, persona_id, model_ref,
+                policy_json, json_ext, created_at, updated_at
          FROM bot_profiles ORDER BY id`,
       )
       .all() as BotProfile[];
+  }
+
+  // ── Personas ────────────────────────────────────────────────────
+
+  getPersona(id: string): Persona | null {
+    const row = this.db
+      .query(
+        `SELECT id, display_name, system_prompt, tools_allowlist_json,
+                skills_allowlist_json, json_ext, created_at, updated_at
+         FROM personas WHERE id = ?`,
+      )
+      .get(id);
+    return row as Persona | null;
   }
 
   // ── Bindings ───────────────────────────────────────────────────

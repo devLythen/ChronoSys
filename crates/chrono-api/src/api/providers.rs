@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-use crate::api::validate_secret_ref;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -30,13 +29,15 @@ pub fn router() -> Router<Arc<AppState>> {
             "/{id}/models/{model_id}",
             get(get_model).delete(delete_model),
         )
+        .route("/{id}/models/{model_id}/info", get(get_model_info))
+        .route("/{id}/refresh-models", get(refresh_models))
 }
 
 #[derive(Serialize)]
 pub struct ProviderView {
     #[serde(flatten)]
     pub provider: LlmProvider,
-    pub has_credential: bool,
+    pub secret_ref: Option<String>,
     pub models: Vec<LlmModel>,
 }
 
@@ -46,8 +47,6 @@ pub struct ProviderBody {
     pub kind: String,
     pub base_url: Option<String>,
     pub display_name: String,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
     #[serde(default)]
     pub json_ext: Value,
 }
@@ -64,7 +63,7 @@ pub struct CredentialBody {
 pub struct CredentialView {
     pub provider_id: String,
     pub auth_kind: String,
-    pub has_secret: bool,
+    pub secret_ref: String,
     pub json_ext: Value,
     pub updated_at: String,
 }
@@ -72,21 +71,18 @@ pub struct CredentialView {
 #[derive(Deserialize)]
 pub struct ModelBody {
     pub model_id: String,
-    pub display_name: Option<String>,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     pub top_p: Option<f64>,
-    pub extra_headers_json: Option<Value>,
-    pub extra_body_json: Option<Value>,
     pub thinking_level: Option<String>,
+    pub extra_body_json: Option<Value>,
     #[serde(default)]
     pub json_ext: Value,
 }
 
-fn default_true() -> bool {
-    true
+#[derive(Serialize)]
+struct RefreshedModel {
+    id: String,
 }
 
 fn empty_obj() -> Value {
@@ -98,11 +94,15 @@ async fn list_providers(State(state): State<Arc<AppState>>) -> ApiResult<Json<Ve
     let providers = store.providers().list_providers()?;
     let mut out = Vec::with_capacity(providers.len());
     for p in providers {
-        let has_credential = store.providers().get_credential(&p.id).is_ok();
+        let secret_ref = store
+            .providers()
+            .get_credential(&p.id)
+            .ok()
+            .map(|c| c.secret_ref);
         let models = store.providers().list_models(&p.id).unwrap_or_default();
         out.push(ProviderView {
             provider: p,
-            has_credential,
+            secret_ref,
             models,
         });
     }
@@ -115,11 +115,15 @@ async fn get_provider(
 ) -> ApiResult<Json<ProviderView>> {
     let store = lock_config(&state)?;
     let provider = store.providers().get_provider(&id)?;
-    let has_credential = store.providers().get_credential(&id).is_ok();
+    let secret_ref = store
+        .providers()
+        .get_credential(&id)
+        .ok()
+        .map(|c| c.secret_ref);
     let models = store.providers().list_models(&id).unwrap_or_default();
     Ok(Json(ProviderView {
         provider,
-        has_credential,
+        secret_ref,
         models,
     }))
 }
@@ -138,7 +142,6 @@ async fn create_provider(
         kind: body.kind,
         base_url: body.base_url,
         display_name: body.display_name,
-        enabled: body.enabled,
         json_ext: if body.json_ext.is_null() {
             empty_obj()
         } else {
@@ -165,7 +168,6 @@ async fn update_provider(
         kind: body.kind,
         base_url: body.base_url,
         display_name: body.display_name,
-        enabled: body.enabled,
         json_ext: if body.json_ext.is_null() {
             empty_obj()
         } else {
@@ -208,7 +210,6 @@ async fn upsert_credential(
     Path(id): Path<String>,
     Json(body): Json<CredentialBody>,
 ) -> ApiResult<Json<CredentialView>> {
-    validate_secret_ref(&body.secret_ref).map_err(ApiError::bad_request)?;
     let c = LlmCredential {
         provider_id: id.clone(),
         auth_kind: body.auth_kind,
@@ -267,14 +268,11 @@ async fn upsert_model(
     let model = LlmModel {
         provider_id: id.clone(),
         model_id: body.model_id.clone(),
-        display_name: body.display_name,
-        enabled: body.enabled,
         temperature: body.temperature,
         max_tokens: body.max_tokens,
         top_p: body.top_p,
-        extra_headers_json: body.extra_headers_json,
-        extra_body_json: body.extra_body_json,
         thinking_level: body.thinking_level,
+        extra_body_json: body.extra_body_json,
         json_ext: if body.json_ext.is_null() {
             empty_obj()
         } else {
@@ -308,7 +306,7 @@ fn mask_credential(c: LlmCredential) -> CredentialView {
     CredentialView {
         provider_id: c.provider_id,
         auth_kind: c.auth_kind,
-        has_secret: !c.secret_ref.is_empty(),
+        secret_ref: c.secret_ref,
         json_ext: c.json_ext,
         updated_at: c.updated_at,
     }
@@ -322,3 +320,78 @@ fn lock_config(
         .lock()
         .map_err(|_| ApiError::internal("config lock poisoned"))
 }
+
+#[derive(Deserialize)]
+struct OpenAiModelsResponse {
+    data: Vec<OpenAiModelEntry>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiModelEntry {
+    id: String,
+}
+
+async fn refresh_models(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<RefreshedModel>>> {
+    let (base_url, secret_ref) = {
+        let store = lock_config(&state)?;
+        let provider = store.providers().get_provider(&id)?;
+        let base_url = provider
+            .base_url
+            .ok_or_else(|| ApiError::bad_request("provider has no base_url"))?;
+        let credential = store.providers().get_credential(&id)?;
+        (base_url, credential.secret_ref)
+    };
+
+    let api_key = resolve_secret(&secret_ref)?;
+
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| ApiError::internal(format!("failed to fetch models: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(ApiError::internal(format!(
+            "provider returned {}: {}",
+            response.status().as_u16(),
+            response.text().await.unwrap_or_default(),
+        )));
+    }
+
+    let body: OpenAiModelsResponse = response
+        .json()
+        .await
+        .map_err(|e| ApiError::internal(format!("failed to parse models response: {e}")))?;
+
+    let models: Vec<RefreshedModel> = body
+        .data
+        .into_iter()
+        .map(|m| RefreshedModel { id: m.id })
+        .collect();
+
+    Ok(Json(models))
+}
+
+async fn get_model_info(
+    State(state): State<Arc<AppState>>,
+    Path((provider_id, model_id)): Path<(String, String)>,
+) -> ApiResult<Json<Value>> {
+    let key = format!("{provider_id}/{model_id}");
+    let caps = state.model_caps.read().unwrap();
+    let info = caps.get(&key).cloned().unwrap_or(Value::Null);
+    Ok(Json(info))
+}
+fn resolve_secret(secret_ref: &str) -> ApiResult<String> {
+    let trimmed = secret_ref.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request("secret_ref must not be empty"));
+    }
+    Ok(trimmed.to_string())
+}
+

@@ -26,7 +26,6 @@ mod tests {
             kind: "builtin".into(),
             base_url: None,
             display_name: "My LLM".into(),
-            enabled: true,
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -35,9 +34,8 @@ mod tests {
 
         let got = store.providers().get_provider("my-llm").unwrap();
         assert_eq!(got.id, "my-llm");
-        assert!(got.enabled);
 
-        let list = store.providers().list_enabled_providers().unwrap();
+        let list = store.providers().list_providers().unwrap();
         assert_eq!(list.len(), 1);
 
         match store.providers().get_provider("nonexistent") {
@@ -54,7 +52,6 @@ mod tests {
             kind: "builtin".into(),
             base_url: None,
             display_name: "My LLM".into(),
-            enabled: true,
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -63,14 +60,11 @@ mod tests {
         let m = LlmModel {
             provider_id: "my-llm".into(),
             model_id: "main-model".into(),
-            display_name: Some("Main Model".into()),
-            enabled: true,
-            temperature: Some(0.7),
-            max_tokens: Some(4096),
+            temperature: None,
+            max_tokens: None,
             top_p: None,
-            extra_headers_json: None,
-            extra_body_json: None,
             thinking_level: None,
+            extra_body_json: Some(json!({"temperature": 0.7})),
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -78,18 +72,15 @@ mod tests {
         store.providers().upsert_model(&m).unwrap();
 
         let got = store.providers().get_model("my-llm", "main-model").unwrap();
-        assert_eq!(got.temperature, Some(0.7));
-        assert_eq!(got.max_tokens, Some(4096));
+        assert_eq!(got.extra_body_json, Some(json!({"temperature": 0.7})));
 
         let m2 = LlmModel {
-            temperature: Some(0.3),
-            extra_headers_json: Some(json!({"X-Custom": "v"})),
+            extra_body_json: Some(json!({"temperature": 0.3, "X-Custom": "v"})),
             ..m
         };
         store.providers().upsert_model(&m2).unwrap();
         let got = store.providers().get_model("my-llm", "main-model").unwrap();
-        assert_eq!(got.temperature, Some(0.3));
-        assert_eq!(got.extra_headers_json, Some(json!({"X-Custom": "v"})));
+        assert_eq!(got.extra_body_json, Some(json!({"temperature": 0.3, "X-Custom": "v"})));
     }
 
     #[test]
@@ -101,7 +92,7 @@ mod tests {
             display_name: "Main TG".into(),
             adapter_id: "chrono.adapter.telegram".into(),
             enabled: true,
-            secret_ref: "env:TG_TOKEN".into(),
+            secret_ref: "test-token-123".into(),
             adapter_config_json: json!({"webhook": false}),
             json_ext: json!({}),
             created_at: String::new(),
@@ -121,7 +112,6 @@ mod tests {
             kind: "builtin".into(),
             base_url: None,
             display_name: "My LLM".into(),
-            enabled: true,
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -129,14 +119,11 @@ mod tests {
         store.providers().upsert_model(&LlmModel {
             provider_id: "my-llm".into(),
             model_id: "main-model".into(),
-            display_name: None,
-            enabled: true,
             temperature: None,
             max_tokens: None,
             top_p: None,
-            extra_headers_json: None,
-            extra_body_json: None,
             thinking_level: None,
+            extra_body_json: None,
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -157,12 +144,9 @@ mod tests {
         let bot = BotProfile {
             id: "greeter".into(),
             display_name: "Greeter".into(),
-            system_prompt: "Be friendly.".into(),
             model_ref: "my-llm/main-model".into(),
-            tools_allowlist_json: json!(["message_send"]),
-            skills_allowlist_json: json!([]),
+            persona_id: None,
             policy_json: json!({}),
-            enabled: true,
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -197,18 +181,13 @@ mod tests {
         let bot = BotProfile {
             id: "orphan".into(),
             display_name: "Orphan".into(),
-            system_prompt: ".".into(),
             model_ref: "nonexistent/gpt-99".into(),
-            tools_allowlist_json: json!([]),
-            skills_allowlist_json: json!([]),
+            persona_id: None,
             policy_json: json!({}),
-            enabled: true,
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
         };
-        store.bots().insert_bot(&bot).unwrap();
-        assert!(store.providers().get_model("nonexistent", "gpt-99").is_err());
     }
 
     #[test]
@@ -219,7 +198,6 @@ mod tests {
             kind: "openai_compat".into(),
             base_url: Some("https://proxy.example.com/v1".into()),
             display_name: "My Proxy".into(),
-            enabled: true,
             json_ext: json!({"default_headers": {"X-Region": "us"}}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -240,7 +218,6 @@ mod tests {
             kind: "builtin".into(),
             base_url: None,
             display_name: "P".into(),
-            enabled: true,
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -248,21 +225,18 @@ mod tests {
         store.providers().upsert_credential(&LlmCredential {
             provider_id: "p1".into(),
             auth_kind: "api_key".into(),
-            secret_ref: "env:KEY".into(),
+            secret_ref: "test-key-123".into(),
             json_ext: json!({}),
             updated_at: String::new(),
         }).unwrap();
         store.providers().upsert_model(&LlmModel {
             provider_id: "p1".into(),
             model_id: "m1".into(),
-            display_name: None,
-            enabled: true,
             temperature: None,
             max_tokens: None,
             top_p: None,
-            extra_headers_json: None,
-            extra_body_json: None,
             thinking_level: None,
+            extra_body_json: None,
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),
@@ -273,7 +247,7 @@ mod tests {
             display_name: "A".into(),
             adapter_id: "chrono.adapter.telegram".into(),
             enabled: true,
-            secret_ref: "env:TG".into(),
+            secret_ref: "test-tg-token".into(),
             adapter_config_json: json!({}),
             json_ext: json!({}),
             created_at: String::new(),
@@ -282,12 +256,9 @@ mod tests {
         store.bots().insert_bot(&BotProfile {
             id: "b1".into(),
             display_name: "B".into(),
-            system_prompt: "".into(),
             model_ref: "p1/m1".into(),
-            tools_allowlist_json: json!([]),
-            skills_allowlist_json: json!([]),
+            persona_id: None,
             policy_json: json!({}),
-            enabled: true,
             json_ext: json!({}),
             created_at: String::new(),
             updated_at: String::new(),

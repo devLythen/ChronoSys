@@ -89,7 +89,16 @@ class ApiClient {
       { method: "DELETE" },
     );
   }
-
+  refreshModels(providerId: string) {
+    return this.request<import("./types").RefreshedModel[]>(
+      `/providers/${encodeURIComponent(providerId)}/refresh-models`,
+    );
+  }
+  getModelInfo(providerId: string, modelId: string) {
+    return this.request<import("./types").ModelInfo | null>(
+      `/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}/info`,
+    );
+  }
   // ── Bots (Configs) ──────────────────────────────────────────
   listBots() {
     return this.request<import("./types").BotProfile[]>("/bots");
@@ -111,6 +120,31 @@ class ApiClient {
   }
   deleteBot(id: string) {
     return this.request<{ ok: boolean }>(`/bots/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  // ── Personas ────────────────────────────────────────────────
+  listPersonas() {
+    return this.request<import("./types").Persona[]>("/personas");
+  }
+  getPersona(id: string) {
+    return this.request<import("./types").Persona>(`/personas/${encodeURIComponent(id)}`);
+  }
+  createPersona(body: import("./types").PersonaBody) {
+    return this.request<import("./types").Persona>("/personas", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+  updatePersona(id: string, body: import("./types").PersonaBody) {
+    return this.request<import("./types").Persona>(`/personas/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+  deletePersona(id: string) {
+    return this.request<{ ok: boolean }>(`/personas/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
   }

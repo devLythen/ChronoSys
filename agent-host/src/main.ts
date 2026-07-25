@@ -28,17 +28,79 @@ const DEFAULT_SYSTEM_PROMPT =
 type ContextScope = "session" | "bot" | "account";
 
 function logEvent(event: unknown) {
-  let payload: Record<string, unknown>;
-  if (event && typeof event === "object") {
-    payload = { ts: new Date().toISOString(), ...event };
-  } else {
-    payload = { ts: new Date().toISOString(), event };
+  if (!event || typeof event !== "object") return;
+  const e = event as Record<string, unknown>;
+  const type = String(e.type ?? "");
+  const level = type.startsWith("host_error") || type === "agent_error" ? "error"
+    : type.startsWith("host_warn") ? "warn"
+    : "info";
+
+  // Skip verbose internal events — only log operational messages
+  switch (type) {
+    case "agent_start": return;
+    case "turn_start": return;
+    case "turn_end": return;
+    case "agent_end": {
+      const msgs = e.messages as Array<Record<string,unknown>> | undefined;
+      const last = msgs?.[msgs.length - 1];
+      const stopReason = last?.stopReason ?? "?";
+      const usage = last?.usage as Record<string,number> | undefined;
+      const tokens = usage ? `${usage.totalTokens ?? 0} tokens` : "";
+      logLine(level, `response: stop=${stopReason} ${tokens}`);
+      return;
+    }
+    case "stream_delta": return;
+    case "stream_end": return;
+    case "message_update": return;
+    case "message_start": return;
+    case "message_end": return;
+    case "tool_call": return;
+    case "tool_result": return;
+    case "tool_execution_start": return;
+    case "tool_execution_end": return;
   }
-  process.stderr.write(JSON.stringify(payload) + "\n");
+
+  // Only reachable for events NOT in the switch above
+
+  // Extract message from operational events
+  let msg = String(e.message ?? "");
+  if (!msg || msg === "[object Object]") {
+    msg = type.replace(/^host_/, "").replace(/_/g, " ");
+  }
+  logLine(level, msg);
 }
+
+function logLine(level: string, message: string) {
+  const c = level === "error" ? "\x1b[31;1m"
+    : level === "warn" ? "\x1b[33m"
+    : "\x1b[36m";
+  process.stderr.write(`${c}[agent] ${message}\x1b[0m\n`);
+}
+
 
 function writeControl(msg: Record<string, unknown>) {
   writeFrameStdout(new TextEncoder().encode(JSON.stringify(msg)));
+}
+
+async function pushModelCapabilities(models: MutableModels | null) {
+  const caps: Record<string, unknown> = {};
+  if (models) {
+    for (const provider of models.getProviders()) {
+      for (const model of provider.getModels()) {
+        const key = `${provider.id}/${model.id}`;
+        caps[key] = {
+          name: model.name, reasoning: model.reasoning,
+          thinkingLevels: model.thinkingLevelMap ? Object.keys(model.thinkingLevelMap) : [],
+          maxTokens: model.maxTokens, contextWindow: model.contextWindow,
+          input: model.input,
+        };
+      }
+    }
+  }
+  await fetch("http://127.0.0.1:8787/api/v1/internal/model-capabilities", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ models: caps }),
+  });
 }
 
 function isToolResponse(
@@ -188,24 +250,23 @@ async function main() {
         if (!bot) {
           logEvent({
             type: "host_info",
-            message: `Bot "${botId}" not found or disabled — configure via WebUI`,
+            message: `Bot "${botId}" not found — configure via WebUI`,
           });
         }
       } else {
         const bots = config.listBots();
-        const enabled = bots.filter((b) => b.enabled !== 0);
-        if (enabled.length > 0) {
-          bot = resolveBot(config, models, enabled[0]!.id);
+        if (bots.length > 0) {
+          bot = resolveBot(config, models, bots[0]!.id);
           if (!bot) {
             logEvent({
               type: "host_info",
-              message: `Failed to resolve bot "${enabled[0]!.id}"`,
+              message: `Failed to resolve bot "${bots[0]!.id}"`,
             });
           }
         } else {
           logEvent({
             type: "host_info",
-            message: "No enabled bot profiles yet — configure via WebUI",
+            message: "No bot profiles yet — configure via WebUI",
           });
         }
       }
@@ -222,11 +283,21 @@ async function main() {
           message: `default bot profile: id=${bot.id} model=${bot.modelRef} tools=${JSON.stringify(bot.toolsAllowlist)} scope=${contextScopeOf(bot)}`,
         });
       }
-    }
 
-  const profiles = new BotProfileResolver(config, models, fallbackBot);
+    }
+  // Push capabilities to gateway via HTTP (retry until success)
+  (async () => {
+    for (let i = 0; i < 30; i++) {
+      try {
+        await pushModelCapabilities(models);
+        return;
+      } catch { await new Promise(r => setTimeout(r, 1000)); }
+    }
+  })();
 
   // One Agent instance; transcript isolation is done by swapping state.messages.
+
+  const profiles = new BotProfileResolver(config, models, fallbackBot);
   const agent = new Agent({
     initialState: {
       systemPrompt: defaultSystemPrompt,
@@ -429,11 +500,11 @@ async function main() {
             if (newModels) {
               models = newModels;
               streamFn = models.streamSimple.bind(models);
+              pushModelCapabilities(models);
               // Re-resolve default bot
               const bots = config.listBots();
-              const enabled = bots.filter((b) => b.enabled !== 0);
-              if (enabled.length > 0) {
-                const bot = resolveBot(config, models, enabled[0]!.id);
+              if (bots.length > 0) {
+                const bot = resolveBot(config, models, bots[0]!.id);
                 if (bot) {
                   fallbackBot = bot;
                   defaultSystemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
@@ -643,13 +714,7 @@ async function main() {
 
 main().catch((err) => {
   const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(
-    JSON.stringify({
-      ts: new Date().toISOString(),
-      type: "host_fatal",
-      message,
-    }) + "\n",
-  );
+  process.stderr.write(`\x1b[31;1m[agent] ${message}\x1b[0m\n`);
   try {
     writeControl({ type: "error", message });
   } catch {

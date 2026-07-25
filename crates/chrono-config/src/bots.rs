@@ -13,18 +13,15 @@ pub struct BotStore<'a> {
 impl BotStore<'_> {
     pub fn insert_bot(&self, b: &BotProfile) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO bot_profiles (id, display_name, system_prompt, model_ref,
-                    tools_allowlist_json, skills_allowlist_json, policy_json, enabled, json_ext)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO bot_profiles (id, display_name, model_ref, persona_id,
+                    policy_json, json_ext)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 b.id,
                 b.display_name,
-                b.system_prompt,
                 b.model_ref,
-                serde_json::to_string(&b.tools_allowlist_json).unwrap_or_default(),
-                serde_json::to_string(&b.skills_allowlist_json).unwrap_or_default(),
+                b.persona_id,
                 serde_json::to_string(&b.policy_json).unwrap_or_default(),
-                b.enabled as i32,
                 serde_json::to_string(&b.json_ext).unwrap_or_default(),
             ],
         )?;
@@ -33,19 +30,15 @@ impl BotStore<'_> {
 
     pub fn update_bot(&self, b: &BotProfile) -> Result<()> {
         let rows = self.conn.execute(
-            "UPDATE bot_profiles SET display_name=?2, system_prompt=?3, model_ref=?4,
-                    tools_allowlist_json=?5, skills_allowlist_json=?6, policy_json=?7,
-                    enabled=?8, json_ext=?9, updated_at=datetime('now')
+            "UPDATE bot_profiles SET display_name=?2, model_ref=?3, persona_id=?4,
+                    policy_json=?5, json_ext=?6, updated_at=datetime('now')
              WHERE id=?1",
             params![
                 b.id,
                 b.display_name,
-                b.system_prompt,
                 b.model_ref,
-                serde_json::to_string(&b.tools_allowlist_json).unwrap_or_default(),
-                serde_json::to_string(&b.skills_allowlist_json).unwrap_or_default(),
+                b.persona_id,
                 serde_json::to_string(&b.policy_json).unwrap_or_default(),
-                b.enabled as i32,
                 serde_json::to_string(&b.json_ext).unwrap_or_default(),
             ],
         )?;
@@ -58,8 +51,8 @@ impl BotStore<'_> {
     pub fn get_bot(&self, id: &str) -> Result<BotProfile> {
         self.conn
             .query_row(
-                "SELECT id, display_name, system_prompt, model_ref, tools_allowlist_json,
-                        skills_allowlist_json, policy_json, enabled, json_ext, created_at, updated_at
+                "SELECT id, display_name, model_ref, persona_id,
+                        policy_json, json_ext, created_at, updated_at
                  FROM bot_profiles WHERE id=?1",
                 params![id],
                 row_to_bot,
@@ -75,8 +68,8 @@ impl BotStore<'_> {
 
     pub fn list_bots(&self) -> Result<Vec<BotProfile>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, display_name, system_prompt, model_ref, tools_allowlist_json,
-                    skills_allowlist_json, policy_json, enabled, json_ext, created_at, updated_at
+            "SELECT id, display_name, model_ref, persona_id,
+                    policy_json, json_ext, created_at, updated_at
              FROM bot_profiles ORDER BY id"
         )?;
         let rows = stmt.query_map([], row_to_bot)?;
@@ -99,15 +92,12 @@ fn row_to_bot(row: &rusqlite::Row) -> std::result::Result<BotProfile, rusqlite::
     Ok(BotProfile {
         id: row.get(0)?,
         display_name: row.get(1)?,
-        system_prompt: row.get(2)?,
-        model_ref: row.get(3)?,
-        tools_allowlist_json: parse_json_or_empty(row.get::<_, String>(4)?),
-        skills_allowlist_json: parse_json_or_empty(row.get::<_, String>(5)?),
-        policy_json: parse_json_or_empty(row.get::<_, String>(6)?),
-        enabled: row.get::<_, i32>(7)? != 0,
-        json_ext: parse_json_or_empty(row.get::<_, String>(8)?),
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        model_ref: row.get(2)?,
+        persona_id: row.get(3)?,
+        policy_json: parse_json_or_empty(row.get::<_, String>(4)?),
+        json_ext: parse_json_or_empty(row.get::<_, String>(5)?),
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
     })
 }
 

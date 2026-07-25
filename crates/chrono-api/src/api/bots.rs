@@ -23,32 +23,17 @@ pub fn router() -> Router<Arc<AppState>> {
 pub struct BotBody {
     pub id: Option<String>,
     pub display_name: String,
-    #[serde(default)]
-    pub system_prompt: String,
     pub model_ref: String,
-    #[serde(default = "default_tools")]
-    pub tools_allowlist_json: Value,
-    #[serde(default = "default_arr")]
-    pub skills_allowlist_json: Value,
+    #[serde(default)]
+    pub persona_id: Option<String>,
     #[serde(default = "default_obj")]
     pub policy_json: Value,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
     #[serde(default = "default_obj")]
     pub json_ext: Value,
 }
 
-fn default_true() -> bool {
-    true
-}
 fn default_obj() -> Value {
     json!({})
-}
-fn default_arr() -> Value {
-    json!([])
-}
-fn default_tools() -> Value {
-    json!(["message_send"])
 }
 
 async fn list_bots(State(state): State<Arc<AppState>>) -> ApiResult<Json<Vec<BotProfile>>> {
@@ -76,12 +61,9 @@ async fn create_bot(
     let bot = BotProfile {
         id: id.clone(),
         display_name: body.display_name,
-        system_prompt: body.system_prompt,
         model_ref: body.model_ref,
-        tools_allowlist_json: body.tools_allowlist_json,
-        skills_allowlist_json: body.skills_allowlist_json,
+        persona_id: body.persona_id,
         policy_json: body.policy_json,
-        enabled: body.enabled,
         json_ext: body.json_ext,
         created_at: String::new(),
         updated_at: String::new(),
@@ -102,12 +84,9 @@ async fn update_bot(
     let bot = BotProfile {
         id: id.clone(),
         display_name: body.display_name,
-        system_prompt: body.system_prompt,
         model_ref: body.model_ref,
-        tools_allowlist_json: body.tools_allowlist_json,
-        skills_allowlist_json: body.skills_allowlist_json,
+        persona_id: body.persona_id,
         policy_json: body.policy_json,
-        enabled: body.enabled,
         json_ext: body.json_ext,
         created_at: String::new(),
         updated_at: String::new(),

@@ -2,14 +2,14 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { BotProfile, ProviderView } from "../api/types";
+import type { BotProfile, Persona, ProviderView } from "../api/types";
 import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
 import Select from "../components/ui/Select";
 import { useToast } from "../components/ui/Toast";
-import { ArrowLeft, UserCircle, Save, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, Loader2, ExternalLink } from "lucide-react";
 
 export default function ConfigEditor() {
   const { id } = useParams<{ id: string }>();
@@ -28,17 +28,22 @@ export default function ConfigEditor() {
     queryFn: () => api.listProviders(),
   });
 
-  const [displayName, setDisplayName] = useState("");
-  const [enabled, setEnabled] = useState(true);
+  const { data: personas } = useQuery({
+    queryKey: ["personas"],
+    queryFn: () => api.listPersonas(),
+  });
+
+
   const [modelRef, setModelRef] = useState("");
+  const [personaId, setPersonaId] = useState("");
   const [policyJson, setPolicyJson] = useState("");
   const [policyError, setPolicyError] = useState("");
 
   useEffect(() => {
     if (bot) {
-      setDisplayName(bot.display_name);
-      setEnabled(bot.enabled);
+
       setModelRef(bot.model_ref);
+      setPersonaId(bot.persona_id || "");
       setPolicyJson(JSON.stringify(bot.policy_json ?? {}, null, 2));
     }
   }, [bot]);
@@ -47,50 +52,51 @@ export default function ConfigEditor() {
     if (!providers) return [];
     const opts: { value: string; label: string }[] = [];
     for (const pv of providers) {
-      if (!pv.enabled) continue;
       for (const m of pv.models) {
-        if (!m.enabled) continue;
         const ref = `${pv.id}/${m.model_id}`;
         opts.push({
           value: ref,
-          label: m.display_name ? `${m.display_name} (${ref})` : ref,
+          label: ref,
         });
       }
     }
     return opts;
   })();
 
+  const personaOptions = (() => {
+    if (!personas) return [];
+    const opts: { value: string; label: string }[] = [{ value: "", label: "— None —" }];
+    for (const p of personas) {
+      opts.push({
+        value: p.id,
+        label: p.display_name || p.id,
+      });
+    }
+    return opts;
+  })();
+
+  const selectedPersona = personaId ? personas?.find((p: Persona) => p.id === personaId) : null;
+
   const saveMut = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error("Missing bot id");
-      // Validate policy JSON
       let parsedPolicy;
       try {
         parsedPolicy = JSON.parse(policyJson);
       } catch {
         throw new Error("Invalid policy JSON");
       }
-      // Re-fetch current bot to get full state
-      const current = await api.getBot(id);
-      // Merge: overwrite only config-owned fields
-      const body = {
-        ...current,
-        display_name: displayName,
-        enabled,
+      return api.updateBot(id, {
         model_ref: modelRef,
+        persona_id: personaId || null,
         policy_json: parsedPolicy,
-        // Preserve persona fields from current fetch
-        system_prompt: current.system_prompt,
-        tools_allowlist_json: current.tools_allowlist_json,
-        skills_allowlist_json: current.skills_allowlist_json,
-        json_ext: current.json_ext,
-      };
-      return api.updateBot(id, body);
+        json_ext: bot?.json_ext || {},
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bot", id] });
-      queryClient.invalidateQueries({ queryKey: ["bots"] });
       toast.add("success", "Config saved");
+      navigate("/config");
     },
     onError: (err: Error) => {
       toast.add("error", err.message);
@@ -98,15 +104,12 @@ export default function ConfigEditor() {
   });
 
   const handleSave = () => {
-    // Validate policy JSON before save
     try {
       JSON.parse(policyJson);
-      setPolicyError("");
+      saveMut.mutate();
     } catch (e) {
       setPolicyError((e as Error).message);
-      return;
     }
-    saveMut.mutate();
   };
 
   const validatePolicyJson = (val: string) => {
@@ -171,11 +174,6 @@ export default function ConfigEditor() {
             <p className="t-label text-muted-fg mt-1">Model binding and runtime policy</p>
           </div>
 
-          <Input
-            label="Display Name"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-          />
           <Select
             label="Model"
             options={modelOptions}
@@ -183,16 +181,6 @@ export default function ConfigEditor() {
             onChange={(e) => setModelRef(e.target.value)}
             placeholder="Select a model…"
           />
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              className="w-4 h-4 border-border accent-fg"
-            />
-            <span className="text-sm">Enabled</span>
-          </label>
-
           <div className="flex flex-col gap-1.5">
             <p className="t-label text-muted-fg">Policy JSON</p>
             <textarea
@@ -210,57 +198,52 @@ export default function ConfigEditor() {
           </div>
         </Card>
 
-        {/* Read-only Persona Preview */}
-        <Card className="space-y-6">
+        {/* Persona Section */}
+        <Card className="space-y-5">
           <div>
             <h2 className="t-headline !text-lg">Persona</h2>
-            <p className="t-label text-muted-fg mt-1">Read-only preview</p>
+            <p className="t-label text-muted-fg mt-1">Select the persona for this config</p>
           </div>
 
-          <div>
-            <p className="t-label text-muted-fg mb-1.5">System Prompt</p>
-            <div className="px-4 py-3 text-sm border border-border bg-muted/30 max-h-40 overflow-y-auto whitespace-pre-wrap text-muted-fg font-mono">
-              {bot.system_prompt || "—"}
+          <Select
+            label="Persona"
+            options={personaOptions}
+            value={personaId}
+            onChange={(e) => setPersonaId(e.target.value)}
+            placeholder="Select a persona…"
+          />
+
+          {selectedPersona && (
+            <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+              <div>
+                <p className="t-label text-muted-fg">System Prompt</p>
+                <p className="text-sm text-fg/80 whitespace-pre-wrap line-clamp-3 font-mono mt-1">
+                  {selectedPersona.system_prompt.slice(0, 200)}
+                  {selectedPersona.system_prompt.length > 200 ? "\u2026" : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="info">
+                  {(selectedPersona.tools_allowlist_json?.length ?? 0)} tool{(selectedPersona.tools_allowlist_json?.length ?? 0) !== 1 ? "s" : ""}
+                </Badge>
+                <Badge variant="info">
+                  {(selectedPersona.skills_allowlist_json?.length ?? 0)} skill{(selectedPersona.skills_allowlist_json?.length ?? 0) !== 1 ? "s" : ""}
+                </Badge>
+              </div>
+              <div className="rule-thin" />
+              <Link
+                to={`/persona/${selectedPersona.id}`}
+                className="inline-flex items-center gap-1.5 t-label font-medium text-accent hover:underline transition-colors"
+              >
+                Edit Persona
+                <ExternalLink size={13} />
+              </Link>
             </div>
-          </div>
+          )}
 
-          <div>
-            <p className="t-label text-muted-fg mb-1.5">Tools</p>
-            <div className="flex flex-wrap gap-1.5">
-              {bot.tools_allowlist_json?.length > 0 ? (
-                bot.tools_allowlist_json.map((t) => (
-                  <Badge key={t} variant="info">
-                    {t}
-                  </Badge>
-                ))
-              ) : (
-                <span className="text-xs text-muted-fg">—</span>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <p className="t-label text-muted-fg mb-1.5">Skills</p>
-            <div className="flex flex-wrap gap-1.5">
-              {bot.skills_allowlist_json?.length > 0 ? (
-                bot.skills_allowlist_json.map((s) => (
-                  <Badge key={s} variant="info">
-                    {s}
-                  </Badge>
-                ))
-              ) : (
-                <span className="text-xs text-muted-fg">—</span>
-              )}
-            </div>
-          </div>
-
-          <Link
-            to={`/persona/${bot.id}`}
-            className="inline-flex items-center gap-1.5 t-label text-fg hover:text-muted-fg transition-colors"
-          >
-            <UserCircle size={13} />
-            Edit Persona
-          </Link>
+          {!selectedPersona && personaId && (
+            <p className="text-sm text-muted-fg italic">Persona not found</p>
+          )}
         </Card>
       </div>
 

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use chrono_ipc::adapter::{
     session_key, AdapterError, AdapterResult, PlatformAdapter, PlatformResult, RoutedEvent,
@@ -11,15 +11,15 @@ use teloxide::types::{MessageId, Recipient, ReplyParameters, UpdateKind};
 pub struct TelegramAdapter {
     bot: Arc<Bot>,
     account_id: String,
-    bot_username: String,
+    bot_username: OnceLock<String>,
 }
 
 impl TelegramAdapter {
-    pub fn new(token: String, account_id: String, bot_username: String) -> Self {
+    pub fn new(token: String, account_id: String) -> Self {
         Self {
             bot: Arc::new(Bot::new(token)),
             account_id,
-            bot_username,
+            bot_username: OnceLock::new(),
         }
     }
 }
@@ -35,7 +35,7 @@ impl PlatformAdapter for TelegramAdapter {
     }
 
     fn bot_username(&self) -> &str {
-        &self.bot_username
+        self.bot_username.get().map(|s| s.as_str()).unwrap_or("unknown")
     }
 
     async fn start(
@@ -52,6 +52,7 @@ impl PlatformAdapter for TelegramAdapter {
         })?;
         let username = me.username.as_deref().unwrap_or("unknown");
         eprintln!("[telegram] connected as @{username} (id: {})", me.id.0);
+        let _ = self.bot_username.set(username.to_string());
 
         // Manual long-polling loop — cooperative cancel via task abort / drop.
         let mut offset: i32 = 0;

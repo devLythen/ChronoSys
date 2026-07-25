@@ -12,14 +12,13 @@ pub struct ProviderStore<'a> {
 impl ProviderStore<'_> {
     pub fn insert_provider(&self, p: &LlmProvider) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO llm_providers (id, kind, base_url, display_name, enabled, json_ext)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO llm_providers (id, kind, base_url, display_name, json_ext)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 p.id,
                 p.kind,
                 p.base_url,
                 p.display_name,
-                p.enabled as i32,
                 serde_json::to_string(&p.json_ext).unwrap_or_default(),
             ],
         )?;
@@ -28,7 +27,7 @@ impl ProviderStore<'_> {
 
     pub fn update_provider(&self, p: &LlmProvider) -> Result<()> {
         let rows = self.conn.execute(
-            "UPDATE llm_providers SET kind=?2, base_url=?3, display_name=?4, enabled=?5, json_ext=?6,
+            "UPDATE llm_providers SET kind=?2, base_url=?3, display_name=?4, json_ext=?5,
                     updated_at=datetime('now')
              WHERE id=?1",
             params![
@@ -36,7 +35,6 @@ impl ProviderStore<'_> {
                 p.kind,
                 p.base_url,
                 p.display_name,
-                p.enabled as i32,
                 serde_json::to_string(&p.json_ext).unwrap_or_default(),
             ],
         )?;
@@ -49,7 +47,7 @@ impl ProviderStore<'_> {
     pub fn get_provider(&self, id: &str) -> Result<LlmProvider> {
         self.conn
             .query_row(
-                "SELECT id, kind, base_url, display_name, enabled, json_ext, created_at, updated_at
+                "SELECT id, kind, base_url, display_name, json_ext, created_at, updated_at
                  FROM llm_providers WHERE id=?1",
                 params![id],
                 row_to_provider,
@@ -65,21 +63,13 @@ impl ProviderStore<'_> {
 
     pub fn list_providers(&self) -> Result<Vec<LlmProvider>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, kind, base_url, display_name, enabled, json_ext, created_at, updated_at
+            "SELECT id, kind, base_url, display_name, json_ext, created_at, updated_at
              FROM llm_providers ORDER BY id"
         )?;
         let rows = stmt.query_map([], row_to_provider)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
-    pub fn list_enabled_providers(&self) -> Result<Vec<LlmProvider>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, kind, base_url, display_name, enabled, json_ext, created_at, updated_at
-             FROM llm_providers WHERE enabled=1 ORDER BY id"
-        )?;
-        let rows = stmt.query_map([], row_to_provider)?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
-    }
 
     pub fn delete_provider(&self, id: &str) -> Result<()> {
         let rows = self.conn.execute("DELETE FROM llm_providers WHERE id=?1", params![id])?;
@@ -99,10 +89,9 @@ fn row_to_provider(row: &rusqlite::Row) -> std::result::Result<LlmProvider, rusq
         kind: row.get(1)?,
         base_url: row.get(2)?,
         display_name: row.get(3)?,
-        enabled: row.get::<_, i32>(4)? != 0,
-        json_ext: parse_json_or_empty(row.get::<_, String>(5)?),
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        json_ext: parse_json_or_empty(row.get::<_, String>(4)?),
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }
 
@@ -171,27 +160,24 @@ impl ProviderStore<'_> {
 impl ProviderStore<'_> {
     pub fn upsert_model(&self, m: &LlmModel) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO llm_models (provider_id, model_id, display_name, enabled,
-                    temperature, max_tokens, top_p, extra_headers_json, extra_body_json,
-                    thinking_level, json_ext)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "INSERT INTO llm_models (provider_id, model_id, temperature, max_tokens, top_p,
+                    thinking_level, extra_body_json, json_ext)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(provider_id, model_id) DO UPDATE SET
-                display_name=excluded.display_name, enabled=excluded.enabled,
-                temperature=excluded.temperature, max_tokens=excluded.max_tokens,
-                top_p=excluded.top_p, extra_headers_json=excluded.extra_headers_json,
-                extra_body_json=excluded.extra_body_json, thinking_level=excluded.thinking_level,
+                temperature=excluded.temperature,
+                max_tokens=excluded.max_tokens,
+                top_p=excluded.top_p,
+                thinking_level=excluded.thinking_level,
+                extra_body_json=excluded.extra_body_json,
                 json_ext=excluded.json_ext, updated_at=datetime('now')",
             params![
                 m.provider_id,
                 m.model_id,
-                m.display_name,
-                m.enabled as i32,
                 m.temperature,
                 m.max_tokens,
                 m.top_p,
-                m.extra_headers_json.as_ref().map(|v| v.to_string()),
-                m.extra_body_json.as_ref().map(|v| v.to_string()),
                 m.thinking_level,
+                m.extra_body_json.as_ref().map(|v| v.to_string()),
                 serde_json::to_string(&m.json_ext).unwrap_or_default(),
             ],
         )?;
@@ -201,8 +187,8 @@ impl ProviderStore<'_> {
     pub fn get_model(&self, provider_id: &str, model_id: &str) -> Result<LlmModel> {
         self.conn
             .query_row(
-                "SELECT provider_id, model_id, display_name, enabled, temperature, max_tokens,
-                        top_p, extra_headers_json, extra_body_json, thinking_level, json_ext,
+                "SELECT provider_id, model_id, temperature, max_tokens, top_p,
+                        thinking_level, extra_body_json, json_ext,
                         created_at, updated_at
                  FROM llm_models WHERE provider_id=?1 AND model_id=?2",
                 params![provider_id, model_id],
@@ -219,21 +205,10 @@ impl ProviderStore<'_> {
 
     pub fn list_models(&self, provider_id: &str) -> Result<Vec<LlmModel>> {
         let mut stmt = self.conn.prepare(
-            "SELECT provider_id, model_id, display_name, enabled, temperature, max_tokens,
-                    top_p, extra_headers_json, extra_body_json, thinking_level, json_ext,
+            "SELECT provider_id, model_id, temperature, max_tokens, top_p,
+                    thinking_level, extra_body_json, json_ext,
                     created_at, updated_at
              FROM llm_models WHERE provider_id=?1 ORDER BY model_id"
-        )?;
-        let rows = stmt.query_map(params![provider_id], row_to_model)?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
-    }
-
-    pub fn list_enabled_models(&self, provider_id: &str) -> Result<Vec<LlmModel>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT provider_id, model_id, display_name, enabled, temperature, max_tokens,
-                    top_p, extra_headers_json, extra_body_json, thinking_level, json_ext,
-                    created_at, updated_at
-             FROM llm_models WHERE provider_id=?1 AND enabled=1 ORDER BY model_id"
         )?;
         let rows = stmt.query_map(params![provider_id], row_to_model)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -258,17 +233,14 @@ fn row_to_model(row: &rusqlite::Row) -> std::result::Result<LlmModel, rusqlite::
     Ok(LlmModel {
         provider_id: row.get(0)?,
         model_id: row.get(1)?,
-        display_name: row.get(2)?,
-        enabled: row.get::<_, i32>(3)? != 0,
-        temperature: row.get(4)?,
-        max_tokens: row.get(5)?,
-        top_p: row.get(6)?,
-        extra_headers_json: row.get::<_, Option<String>>(7)?.map(parse_json_or_empty),
-        extra_body_json: row.get::<_, Option<String>>(8)?.map(parse_json_or_empty),
-        thinking_level: row.get(9)?,
-        json_ext: parse_json_or_empty(row.get::<_, String>(10)?),
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        temperature: row.get(2)?,
+        max_tokens: row.get(3)?,
+        top_p: row.get(4)?,
+        thinking_level: row.get(5)?,
+        extra_body_json: row.get::<_, Option<String>>(6)?.map(parse_json_or_empty),
+        json_ext: parse_json_or_empty(row.get::<_, String>(7)?),
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 

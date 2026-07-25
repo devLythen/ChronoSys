@@ -21,61 +21,43 @@ ChronoSys 的管理与观测面板。操作员通过浏览器管理平台账号�
 | 样式 | Tailwind CSS v4 + CSS 设计令牌 |
 | 状态 | TanStack Query（服务端）+ Zustand（auth token） |
 | 路由 | HashRouter（`/#/overview`，`/#/platforms`，…） |
-| 实时 | WebSocket（`/api/v1/ws`） |
-| 图标 | Lucide（SVG） |
-| 动效 | GSAP（ScrollTrigger） |
-
----
-
-## 2. 领域模型
-
-四个核心概念，对应四张数据库表：
-
-| 概念 | 运营语义 | 落库 | 备注 |
-|------|----------|------|------|
 | **Providers** | LLM 后端与可用模型目录 | `llm_providers` / `llm_credentials` / `llm_models` | 模型参数在模型行上 |
-| **Config** | 一份可被平台选用的运行配置 | `bot_profiles` | 含 model_ref + persona 字段 + policy |
-| **Persona** | 提示词与工具/技能权限 | `bot_profiles` 的子集字段 | **不是独立表**，但与 Config 独立编辑 |
-| **Platforms** | 消息平台账号 + 选用哪份配置 | `platform_accounts` + `bindings` | UI 称「Attach config」，API 仍是 `/bindings` |
+| **Config** | 一份可被平台选用的运行配置 | `bot_profiles` | model_ref + persona_id FK + policy |
+| **Persona** | 提示词与工具/技能权限 | `personas`（独立表） | 与 Config 独立创建和删除 |
+| **Platforms** | 消息平台账号 + 选用哪份配置 | `platform_accounts` + `bindings` | UI 称「Attach config」 |
 
 ### 闭环关系
 
 ```
 Providers
-  provider + credential + enabled model
+  provider + credential (plaintext API key) + model
         │
         │  model_ref = "provider_id/model_id"
         ▼
 Config (bot_profiles)
-  display_name / enabled / model_ref / policy
-  + persona: system_prompt / tools / skills
+  model_ref + persona_id → Persona (system_prompt + tools + skills)
+  + policy
         ▲
         │  平台选用配置（bindings）
-        │  account_id + chat_pattern → bot_profile_id
 Platforms (platform_accounts)
-  secret_ref + adapter_config
+  secret_ref (plaintext bot token) + adapter_config
 ```
-
-消息跑通的最小条件（Overview 页逐项检查）：
-
-1. 至少一个 **enabled provider**，有 credential，至少一个 **enabled model**
-2. 至少一份 **enabled config**，`model_ref` 指向上述模型
-3. 至少一个 **enabled platform account**，`secret_ref` 可解析
-4. 至少一条 **enabled attachment** 把 account 指到 config
 
 ### 命名对照
 
 | UI 用语 | REST 路径 | 数据库表 |
 |---------|-----------|----------|
 | Config | `/api/v1/bots` | `bot_profiles` |
-| Persona | `/api/v1/bots/:id`（只改人格字段） | `bot_profiles` 子集 |
+| Persona | `/api/v1/personas` | `personas` |
 | Platform account | `/api/v1/accounts` | `platform_accounts` |
 | Attach config | `/api/v1/bindings` | `bindings` |
 | Provider / Model | `/api/v1/providers` | `llm_providers` / `llm_models` |
-| Tools catalog | `/api/v1/tools` | 无（硬编码，与 agent-host 同步） |
 
+消息跑通的最小条件（Overview 页逐项检查）：
+
+1. 至少一个 **enabled provider**，有 credential，至少一个 **enabled model**
+2. 至少一份 **enabled config**，`model_ref` 指向上述模型
 ---
-
 ## 3. 信息架构
 
 ```
@@ -281,4 +263,3 @@ webui/
 
 - **开发**：`cd webui && bun run dev` — Vite 在 `:5173`，`/api` 代理到 `:8787`
 - **生产**：`bun run build` → `dist/`；gateway 通过 `tower-http::ServeDir` 提供静态文件
-- Gateway 通过 `CHRONO_WEBUI_DIST` 环境变量或默认 `webui/dist/` 定位构建输出

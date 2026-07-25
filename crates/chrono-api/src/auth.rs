@@ -29,6 +29,10 @@ pub async fn auth_middleware(
     if path == "/api/v1/health" {
         return next.run(request).await;
     }
+    // Internal endpoints: agent-host pushes model capabilities on the loopback.
+    if path.starts_with("/api/v1/internal") {
+        return next.run(request).await;
+    }
 
     let authorized = request
         .headers()

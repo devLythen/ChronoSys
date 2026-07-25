@@ -6,8 +6,13 @@ use crate::providers::ProviderStore;
 use crate::accounts::AccountStore;
 use crate::bots::BotStore;
 use crate::settings::SettingStore;
-
+use crate::personas::PersonaStore;
 const MIGRATION_001: &str = include_str!("migrations/001_init.sql");
+const MIGRATION_002: &str = include_str!("migrations/002_personas.sql");
+const MIGRATION_003: &str = include_str!("migrations/003_drop_bot_enabled.sql");
+const MIGRATION_004: &str = include_str!("migrations/004_drop_provider_enabled.sql");
+const MIGRATION_005: &str = include_str!("migrations/005_cleanup_llm_models.sql");
+const MIGRATION_006: &str = include_str!("migrations/006_model_params.sql");
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -65,6 +70,46 @@ impl ConfigStore {
             )?;
         }
 
+        if current < 2 {
+            self.conn.execute_batch(MIGRATION_002)?;
+            self.conn.execute(
+                "INSERT INTO schema_migrations (version, name) VALUES (2, '002_personas')",
+                [],
+            )?;
+        }
+
+        if current < 3 {
+            self.conn.execute_batch(MIGRATION_003)?;
+            self.conn.execute(
+                "INSERT INTO schema_migrations (version, name) VALUES (3, '003_drop_bot_enabled')",
+                [],
+            )?;
+        }
+
+        if current < 4 {
+            self.conn.execute_batch(MIGRATION_004)?;
+            self.conn.execute(
+                "INSERT INTO schema_migrations (version, name) VALUES (4, '004_drop_provider_enabled')",
+                [],
+            )?;
+        }
+
+        if current < 5 {
+            self.conn.execute_batch(MIGRATION_005)?;
+            self.conn.execute(
+                "INSERT INTO schema_migrations (version, name) VALUES (5, '005_cleanup_llm_models')",
+                [],
+            )?;
+        }
+
+        if current < 6 {
+            self.conn.execute_batch(MIGRATION_006)?;
+            self.conn.execute(
+                "INSERT INTO schema_migrations (version, name) VALUES (6, '006_model_params')",
+                [],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -76,6 +121,10 @@ impl ConfigStore {
 
     pub fn accounts(&self) -> AccountStore<'_> {
         AccountStore { conn: &self.conn }
+    }
+
+    pub fn personas(&self) -> PersonaStore<'_> {
+        PersonaStore { conn: &self.conn }
     }
 
     pub fn bots(&self) -> BotStore<'_> {

@@ -24,14 +24,15 @@ interface ParsedMessage {
   name?: string;
 }
 
-function renderMessageContent(msg: ParsedMessage) {
+function renderMessageContent(msg: ParsedMessage | undefined) {
+  if (!msg) return <code className="t-mono text-muted-fg">—</code>;
   if (msg.tool_calls && msg.tool_calls.length > 0) {
     return (
       <div className="space-y-1.5">
         {msg.content && (
           <p className="whitespace-pre-wrap break-words">{msg.content}</p>
         )}
-        {msg.tool_calls.map((tc, i) => (
+        {msg.tool_calls?.map((tc, i) => (
           <code
             key={i}
             className="block t-mono bg-muted px-2 py-1 border border-border whitespace-pre-wrap break-all"

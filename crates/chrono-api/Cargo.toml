@@ -18,3 +18,5 @@ rusqlite = { workspace = true }
 thiserror = { workspace = true }
 http = { workspace = true }
 futures = { workspace = true }
+reqwest = { workspace = true }
+uuid = { workspace = true }

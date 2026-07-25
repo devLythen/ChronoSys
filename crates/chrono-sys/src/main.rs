@@ -11,7 +11,7 @@ use chrono_gateway::{find_bun, resolve_agent_host_dir};
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("chrono: {err:#}");
+        eprintln!("\x1b[31;1m[chrono]\x1b[0m {err:#}");
         std::process::exit(1);
     }
 }
@@ -32,10 +32,10 @@ fn run() -> anyhow::Result<()> {
     let store = ConfigStore::open(&db_path).context("open config DB")?;
 
     eprintln!(
-        "[chrono] starting (CHRONO_HOME={})",
+        "\x1b[36m[chrono]\x1b[0m starting (CHRONO_HOME={})",
         chrono_home.display()
     );
-    eprintln!("[chrono] configure via WebUI → http://127.0.0.1:8787");
+    eprintln!("\x1b[36m[chrono]\x1b[0m configure via WebUI → http://127.0.0.1:8787");
 
     let rt = tokio::runtime::Runtime::new().expect("create tokio runtime");
     rt.block_on(run_gateway(

@@ -3,7 +3,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -95,14 +95,9 @@ struct ResolvedBinding {
 
 /// Fingerprint of adapter-relevant account fields (restart when this changes).
 fn account_fingerprint(a: &PlatformAccount) -> String {
-    let username = a
-        .adapter_config_json
-        .get("bot_username")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
     format!(
-        "{}|{}|{}|{}|{}",
-        a.platform, a.enabled, a.secret_ref, a.adapter_id, username
+        "{}|{}|{}|{}",
+        a.platform, a.enabled, a.secret_ref, a.adapter_id
     )
 }
 
@@ -236,6 +231,9 @@ pub async fn run_gateway(
         .context("spawn agent-host")?;
     let child = Arc::new(child);
 
+    let pending_queries = Arc::new(Mutex::new(HashMap::new()));
+    let model_caps = Arc::new(RwLock::new(Value::Null));
+
     // 2. Audit log
     let audit = AuditLog::open(&chrono_home).context("open audit log")?;
 
@@ -253,7 +251,7 @@ pub async fn run_gateway(
         mut agent_ctrl_rx,
         agent_alive,
         adapter_count,
-    } = http::start_http_server(&chrono_home, config_store)
+    } = http::start_http_server(&chrono_home, config_store, child.clone(), pending_queries.clone(), model_caps.clone())
         .await
         .context("start control plane")?;
 
@@ -262,24 +260,24 @@ pub async fn run_gateway(
 
     // 5. Initial config + adapters from DB (secrets only resolved here)
     if let Err(e) = sync_from_config(&state, &chrono_home, &event_tx, &adapter_count) {
-        eprintln!("[gateway] initial config sync: {e:#}");
+        gateway_log!(warn, "initial config sync: {e:#}");
     }
 
     // 6. stdout reader (tool dispatch)
     let stdout_child = child.clone();
     let stdout_state = state.clone();
+    let stdout_pending = pending_queries.clone();
     let stdout_alive = agent_alive.clone();
     tokio::task::spawn_blocking(move || loop {
         let payload = match stdout_child.read_frame() {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("[gateway] agent stdout read error: {e}");
+                gateway_log!(error, "agent stdout read error: {e}");
                 stdout_alive.store(false, Ordering::Relaxed);
                 break;
             }
         };
 
-        eprintln!("[gateway] agent stdout frame: {} bytes", payload.len());
         if let Ok(tool_msg) = serde_json::from_slice::<ToolIpcMessage>(&payload) {
             if let ToolIpcMessage::Request {
                 ref session_id, ..
@@ -347,6 +345,17 @@ pub async fn run_gateway(
             continue;
         }
 
+        if let Ok(obj) = serde_json::from_slice::<Value>(&payload) {
+            // Check for pending query responses
+            if let Some(query_id) = obj.get("query_id").and_then(|v| v.as_str()) {
+                let mut pq = stdout_pending.lock().unwrap();
+                if let Some(tx) = pq.remove(query_id) {
+                    let _ = tx.send(obj);
+                }
+                continue;
+            }
+        }
+
         if let Ok(value) = serde_json::from_slice::<Value>(&payload) {
             let msg_type = value
                 .get("type")
@@ -359,7 +368,7 @@ pub async fn run_gateway(
                         .get("message")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
-                    eprintln!("[gateway] agent error: {message}");
+                    gateway_log!(error, "agent error: {message}");
                 }
                 other => {
                     eprintln!("[gateway] unknown message type from agent-host: {other}");
@@ -369,7 +378,7 @@ pub async fn run_gateway(
     });
 
     // 7. Main loop
-    eprintln!("[gateway] control plane ready (adapters managed from config DB / WebUI)");
+    gateway_log!(info, "control plane ready (adapters managed from config DB / WebUI)");
     loop {
         agent_alive.store(child.is_alive(), Ordering::Relaxed);
 
@@ -549,7 +558,7 @@ fn sync_from_config(
         "detail": format!("bindings/bots reloaded; {count} live adapter(s)"),
         "adapter_count": count,
     }));
-    eprintln!("[gateway] config reloaded ({count} live adapter(s))");
+    gateway_log!(info, "config reloaded ({count} live adapter(s))");
     Ok(())
 }
 
@@ -646,7 +655,6 @@ fn handle_inbound_event(state: &Arc<Mutex<GatewayState>>, routed: RoutedEvent) -
     if let Err(e) = state.child.write_frame(&payload) {
         eprintln!("[gateway] failed to write event to agent: {e}");
     } else {
-        eprintln!("[gateway] wrote inbound event to agent stdin");
     }
     Ok(())
 }

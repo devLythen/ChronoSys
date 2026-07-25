@@ -23,6 +23,10 @@ export default function Overview() {
     queryKey: ["bindings"],
     queryFn: () => api.listBindings(),
   });
+  const { data: personas } = useQuery({
+    queryKey: ["personas"],
+    queryFn: () => api.listPersonas(),
+  });
 
   if (healthLoading) {
     return (
@@ -47,9 +51,9 @@ export default function Overview() {
       link: "/config",
     },
     {
-      ok: bots ? bots.some((b) => b.system_prompt && b.system_prompt.trim().length > 0) : false,
+      ok: personas ? personas.some((p) => p.system_prompt && p.system_prompt.trim().length > 0) : false,
       label: "Personas",
-      detail: "At least one bot has a non-empty system prompt",
+      detail: "At least one persona has a non-empty system prompt",
       link: "/persona",
     },
     {

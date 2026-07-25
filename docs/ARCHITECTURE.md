@@ -6,11 +6,9 @@ Agent-centric chat integration framework: platforms (Telegram / QQ / WeChat / �
 
 **No magic defaults.** Every runtime entity (provider, model, bot profile, platform account, binding) must be explicitly created by the operator. There is no built-in "default bot" or "first available model". An empty config database on first deploy is normal and expected — the system starts and waits for WebUI configuration, then hot-reloads.
 
-**One process boundary.** Gateway (Rust) and agent-host (TypeScript/Bun) communicate over stdin/stdout framed IPC. The gateway spawns the agent-host as a child process. No network sockets between them — just pipes.
+**Exist = enabled.** Providers and configs have no on/off switch. If they exist in the database, they are active. Only platform accounts have an enable/disable toggle — that's where operational control lives.
 
-**Configuration lives in SQLite, not env vars.** `$CHRONO_HOME/state/chrono.db` is the source of truth for providers, models, bot profiles, accounts, bindings, and settings. Environment variables are for process bootstrap only: `CHRONO_HOME`, `CHRONO_AUTH_TOKEN`, `CHRONO_API_HOST`.
-
-**WebUI is the primary management surface.** The operator configures everything through a browser, not config files or CLI flags. The gateway serves the WebUI SPA from `webui/dist/`.
+**Secrets are plaintext.** `secret_ref` stores the actual API key or bot token directly. No `env:VAR` or `file:PATH` indirection — just the value. The API returns it in responses so the WebUI can display and edit it.
 
 ---
 
@@ -38,6 +36,7 @@ crates/
 │   ├── bindings.rs          /api/v1/bindings (Attach config in UI)
 │   ├── sessions.rs          /api/v1/sessions
 │   ├── tools.rs             /api/v1/tools — canonical tool catalog
+│   ├── personas.rs          /api/v1/personas
 │   ├── audit.rs             /api/v1/audit
 │   ├── settings.rs          /api/v1/settings
 │   ├── health.rs            /api/v1/health
@@ -51,8 +50,21 @@ crates/
 ---
 
 ## 2. Process Architecture
+---
 
-```
+## 2. LLM Credential Flow
+
+Agent-host bridges the config DB to pi-ai via `ChronoCredentialStore` (`agent-host/src/credential-store.ts`). When pi-ai needs an API key:
+
+1. pi-ai calls `CredentialStore.read(providerId)`
+2. `ChronoCredentialStore` queries `llm_credentials` in the config DB
+3. Returns `{ type: "api_key", key: secret_ref }` — the plaintext key
+
+This is the only path for LLM auth. There is no separate env var or config file for API keys.
+
+---
+
+## 4. Process Architecture
 ┌──────────────────────────────────────────────────────────┐
 │  chrono (Rust)  — single binary, entry point             │
 │  crates/chrono-sys/src/main.rs                           │
@@ -81,8 +93,7 @@ crates/
 **Hot path**: adapter inbound → `ChronoEvent` → frame to agent-host stdin → agent processes → tool call frame on stdout → gateway dispatches to adapter → outbound message.
 
 ---
-
-## 3. Language Domains
+## 5. Language Domains
 
 | Domain | Language | Why |
 |--------|----------|-----|
@@ -93,24 +104,23 @@ crates/
 **Decision**: Do not reimplement the agent core in Rust. pi owns the agent loop; ChronoSys owns IM + routing + policy + ops.
 
 ---
-
-## 4. Data Model
+## 6. Data Model
 
 ```
-LlmProvider     provider slot (id, kind, base_url, enabled)
-LlmCredential   secret material (auth_kind, secret_ref — never plaintext in API responses)
+LlmProvider     provider slot (id, kind, base_url)
+LlmCredential   API key (auth_kind, secret_ref — plaintext)
 LlmModel        allowlisted model (provider_id + model_id, params)
-BotProfile      "Config" in UI — system_prompt, model_ref, tools/skills, policy
+Persona         system prompt + tools allowlist + skills allowlist
+BotProfile      "Config" in UI — model_ref, persona_id FK, policy
 PlatformAccount platform identity + secret_ref + adapter_config
 Binding         "Attach config" in UI — account × chat_pattern → bot_profile
 Session         durable conversation transcript (sessions.db)
 ```
 
-**Persona is not a separate table.** Persona fields (system_prompt, tools_allowlist, skills_allowlist) live on `bot_profiles`. The Persona page in WebUI edits those fields independently, preserving config fields (display_name, model_ref, policy) via GET→merge→PUT.
+**Persona is a separate table.** Persona fields (system_prompt, tools_allowlist, skills_allowlist) live in their own `personas` table. `bot_profiles` references a persona via `persona_id`. Creating or deleting a config does not affect the persona, and vice versa.
 
 ---
-
-## 5. Startup Behavior
+## 7. Startup Behavior
 
 1. `chrono` resolves `CHRONO_HOME` (default `.chrono`), canonicalizes to absolute path
 2. Creates `$CHRONO_HOME/state/` if missing
@@ -122,19 +132,17 @@ Session         durable conversation transcript (sessions.db)
 **No crash on empty config.** The system starts and stays alive. Operators configure via WebUI; gateway sends `config.reload` frame to agent-host when config changes.
 
 ---
-
-## 6. Tools
+## 8. Tools
 
 The canonical tool registry is defined in `agent-host/src/tools.ts` and mirrored in `crates/chrono-api/src/api/tools.rs` (for the `/api/v1/tools` endpoint).
 
 Currently implemented:
 - `message_send` — send/forward text to a chat; preferred path for all intentional outbound messages
 
-Tools are allowlisted per bot profile via `tools_allowlist_json` in `bot_profiles`. An empty allowlist means "all known tools".
-
+Tools are allowlisted per persona via `tools_allowlist_json` in the `personas` table. An empty allowlist means "all known tools".
 ---
 
-## 7. Real-time Protocol
+## 9. Real-time Protocol
 
 Gateway ↔ agent-host: length-prefixed JSON frames over stdin/stdout.
 
@@ -149,20 +157,88 @@ Agent-host → gateway:
 
 Gateway ↔ WebUI: WebSocket at `/api/v1/ws` for streaming session events and audit log.
 
----
+## 10. Configuration Store
 
-## 8. Configuration Store
 
 SQLite at `$CHRONO_HOME/state/chrono.db`. Schema managed by migrations in `crates/chrono-config/src/migrations/`.
 
 | Table | Purpose |
-|-------|---------|
 | `llm_providers` | LLM backend definitions |
-| `llm_credentials` | API keys / secret refs per provider |
+| `llm_credentials` | API keys per provider (plaintext) |
 | `llm_models` | Allowlisted models with per-model overrides |
-| `bot_profiles` | Bot configs (model, prompt, tools, policy) |
+| `personas` | System prompts + tool/skill allowlists |
+| `bot_profiles` | Bot configs (model_ref, persona_id, policy) |
 | `platform_accounts` | Messaging platform identities |
 | `bindings` | Account → bot profile routing rules |
 | `settings` | Key-value operational settings |
 
-Secrets are never stored in the DB. `secret_ref` values are references: `env:VAR_NAME`, `file:/path`, or literal strings (dev only). API responses return `has_secret: bool`, never the value.
+`secret_ref` values are plaintext API keys or bot tokens. API responses return them directly.
+---
+
+## 11. Logging
+
+All processes write to stderr. Stdout is reserved for framed IPC (agent-host ↔ gateway).
+
+### Format
+
+```
+[component] message
+```
+
+No timestamps, no JSON, no log levels in the text. The prefix identifies the component; ANSI color communicates severity.
+
+### Components
+
+| Prefix | Process | Language |
+|--------|---------|----------|
+| `[chrono]` | chrono-sys entry point | Rust |
+| `[gateway]` | chrono-gateway | Rust |
+| `[agent]` | agent-host | TypeScript |
+| `[adapter:N]` | platform adapters | Rust |
+
+### Levels & Colors
+
+| Level | ANSI | When |
+|-------|------|------|
+| `info` | `\x1b[36m` (cyan) | Normal operations: startup, reload, session lifecycle |
+| `warn` | `\x1b[33m` (yellow) | Recoverable issues: config sync failure, rate limit hit, orphan tool response |
+| `error` | `\x1b[31;1m` (red bold) | Non-recoverable: agent crash, IPC failure, DB corruption |
+
+Expected empty-config startup (all `info`, no warnings):
+
+```
+[chrono] starting (CHRONO_HOME=/.../ChronoSys/.chrono)
+[chrono] configure via WebUI → http://127.0.0.1:8787
+[gateway] control plane listening on http://127.0.0.1:8787
+[gateway] config reloaded (0 live adapter(s))
+[gateway] control plane ready (adapters managed from config DB / WebUI)
+[agent] No enabled LLM providers yet — configure via WebUI
+```
+
+### Rules
+
+1. **Messages are one line.** No multi-line logs, no stack traces on stderr.
+2. **No secret material.** Never log API keys, tokens, or `secret_ref` values.
+3. **No IDs in info.** Session IDs and message IDs go in `warn`/`error` only — not in normal flow.
+4. **Prefer info.** If the system can recover automatically, it's `info`, not `warn`.
+5. **Empty config is normal.** "No providers yet" and "No bot profiles yet" are `info` — expected state before WebUI setup.
+
+### Implementation
+
+**Rust** — use `gateway_log!` macro (defined in `chrono-gateway/src/lib.rs`):
+
+```rust
+gateway_log!(info, "control plane listening on http://{addr}");
+gateway_log!(warn, "initial config sync: {e:#}");
+gateway_log!(error, "agent stdout read error: {e}");
+```
+
+**TypeScript** — use `logEvent()` (defined in `agent-host/src/main.ts`):
+
+```ts
+logEvent({ type: "host_info", message: "No enabled LLM providers yet" });
+logEvent({ type: "host_warn", message: `orphan tool.response for ${id}` });
+logEvent({ type: "host_error", message: err.message });
+```
+
+The function strips the `host_` prefix and maps the remainder to ANSI color.

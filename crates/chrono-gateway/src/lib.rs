@@ -1,3 +1,16 @@
+#[macro_export]
+macro_rules! gateway_log {
+    (info, $($arg:tt)*) => {
+        eprintln!("\x1b[36m[gateway]\x1b[0m {}", format!($($arg)*))
+    };
+    (warn, $($arg:tt)*) => {
+        eprintln!("\x1b[33m[gateway]\x1b[0m {}", format!($($arg)*))
+    };
+    (error, $($arg:tt)*) => {
+        eprintln!("\x1b[31;1m[gateway]\x1b[0m {}", format!($($arg)*))
+    };
+}
+
 pub mod adapter;
 pub mod adapters;
 pub mod http;
@@ -124,6 +137,13 @@ impl GatewayChild {
             Ok(Some(_)) => false,
             Err(_) => false,
         }
+    }
+}
+
+
+impl chrono_api::AgentQuery for GatewayChild {
+    fn write_frame(&self, payload: &[u8]) -> anyhow::Result<()> {
+        GatewayChild::write_frame(self, payload).map_err(|e| anyhow::anyhow!("{e}"))
     }
 }
 

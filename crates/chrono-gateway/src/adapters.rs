@@ -18,17 +18,11 @@ pub fn build_adapter(account: &PlatformAccount) -> Result<Arc<dyn PlatformAdapte
             let token = resolve_secret(&account.secret_ref).with_context(|| {
                 format!("resolve secret for account {} (telegram)", account.id)
             })?;
-            let bot_username = account
-                .adapter_config_json
-                .get("bot_username")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown_bot")
-                .to_string();
-            Ok(Arc::new(TelegramAdapter::new(
+            let adapter = TelegramAdapter::new(
                 token,
                 account.id.clone(),
-                bot_username,
-            )))
+            );
+            Ok(Arc::new(adapter))
         }
         other => bail!("unsupported platform '{other}' for account {}", account.id),
     }

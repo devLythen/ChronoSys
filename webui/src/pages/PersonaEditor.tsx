@@ -7,7 +7,7 @@ import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
 import { useToast } from "../components/ui/Toast";
-import { ArrowLeft, FileText, Save, Loader2, Plus, X } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Plus, X } from "lucide-react";
 import { cn } from "../lib/utils";
 
 
@@ -17,9 +17,9 @@ export default function PersonaEditor() {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const { data: bot, isLoading, error } = useQuery({
-    queryKey: ["bot", id],
-    queryFn: () => api.getBot(id!),
+  const { data: persona, isLoading, error } = useQuery({
+    queryKey: ["persona", id],
+    queryFn: () => api.getPersona(id!),
     enabled: !!id,
   });
   const { data: tools } = useQuery({
@@ -35,12 +35,12 @@ export default function PersonaEditor() {
   const [skillError, setSkillError] = useState("");
 
   useEffect(() => {
-    if (bot) {
-      setSystemPrompt(bot.system_prompt || "");
-      setSelectedTools(bot.tools_allowlist_json || []);
-      setSkills(bot.skills_allowlist_json || []);
+    if (persona) {
+      setSystemPrompt(persona.system_prompt || "");
+      setSelectedTools(persona.tools_allowlist_json || []);
+      setSkills(persona.skills_allowlist_json || []);
     }
-  }, [bot]);
+  }, [persona]);
 
   const toggleTool = (tool: string) => {
     setSelectedTools((prev) =>
@@ -70,28 +70,20 @@ export default function PersonaEditor() {
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      if (!id) throw new Error("Missing bot id");
-      // Re-fetch current bot to get full state
-      const current = await api.getBot(id);
-      // Merge: overwrite only persona-owned fields, preserve config fields
-      const body = {
-        ...current,
+      if (!id) throw new Error("Missing persona id");
+      return api.updatePersona(id, {
+        display_name: persona?.display_name || id,
         system_prompt: systemPrompt,
         tools_allowlist_json: selectedTools,
         skills_allowlist_json: skills,
-        // Preserve config fields from current fetch
-        display_name: current.display_name,
-        model_ref: current.model_ref,
-        policy_json: current.policy_json,
-        enabled: current.enabled,
-        json_ext: current.json_ext,
-      };
-      return api.updateBot(id, body);
+        json_ext: persona?.json_ext || {},
+      });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["bot", id] });
-      queryClient.invalidateQueries({ queryKey: ["bots"] });
+      queryClient.invalidateQueries({ queryKey: ["persona", id] });
+      queryClient.invalidateQueries({ queryKey: ["personas"] });
       toast.add("success", "Persona saved");
+      navigate("/persona");
     },
     onError: (err: Error) => {
       toast.add("error", err.message);
@@ -106,11 +98,11 @@ export default function PersonaEditor() {
     );
   }
 
-  if (error || !bot) {
+  if (error || !persona) {
     return (
       <div className="animate-fade-up py-20 text-center">
         <p className="text-sm text-destructive font-medium mb-4">
-          {error ? (error as Error).message : "Bot not found"}
+          {error ? (error as Error).message : "Persona not found"}
         </p>
         <Button variant="secondary" onClick={() => navigate("/persona")}>
           <ArrowLeft size={14} />
@@ -133,14 +125,14 @@ export default function PersonaEditor() {
 
       {/* Hero header */}
       <div>
-        <h1 className="t-display">Persona: {bot.display_name || bot.id}</h1>
-        <p className="t-mono text-muted-fg mt-2">{bot.id}</p>
+        <h1 className="t-display">Persona: {persona.display_name || persona.id}</h1>
+        <p className="t-mono text-muted-fg mt-2">{persona.id}</p>
       </div>
       <div className="rule-heavy" />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* System Prompt — takes 2 cols */}
-        <Card className="lg:col-span-2 space-y-4">
+      <div className="grid grid-cols-1 gap-6">
+        {/* System Prompt */}
+        <Card className="space-y-4">
           <div>
             <h2 className="t-headline !text-lg">System Prompt</h2>
             <p className="t-label text-muted-fg mt-1">Define how the assistant behaves</p>
@@ -153,43 +145,6 @@ export default function PersonaEditor() {
             spellCheck={false}
             rows={10}
           />
-        </Card>
-
-        {/* Config Summary */}
-        <Card className="space-y-4">
-          <div>
-            <h2 className="t-headline !text-lg">Config</h2>
-            <p className="t-label text-muted-fg mt-1">Read-only summary</p>
-          </div>
-
-          <div>
-            <p className="t-label text-muted-fg">Model</p>
-            <p className="t-mono mt-0.5">{bot.model_ref || "—"}</p>
-          </div>
-          <div>
-            <p className="t-label text-muted-fg">Status</p>
-            <div className="mt-0.5">
-              <Badge variant={bot.enabled ? "success" : "default"}>
-                {bot.enabled ? "Enabled" : "Disabled"}
-              </Badge>
-            </div>
-          </div>
-          <div>
-            <p className="t-label text-muted-fg">Max Context</p>
-            <p className="text-sm mt-0.5">
-              {bot.policy_json?.max_context_messages ?? "default"}
-            </p>
-          </div>
-
-          {bot.model_ref && (
-            <Link
-              to={`/config/${bot.id}`}
-              className="inline-flex items-center gap-1.5 t-label text-fg hover:text-muted-fg transition-colors"
-            >
-              <FileText size={13} />
-              View Config
-            </Link>
-          )}
         </Card>
       </div>
 
@@ -304,4 +259,3 @@ export default function PersonaEditor() {
     </div>
   );
 }
-

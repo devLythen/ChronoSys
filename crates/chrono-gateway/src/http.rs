@@ -1,14 +1,19 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use chrono_api::{build_router, AgentControl, AppState};
 use chrono_config::ConfigStore;
+use serde_json::Value;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::mpsc as tokio_mpsc;
+
+use crate::GatewayChild;
 
 /// Resolve bind address and auth for the control plane.
 ///
@@ -39,7 +44,7 @@ pub fn resolve_bind_and_auth() -> Result<(SocketAddr, Option<String>)> {
 }
 
 pub struct HttpServer {
-    pub agent_ctrl_rx: mpsc::UnboundedReceiver<AgentControl>,
+    pub agent_ctrl_rx: tokio_mpsc::UnboundedReceiver<AgentControl>,
     pub agent_alive: Arc<AtomicBool>,
     pub adapter_count: Arc<AtomicUsize>,
 }
@@ -49,9 +54,12 @@ pub struct HttpServer {
 pub async fn start_http_server(
     chrono_home: &std::path::Path,
     config: ConfigStore,
+    child: Arc<GatewayChild>,
+    pending_queries: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
+    model_caps: Arc<RwLock<Value>>,
 ) -> Result<HttpServer> {
     let (addr, auth_token) = resolve_bind_and_auth()?;
-    let (agent_tx, agent_ctrl_rx) = mpsc::unbounded_channel::<AgentControl>();
+    let (agent_tx, agent_ctrl_rx) = tokio_mpsc::unbounded_channel::<AgentControl>();
     let agent_alive = Arc::new(AtomicBool::new(true));
     let adapter_count = Arc::new(AtomicUsize::new(0));
 
@@ -68,6 +76,7 @@ pub async fn start_http_server(
     let state = Arc::new(AppState {
         config: Arc::new(Mutex::new(config)),
         agent_tx,
+        chrono_home: chrono_home.to_path_buf(),
         sessions_db_path: chrono_home.join("state/sessions.db"),
         audit_log_path: chrono_home.join("logs/audit.jsonl"),
         auth_token,
@@ -75,13 +84,16 @@ pub async fn start_http_server(
         started_at: Instant::now(),
         adapter_count: adapter_count.clone(),
         agent_alive: agent_alive.clone(),
+        child,
+        pending_queries,
+        model_caps,
     });
 
     let app = build_router(state);
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("bind control plane on {addr}"))?;
-    eprintln!("[gateway] control plane listening on http://{addr}");
+    gateway_log!(info, "control plane listening on http://{addr}");
 
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
