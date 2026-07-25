@@ -42,7 +42,7 @@ pub struct GatewayChild {
 }
 
 impl GatewayChild {
-    /// Spawn `bun run src/main.ts` in `agent_host_dir` with stdin/stdout pipes.
+    /// Spawn `bun run src/main.ts` in `agent_host_dir`. CHRONO_HOME is absolute.
     pub fn spawn(
         bun_path: &str,
         agent_host_dir: &Path,

@@ -56,11 +56,14 @@ fn run_up(fake_llm: bool) -> Result<()> {
     let chrono_home = std::env::var("CHRONO_HOME").unwrap_or_else(|_| ".chrono".into());
     let chrono_home = PathBuf::from(chrono_home);
 
+    std::fs::create_dir_all(chrono_home.join("state")).context("create state dir")?;
+    let chrono_home = chrono_home.canonicalize().unwrap_or_else(|_| chrono_home.clone());
+
     let bun_path = find_bun().context("bun is required on PATH for agent-host")?;
     let agent_host_dir = resolve_agent_host_dir().context("agent-host dir")?;
 
     let db_path = chrono_home.join("state/chrono.db");
-    std::fs::create_dir_all(db_path.parent().unwrap()).context("create state dir")?;
+
     let store = ConfigStore::open(&db_path).context("open config DB")?;
 
     eprintln!(

@@ -233,7 +233,6 @@ pub async fn run_gateway(
     agent_host_dir: PathBuf,
     config_store: ConfigStore,
 ) -> Result<()> {
-    // 1. Spawn agent-host (no secrets involved)
     let child = GatewayChild::spawn(&bun_path, &agent_host_dir, &chrono_home, fake_llm)
         .context("spawn agent-host")?;
     let child = Arc::new(child);

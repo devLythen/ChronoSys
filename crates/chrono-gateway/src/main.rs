@@ -11,6 +11,16 @@ use chrono_gateway::{find_bun, resolve_agent_host_dir};
 fn main() {
     let chrono_home = std::env::var("CHRONO_HOME").unwrap_or_else(|_| ".chrono".into());
     let chrono_home = PathBuf::from(chrono_home);
+
+    // Create state dir early so we can canonicalize. Agent-host runs with
+    // a different CWD, so CHRONO_HOME must be an absolute path.
+    std::fs::create_dir_all(chrono_home.join("state")).expect("create state dir");
+    let chrono_home = chrono_home.canonicalize().unwrap_or_else(|_| {
+        eprintln!("[gateway] warning: cannot canonicalize CHRONO_HOME, using as-is");
+        chrono_home.clone()
+    });
+
+
     let fake_llm = std::env::var("CHRONO_FAKE_LLM").is_ok();
 
     let bun_path = match find_bun() {
@@ -29,7 +39,6 @@ fn main() {
     };
 
     let db_path = chrono_home.join("state/chrono.db");
-    std::fs::create_dir_all(db_path.parent().unwrap()).expect("create state dir");
     let store = ConfigStore::open(&db_path).expect("open config DB");
 
     let rt = tokio::runtime::Runtime::new().expect("create tokio runtime");
