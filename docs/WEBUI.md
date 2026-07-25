@@ -1,170 +1,178 @@
 # WebUI Design
 
-Admin + observability surface for ChronoSys. Not a full IM client clone—operators manage bots, sessions, plugins, and watch agent tool traces in real time.
+Admin + observability surface for ChronoSys. Operators manage platforms, configs, personas, providers, sessions, and audit logs through a browser.
 
-## 1. Goals
+## Design Philosophy
 
-- Real-time: streaming tokens + tool timelines
-- Low ceremony: works with single-node `chrono up`
-- Modern stack, zero host pollution: static assets served by gateway or separate SPA
-- Accessible dark-first UI; keyboard-friendly ops
+**Swiss Modernism.** Typography is the primary visual element — not gradients, shadows, or decorative UI chrome. Black-on-white, sharp edges, generous whitespace. Halftone dot patterns and monochrome gradient blocks provide texture without distraction.
 
-## 2. Stack
+**Editorial layout, not dashboard.** Pages are designed to be read top-to-bottom with clear typographic hierarchy. No cramped data tables unless the data demands it. Content determines form.
+
+**Minimal motion.** Page enter and scroll reveal animations serve readability, not spectacle. `prefers-reduced-motion` is respected.
+
+---
+
+## 1. Stack
 
 | Layer | Choice |
 |-------|--------|
-| Build | Vite |
+| Build | Vite 6 |
 | UI | React 19 + TypeScript |
-| Style | Tailwind CSS v4 + CSS variables (design tokens) |
-| State | TanStack Query (server) + Zustand (ephemeral UI) |
+| Style | Tailwind CSS v4 + CSS design tokens |
+| State | TanStack Query (server) + Zustand (auth token) |
+| Routing | HashRouter (`/#/overview`, `/#/platforms`, …) |
 | Realtime | WebSocket (`/api/v1/ws`) |
-| Charts | Lightweight (e.g. uPlot) only if needed for token/cost |
-| Auth | Session cookie / OIDC later; local-dev open with token |
+| Icons | Lucide (SVG) |
+| Animation | GSAP (ScrollTrigger) |
 
-Avoid heavy component kits that look generic; custom shell with clear density for ops.
+---
 
-## 3. Information architecture
-
-```text
-/                     Overview (status, throughput, errors)
-/accounts             Platform accounts + health
-/bots                 Bot profiles (prompt, model_ref, tools)
-/bindings             Account × chat pattern → bot
-/sessions             Live & historical agent sessions
-/sessions/:id         Session detail (transcript + tool trace)
-/plugins              Installed plugins + grants
-/sandbox              Active sandboxes, quotas
-/memory               Scoped memory browser
-/audit                Tool & adapter audit log
-/providers            LLM providers, credential status, allowlisted models
-/settings             Bootstrap knobs + feature flags (not model catalog)
-```
-
-Mobile: collapse nav; sessions + overview first.
-
-## 4. Core screens (wire-level)
-
-### 4.1 Overview
-
-- Gateway / agent-host / sandbox supervisor health
-- Events/min, open sessions, tool error rate
-- Recent audit failures
-- Quick actions: pause all bots, open logs
-
-### 4.2 Bot profile editor
+## 2. Information Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ Bot: SupportCN                          [Save] [Duplicate]│
-├─────────────────┬────────────────────────────────────────┤
-│ Model           │ my-llm / main-model  Thinking  │
-│ System prompt   │ multiline + skill chips                │
-│ Tools           │ checklist from registry + plugins      │
-│ Skills          │ enable/disable catalog                 │
-│ Policies        │ rate, mention-only, human-approve list │
-│ Memory scope    │ off | user | chat | both               │
-└─────────────────┴────────────────────────────────────────┘
+/#/overview      System health + configuration completeness checklist
+/#/platforms     Messaging accounts + attach configs
+/#/config        Bot profiles — assemble model + settings
+/#/config/:id    Config editor
+/#/providers     LLM providers, credentials, model catalog
+/#/persona       System prompts + tool allowlists (independent creation)
+/#/persona/:id   Persona editor
+/#/sessions      Live & historical agent sessions
+/#/sessions/:id  Session transcript + tool trace
+/#/audit         Tool & adapter audit log
+/#/settings      Auth token + instance info
 ```
 
-Preview: “Injected system prompt” dry-run with sample chat metadata.
+**Nav order reflects the operator workflow**: first set up a platform account → then create a config that selects a model and persona → models come from providers, personas are created independently.
 
-### 4.3 Session detail (most important)
+---
 
-Split view:
+## 3. Visual Design
 
-```
-┌─────────────────────────────┬────────────────────────────┐
-│ Transcript                  │ Tool timeline              │
-│  user / assistant bubbles   │  · message.send  42ms  ok  │
-│  streaming cursor           │  · sandbox.exec  …running  │
-│  platform meta (tg ids)     │  args + result expand      │
-├─────────────────────────────┴────────────────────────────┤
-│ Composer (operator inject / steer / abort)               │
-└──────────────────────────────────────────────────────────┘
-```
+### Typography Scale
 
-Actions: abort run, steer, follow-up, compact, open sandbox FS browser, export JSONL.
+| Class | Size | Use |
+|-------|------|-----|
+| `.t-display` | clamp(1.75rem, 4vw, 2.75rem) | Page titles |
+| `.t-headline` | clamp(1.1rem, 2vw, 1.35rem) | Section headers, card titles |
+| `.t-title` | 1rem | Modal titles |
+| `.t-body` | 0.875rem | Body text |
+| `.t-label` | 0.6875rem uppercase | Form labels, metadata |
+| `.t-mono` | 0.8125rem | IDs, model refs, code |
 
-### 4.4 Plugins
+Fonts: **Inter** (body) + **JetBrains Mono** (code).
 
-- Card list: name, version, caps, status
-- Grant matrix (toggle capabilities)
-- Install from path / git / OCI
-- Logs per plugin worker
+### Decorative Elements
 
-### 4.5 Audit
+| Class | Effect |
+|-------|--------|
+| `.halftone` | Black dot pattern, 12px grid |
+| `.halftone-light` | Gray dot pattern, 10px grid |
+| `.grad-block` | Black → gray diagonal gradient |
+| `.rule-heavy` | 4px black horizontal divider |
+| `.rule-thin` | 1px gray horizontal divider |
 
-Filterable table: time, session, tool, platform op, allow/deny, latency. Click → deep link session.
+### Color Palette
 
-## 5. Realtime protocol
+| Token | Value | Use |
+|-------|-------|-----|
+| `--color-bg` | `#FAFAFA` | Page background |
+| `--color-fg` | `#0A0A0A` | Text, accents |
+| `--color-card` | `#FFFFFF` | Card surfaces |
+| `--color-muted` | `#F0F0F0` | Subtle backgrounds |
+| `--color-muted-fg` | `#6B6B6B` | Secondary text |
+| `--color-border` | `#E0E0E0` | Borders, dividers |
+| `--color-success` | `#16A34A` | Enabled, online, ok |
+| `--color-destructive` | `#DC2626` | Errors, delete actions |
 
-WebSocket messages (server → client):
+No border-radius anywhere. No box-shadows. Depth is conveyed through borders and color contrast alone.
+
+---
+
+## 4. Component Patterns
+
+### Shell
+- Sticky top navigation bar with horizontal text links
+- Active nav item: black background, white text
+- No sidebar. No icons in nav.
+- Footer with version info
+- Content: `max-w-6xl` centered, responsive padding
+
+### Pages
+- Hero header: `.t-display` title + `.t-body` subtitle + `.rule-heavy` divider
+- Sections separated by `space-y-6` to `space-y-8`
+- Halftone blocks as visual breaks between major sections
+- Empty states: halftone-light background, centered text with CTA link
+- Loading states: centered `.t-body` muted text
+- Error states: destructive-colored message
+
+### Cards
+- White background, 1px border
+- Minimal padding (`p-4`)
+- Full-width horizontal layout: info on left, actions on right
+- Clickable cards use `<button>` element for accessibility
+
+### Modals & Toasts
+- Rendered via `React.createPortal` to `document.body`
+- Modal: `z-[100]`, locks body scroll
+- Toast: `z-[200]`, auto-dismiss 4s, stacked bottom-right
+
+### Forms
+- Labels: `.t-label` above inputs
+- Inputs: 1px border, focus ring matches text color
+- Selects: same styling as inputs
+- Save buttons: prominent, full-width or right-aligned
+
+---
+
+## 5. Key Interactions
+
+### Config Editor
+- `model_ref` is a Select dropdown populated from enabled providers + enabled models
+- Persona fields (system_prompt, tools, skills) are preserved on save (GET→merge→PUT)
+- Policy JSON editor with validation
+
+### Persona Editor
+- Independent of Config — persona can be created and edited without going through Config
+- Tools checklist fetched from `/api/v1/tools` (no hardcoded placeholders)
+- Skills managed as tag chips (add/remove)
+
+### Platforms Page
+- UI terminology: "Attach Config" / "Detach" — never "Binding"
+- Secret input: "Leave blank to keep existing secret"
+- Attachment IDs generated as `${accountId}-${configId}-${timestamp36}`
+
+### Overview
+- 5-step configuration completeness checklist
+- Each step links to the relevant page for resolution
+- Stats cards for uptime, agent status, adapter count, session count
+
+---
+
+## 6. API Integration
+
+All REST calls go through `src/api/client.ts`. Query keys follow a flat convention:
 
 ```ts
-type WsServer =
-  | { type: "agent.delta"; session_id: string; text: string }
-  | { type: "agent.message"; session_id: string; message: AgentMessage }
-  | { type: "tool.trace"; session_id: string; phase: "start"|"update"|"end"; ... }
-  | { type: "session.status"; session_id: string; status: "idle"|"running"|"error" }
-  | { type: "metrics.sample"; ... }
-  | { type: "audit.append"; entry: AuditEntry };
+["health"]   ["providers"]   ["bots"]   ["bots", id]
+["accounts"] ["bindings"]    ["tools"]  ["sessions"]
+["audit"]    ["settings"]
 ```
 
-Client → server:
+Mutations invalidate relevant query keys on success. WebSocket connection is managed by `useWebSocket` hook.
 
-```ts
-type WsClient =
-  | { type: "subscribe"; topics: string[] } // sessions:*, audit, metrics
-  | { type: "session.prompt"; session_id: string; text: string }
-  | { type: "session.steer"; session_id: string; text: string }
-  | { type: "session.abort"; session_id: string };
+---
+
+## 7. Build & Serve
+
+```
+webui/
+├── src/          TypeScript source
+├── dist/         build output (git-ignored)
+├── package.json  bun install
+└── vite.config.ts  Vite 6 + Tailwind v4 + proxy → :8787
 ```
 
-REST for CRUD (`/api/v1/bots`, `/accounts`, …). OpenAPI generated from gateway.
-
-## 6. Visual design direction
-
-Not “purple gradient AI SaaS”. Direction:
-
-- **Industrial console**: deep neutral background, sharp 1px borders, monospace for ids/tool args
-- Accent: single hue (e.g. teal or amber) for live/running states
-- Typography: Inter/Geist UI + JetBrains Mono for traces
-- Density: compact default; comfortable toggle
-- Motion: only streaming cursor + subtle tool status pulse
-
-Accessibility: WCAG AA contrast; focus rings; reduce-motion respected.
-
-## 7. Auth & multi-user (phased)
-
-| Phase | Auth |
-|-------|------|
-| v0.1 | Local bind `127.0.0.1` + optional bearer token |
-| v0.3 | Password / passkey single admin |
-| v1.0 | OIDC + RBAC (viewer / operator / admin) |
-
-## 8. Build & serve (zero pollution)
-
-```text
-webui/                 # source
-  dist/                # build output committed? NO — built in CI/image
-```
-
-- Dev: Vite proxy → gateway `:8787`
-- Prod: gateway embeds `dist/` via `rust-embed` **or** serves volume mount
-- No global `npm install -g`; use `pnpm`/`bun` in repo or CI only
-- Assets hashed; CSP headers from gateway
-
-## 9. Implementation phases (UI)
-
-1. Shell + auth token + overview health
-2. Sessions list + live transcript/tool trace
-3. Bots / bindings CRUD
-4. Plugins + grants
-5. Audit + memory + sandbox browser
-6. Polish, RBAC, export
-
-## 10. Out of scope for WebUI
-
-- Replacing Telegram/QQ/WeChat native clients
-- Rich end-user chat for customers (unless later “public bot portal”)
-- Training / fine-tune UIs
+- **Dev**: `bun run dev` — Vite on `:5173`, proxies `/api` → `:8787`
+- **Prod**: `bun run build` → `dist/`; gateway serves it via `tower-http::ServeDir`
+- Gateway locates `dist/` via `CHRONO_WEBUI_DIST` env or default `webui/dist/`

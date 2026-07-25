@@ -17,16 +17,16 @@
 **Deliverable:** monorepo builds; `chrono --help`; docs present.
 
 - [x] Architecture / plugin / WebUI / roadmap docs
-- [x] Cargo workspace + `chrono-cli` stub
+- [x] Cargo workspace + `chrono-sys` (entry crate → `chrono` binary)
 - [x] `agent-host` package with npm deps `@earendil-works/pi-agent-core@0.81.1` + `@earendil-works/pi-ai@0.81.1`
 - [x] Shared JSON schema for `ChronoEvent` / tool IPC (JSON Schema + hand-written Rust/TS types)
 - [x] `docker-compose` skeleton (no pollution: named volumes only)
 
-**Exit:** `cargo build` + `bun install && bun run typecheck` green.
+**Exit:** `cargo build -p chrono-sys` + `bun install && bun run typecheck` green.
 
 ### M1 — Agent loop vertical slice (week 1–2)
 
-**Deliverable:** CLI injects a fake inbound message → pi agent → tool `message.send` → log.
+**Deliverable:** gateway spawns agent-host; inbound message → pi agent → tool `message.send` → log.
 
 - [ ] agent-host: create `Agent` with system prompt + `message.send` tool
 - [ ] tool IPC over UDS to gateway mock
@@ -49,7 +49,7 @@
 - [ ] `chrono config doctor` prints missing links (credential/model/binding) and exits non-zero if not live-ready
 - [ ] Fail closed: empty DB ⇒ control plane may start; agent sessions and adapters refuse until configured
 
-**Exit:** with only env vars and no DB rows, live path errors clearly; after CLI setup, `createModels` + `streamSimple` work for a configured model; fake-llm demo still works without DB.
+**Exit:** with only env vars and no DB rows, system starts cleanly and waits for WebUI configuration. After setup, `createModels` + `streamSimple` work for a configured model.
 
 ### M2 — Telegram adapter + sandbox (week 3–5)
 
@@ -127,7 +127,7 @@ Sandbox/media intentionally deferred to a later hardening pass.
 1. crates/chrono-ipc          # types + framing
 2. agent-host/src/pi-bridge   # Agent + tools
 3. crates/chrono-gateway      # event loop + mock adapter
-4. crates/chrono-cli          # chrono dev / up
+4. crates/chrono-sys          # entry crate → chrono binary
 5. crates/chrono-adapters/telegram
 6. crates/chrono-sandbox
 7. webui (sessions first)
@@ -143,7 +143,7 @@ Do not start WebUI polish before M1 demo works.
 
 | Crate / package | Lang | Notes |
 |-----------------|------|-------|
-| gateway, adapters, sandbox, plugin host, cli | Rust | edition 2021, tokio |
+| gateway, adapters, sandbox, plugin host, chrono-sys | Rust | edition 2021, tokio |
 | agent-host | TypeScript (Bun) | pi peer; Node 22.19+ fallback |
 | webui | TypeScript (Vite) | static |
 | example data plugins | Python 3.12+ | uv-managed venv under CHRONO_HOME |
@@ -307,7 +307,7 @@ Missing any required link → start fails with a structured checklist (provider 
 
 ### 5.4 Demo / CI exception
 
-`CHRONO_FAKE_LLM=1` / `chrono dev --fake-llm` is the **only** path that may run without real credentials. It does not create production defaults and must not write a default bot into the DB unless the operator runs an explicit `chrono init --demo` (optional later).
+The system starts with an empty config DB and waits for WebUI setup. It does not create production defaults. A demo seed script (`agent-host/src/seed.ts`) can populate the DB for testing, but it is never run automatically.
 
 ---
 
