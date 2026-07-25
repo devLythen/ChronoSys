@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "chrono"
+name = "chrono-gateway"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,6 +1,5 @@
 // ChronoSys control plane — single binary entry point.
 // Start with: cargo run -p chrono-gateway
-// Or after install: chrono
 
 use std::path::PathBuf;
 
