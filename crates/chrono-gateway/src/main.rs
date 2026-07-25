@@ -21,8 +21,6 @@ fn main() {
     });
 
 
-    let fake_llm = std::env::var("CHRONO_FAKE_LLM").is_ok();
-
     let bun_path = match find_bun() {
         Ok(p) => p,
         Err(e) => {
@@ -44,7 +42,6 @@ fn main() {
     let rt = tokio::runtime::Runtime::new().expect("create tokio runtime");
     rt.block_on(run_gateway(
         chrono_home,
-        fake_llm,
         bun_path,
         agent_host_dir,
         store,

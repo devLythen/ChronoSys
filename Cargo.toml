@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
   "crates/chrono-ipc",
-  "crates/chrono-cli",
   "crates/chrono-gateway",
   "crates/chrono-config",
   "crates/chrono-adapter-telegram",

@@ -2,7 +2,6 @@ import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model, Api, MutableModels } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { ChronoEvent, ToolIpcMessage } from "./ipc/types.ts";
-import { createFakeStreamFn, FAKE_MODEL } from "./fake-llm.ts";
 import {
   createToolsForAllowlist,
   sendBodyTextToCurrentChat,
@@ -24,7 +23,6 @@ import { SessionStore, sessionsDbPath } from "./session-store.ts";
 const DEFAULT_SYSTEM_PROMPT =
   "You are an assistant on a chat platform. Prefer the message_send tool for all intentional outbound messages (optionally set chat_id to reach another chat). Plain body text without the tool only falls back to the current chat.";
 
-const FAKE_SEND_TEXT = "Hello from ChronoSys!";
 
 /** Supported context scopes. Only "session" is implemented; others fall back. */
 type ContextScope = "session" | "bot" | "account";
@@ -157,33 +155,21 @@ function extractAssistantText(message: AgentMessage | undefined): string {
 }
 
 async function main() {
-  const fakeLlm = process.env.CHRONO_FAKE_LLM === "1";
   const pendingCalls = new Map<string, PendingCall>();
 
-  // ── Resolve model + streamFn + default bot profile ────────────
-  let streamFn: StreamFn = createFakeStreamFn("unconfigured");
-  let defaultModel: Model<Api> = FAKE_MODEL;
+  // ── Sentinel placeholders — never used when unconfigured ──────
+  const PLACEHOLDER_MODEL = { id: "__unconfigured__", name: "Unconfigured", api: "faux" as Api, provider: "__unconfigured__", baseUrl: "", reasoning: false, input: [] as string[], maxTokens: 4096, temperature: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 4096 } as Model<Api>;
+  const PLACEHOLDER_STREAM: StreamFn = () => { throw new Error("Agent not configured"); };
+
+  let streamFn: StreamFn = PLACEHOLDER_STREAM;
+  let defaultModel: Model<Api> = PLACEHOLDER_MODEL;
   let defaultSystemPrompt = DEFAULT_SYSTEM_PROMPT;
   let defaultToolsAllowlist: string[] = [];
   let config: ChronoConfig | null = null;
   let models: MutableModels | null = null;
   let fallbackBot: ResolvedBot | null = null;
 
-  if (fakeLlm) {
-    streamFn = createFakeStreamFn(FAKE_SEND_TEXT);
-    defaultModel = FAKE_MODEL;
-    defaultToolsAllowlist = ["message_send"];
-    fallbackBot = {
-      id: "fake",
-      modelRef: "fake/fake",
-      resolvedModel: { model: FAKE_MODEL, overrides: null },
-      systemPrompt: DEFAULT_SYSTEM_PROMPT,
-      toolsAllowlist: ["message_send"],
-      skillsAllowlist: [],
-      policy: { context_scope: "session", commands: { new_session: true } },
-    };
-  } else {
-    const chronoHome = process.env.CHRONO_HOME ?? ".chrono";
+  const chronoHome = process.env.CHRONO_HOME ?? ".chrono";
     const dbPath = `${chronoHome}/state/chrono.db`;
     config = openConfig(dbPath);
     models = buildModels(config);
@@ -237,7 +223,6 @@ async function main() {
         });
       }
     }
-  }
 
   const profiles = new BotProfileResolver(config, models, fallbackBot);
 
@@ -263,7 +248,6 @@ async function main() {
    * routeKey = session_key + "#" + bot_id  (routing)
    * sessionId = random UUID                 (conversation instance)
    */
-  const chronoHome = process.env.CHRONO_HOME ?? ".chrono";
   const store = new SessionStore(sessionsDbPath(chronoHome));
   type Bucket = { sessionId: string; messages: AgentMessage[] };
   const sessions = new Map<string, Bucket>();

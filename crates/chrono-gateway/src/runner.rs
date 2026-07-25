@@ -228,12 +228,11 @@ fn dispatch_tool(
 /// DB (WebUI-managed) and re-sync on every `ReloadConfig`.
 pub async fn run_gateway(
     chrono_home: PathBuf,
-    fake_llm: bool,
     bun_path: String,
     agent_host_dir: PathBuf,
     config_store: ConfigStore,
 ) -> Result<()> {
-    let child = GatewayChild::spawn(&bun_path, &agent_host_dir, &chrono_home, fake_llm)
+    let child = GatewayChild::spawn(&bun_path, &agent_host_dir, &chrono_home)
         .context("spawn agent-host")?;
     let child = Arc::new(child);
 

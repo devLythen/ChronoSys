@@ -47,7 +47,6 @@ impl GatewayChild {
         bun_path: &str,
         agent_host_dir: &Path,
         chrono_home: &Path,
-        fake_llm: bool,
     ) -> Result<Self, GatewayError> {
         if !agent_host_dir.join("src/main.ts").exists() {
             return Err(GatewayError::MissingAgentHost(
@@ -63,10 +62,6 @@ impl GatewayChild {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .env("CHRONO_HOME", chrono_home);
-
-        if fake_llm {
-            cmd.env("CHRONO_FAKE_LLM", "1");
-        }
 
         let mut child = cmd.spawn().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
