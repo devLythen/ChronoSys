@@ -92,16 +92,6 @@ export default function ProvidersPage() {
     }
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-select first provider
-  useEffect(() => {
-    if (list.length > 0) {
-      if (!selectedId || !list.find((p) => p.id === selectedId)) {
-        setSelectedId(list[0].id);
-      }
-    } else {
-      setSelectedId(null);
-    }
-  }, [list, selectedId]);
 
   const configuredModelIds = new Set(selected?.models.map((m) => m.model_id) ?? []);
   const unconfiguredModels = availableModels.filter((m) => !configuredModelIds.has(m.id));
@@ -296,57 +286,71 @@ export default function ProvidersPage() {
         </div>
       )}
 
-      {/* ── Two-column layout ────────────────────────────────── */}
-      {list.length > 0 && (
-        <div className="flex gap-0 min-h-[600px]">
-          {/* ── Left sidebar ────────────────────────────────── */}
-          <aside className="w-56 shrink-0 border-r border-border bg-card">
-            <div className="space-y-0.5 py-2">
-              {list.map((pv) => (
-                <div key={pv.id} className="group relative">
-                  <button
-                    onClick={() => setSelectedId(pv.id)}
-                    className={
-                      "w-full text-left px-4 py-2.5 text-sm flex items-center justify-between transition-colors border border-transparent " +
-                      (selectedId === pv.id
-                        ? "bg-fg text-bg border-fg"
-                        : "hover:bg-muted text-fg hover:border-fg/20")
-                    }
-                  >
-                    <span className="truncate">{pv.id}</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                        deleteProvMutation.mutate(pv.id);
-                      if (window.confirm(`Delete provider "${pv.id}"?`)) {
-                      }
-                    }}
-                    className={
-                      "absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity " +
-                      "text-xs px-1.5 py-0.5 rounded hover:bg-destructive hover:text-destructive-fg " +
-                      (selectedId === pv.id ? "text-bg/60 hover:text-destructive-fg" : "text-muted-fg")
-                    }
-                    title="Delete provider"
-                  >
-                    ✕
-                  </button>
+      {/* ── Provider cards or editor ──────────────────────────── */}
+      {list.length > 0 && !selectedId && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {list.map((pv) => (
+            <Card
+              key={pv.id}
+              className="cursor-pointer hover:border-fg/30 transition-colors flex flex-col"
+              padding="none"
+              onClick={() => setSelectedId(pv.id)}
+            >
+              <div className="p-4 flex-1">
+                <div className="flex items-start justify-between mb-3">
+                  <h3 className="t-headline !text-xl truncate">{pv.id}</h3>
+                  <span className="t-mono text-[11px] text-muted-fg">{pv.kind}</span>
                 </div>
-              ))}
-            </div>
-          </aside>
+                <div className="flex items-center gap-3 text-xs text-muted-fg">
+                  <span>{pv.models.length} model{pv.models.length !== 1 ? "s" : ""}</span>
+                  {pv.secret_ref && <span className="text-success">● credential set</span>}
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
 
-          {/* ── Main area ──────────────────────────────────── */}
-          <main className="flex-1 min-w-0">
-            {selected ? (
-              <div className="px-8 py-6 space-y-6">
-                {/* ── Top bar: name + save ─────────────────── */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <h2 className="t-headline">
-                      Provider: {selected.id}
-                    </h2>
-                    <span className="t-mono text-sm text-muted-fg">{selected.id}</span>
-                  </div>
+      {/* ── Provider editor ──────────────────────────────────── */}
+      {list.length > 0 && selectedId && selected && (
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <Button variant="secondary" size="sm" onClick={() => setSelectedId(null)}>
+              ← Back
+            </Button>
+            <h2 className="t-headline">{selected.id}</h2>
+            <span className="t-mono text-sm text-muted-fg">{selected.kind}</span>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* ── Config ──────────────────────────── */}
+            <Card padding="md">
+              <div className="space-y-4">
+                <h3 className="t-title font-medium">Configuration</h3>
+                <Select
+                  label="Kind"
+                  options={PROVIDER_KINDS}
+                  value={editKind}
+                  onChange={(e) => {
+                    const k = e.target.value;
+                    setEditKind(k);
+                    setEditBaseUrl(DEFAULT_BASE_URLS[k] ?? editBaseUrl);
+                  }}
+                />
+                <Input
+                  label="Base URL"
+                  value={editBaseUrl}
+                  onChange={(e) => setEditBaseUrl(e.target.value)}
+                  placeholder="https://api.openai.com/v1"
+                />
+                <Input
+                  label="API Key"
+                  type="text"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={selected?.secret_ref ? "•••••••• (leave blank to keep)" : "sk-..."}
+                />
+                <div className="flex justify-end">
                   <Button
                     onClick={() => saveProvMutation.mutate()}
                     disabled={saveProvMutation.isPending}
@@ -354,105 +358,62 @@ export default function ProvidersPage() {
                     {saveProvMutation.isPending ? "Saving..." : "Save"}
                   </Button>
                 </div>
+              </div>
+            </Card>
 
-                {/* ── Config card ──────────────────────────── */}
-                <Card padding="md">
-                  <div className="space-y-4">
-                    <Select
-                      label="Kind"
-                      options={PROVIDER_KINDS}
-                      value={editKind}
-                      onChange={(e) => {
-                        const k = e.target.value;
-                        setEditKind(k);
-                        setEditBaseUrl(DEFAULT_BASE_URLS[k] ?? editBaseUrl);
-                      }}
-                    />
-                    <Input
-                      label="Base URL"
-                      value={editBaseUrl}
-                      onChange={(e) => setEditBaseUrl(e.target.value)}
-                      placeholder="https://api.openai.com/v1"
-                    />
-                    <Input
-                      label="API Key"
-                      type="text"
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder={selected?.secret_ref ? "•••••••• (leave blank to keep)" : "sk-..."}
-                    />
-                  </div>
-                </Card>
-
-                <div className="halftone h-6 opacity-30" />
-
-                {/* ── Model management ──────────────────────── */}
+            {/* ── Models ──────────────────────────── */}
+            <Card padding="md">
+              <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="t-headline">Configured Models</h3>
+                  <h3 className="t-title font-medium">Models</h3>
                   <Button
                     variant="secondary"
                     size="sm"
                     onClick={handleFetchModels}
                     disabled={fetchingModels}
                   >
-                    {fetchingModels ? "Fetching..." : "Fetch Models"}
+                    {fetchingModels ? "Fetching..." : "Fetch"}
                   </Button>
                 </div>
 
-                {/* Configured models list */}
-                {selected.models.length === 0 ? (
-                  <p className="t-body text-muted-fg py-4">
-                    No models configured for this provider.
-                  </p>
-                ) : (
+                {selected.models.length === 0 && unconfiguredModels.length === 0 && (
+                  <p className="t-body text-muted-fg py-4">No models configured.</p>
+                )}
+
+                {selected.models.length > 0 && (
                   <div className="border border-border rounded-sm overflow-hidden">
                     {selected.models.map((m) => (
                       <div
                         key={m.model_id}
-                        className="flex items-center gap-3 px-4 py-2.5 border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
+                        className="flex items-center gap-3 px-3 py-2 border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
                       >
-                        <span className="t-mono text-sm flex-1 min-w-0 truncate">
-                          {m.model_id}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openModelSettings(m)}
-                          title="Settings"
-                        >
-                          ⚙
-                        </Button>
+                        <span className="t-mono text-sm flex-1 min-w-0 truncate">{m.model_id}</span>
+                        <Button variant="ghost" size="sm" onClick={() => openModelSettings(m)} title="Settings">⚙</Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="text-destructive hover:text-destructive"
                           onClick={() => {
                             if (window.confirm(`Delete model "${m.model_id}"?`)) {
-                              deleteModelMutation.mutate({
-                                providerId: selected.id,
-                                modelId: m.model_id,
-                              });
+                              deleteModelMutation.mutate({ providerId: selected.id, modelId: m.model_id });
                             }
                           }}
                           title="Delete model"
-                        >
-                          ✕
-                        </Button>
+                        >✕</Button>
                       </div>
                     ))}
                   </div>
                 )}
 
-                {/* Available models */}
                 {unconfiguredModels.length > 0 && (
                   <div className="space-y-2">
-                    <h4 className="t-label text-muted-fg">Available Models</h4>
+                    <h4 className="t-label text-muted-fg">Available</h4>
                     <div className="border border-border rounded-sm overflow-hidden">
                       {unconfiguredModels.map((m) => (
                         <button
                           key={m.id}
                           onClick={() => addAvailableModel(m)}
-                          className="w-full text-left px-4 py-2.5 text-sm border-b border-border last:border-0 hover:bg-muted/30 transition-colors flex items-center gap-2"
+                          className="w-full text-left px-3 py-2 text-sm border-b border-border last:border-0 hover:bg-muted/30 transition-colors flex items-center gap-2"
                         >
                           <span className="text-accent">+</span>
                           <span className="t-mono">{m.id}</span>
@@ -462,12 +423,8 @@ export default function ProvidersPage() {
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="flex items-center justify-center h-full py-20">
-                <p className="t-body text-muted-fg">Select a provider from the sidebar.</p>
-              </div>
-            )}
-          </main>
+            </Card>
+          </div>
         </div>
       )}
 
