@@ -10,6 +10,7 @@ import type {
   ModelInfo,
 } from "../api/types";
 import Button from "../components/ui/Button";
+import { Plus } from "lucide-react";
 import Input from "../components/ui/Input";
 import Select from "../components/ui/Select";
 import Card from "../components/ui/Card";
@@ -51,7 +52,6 @@ export default function ProvidersPage() {
     data: providers,
     isLoading,
     error,
-    refetch,
   } = useQuery<ProviderView[]>({
     queryKey: ["providers"],
     queryFn: () => api.listProviders(),
@@ -247,52 +247,53 @@ export default function ProvidersPage() {
 
   // ── Render ───────────────────────────────────────────────────
 
-  if (isLoading) {
-    return (
-      <div className="animate-fade-up flex items-center justify-center h-64">
-        <p className="t-body text-muted-fg">Loading providers...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="animate-fade-up flex flex-col items-center justify-center gap-4 h-64">
-        <p className="t-body text-destructive">
-          Failed to load providers: {(error as Error).message}
-        </p>
-        <Button variant="secondary" onClick={() => refetch()}>
-          Retry
-        </Button>
-      </div>
-    );
-  }
 
   return (
-    <div className="animate-fade-up space-y-6">
+    <div className="animate-fade-up space-y-6 md:space-y-8">
       {/* ── Header ──────────────────────────────────────────── */}
       <div>
-        <h1 className="t-display !text-4xl md:!text-5xl">Providers</h1>
-        <p className="t-body text-muted-fg mt-3 max-w-lg">
+        <h1 className="t-display">Providers</h1>
+        <p className="t-body text-muted-fg mt-3 max-w-xl">
           Configure LLM providers and their models for the ChronoSys gateway.
         </p>
       </div>
 
       <div className="rule-heavy" />
 
-      {/* ── Empty state ─────────────────────────────────────── */}
-      {list.length === 0 && (
-        <>
-          <div className="halftone h-10 opacity-30" />
-          <div className="py-20 text-center">
-            <p className="t-body text-muted-fg">
-              No providers configured. Add one to get started.
-            </p>
-            <Button className="mt-4" onClick={openCreateProv}>
-              Add Provider
-            </Button>
-          </div>
-        </>
+      {/* Toolbar */}
+      <div className="flex items-center justify-between">
+        <p className="t-label text-muted-fg">
+          {list ? `${list.length} provider${list.length !== 1 ? "s" : ""}` : "—"}
+        </p>
+        <Button onClick={openCreateProv}>
+          <Plus size={16} />
+          New Provider
+        </Button>
+      </div>
+
+      {isLoading && (
+        <div className="py-16 text-center">
+          <p className="t-body text-muted-fg">Loading providers&hellip;</p>
+        </div>
+      )}
+
+      {error && (
+        <div className="py-16 text-center">
+          <p className="text-sm text-destructive font-medium">
+            Failed to load providers: {(error as Error).message}
+          </p>
+        </div>
+      )}
+
+      {!isLoading && !error && list.length === 0 && (
+        <div className="halftone-light py-24 text-center border border-border">
+          <p className="t-headline text-muted-fg/60 mb-3">No providers yet</p>
+          <p className="t-body text-muted-fg/70 mb-6">Add one to get started.</p>
+          <Button onClick={openCreateProv}>
+            <Plus size={16} />
+            New Provider
+          </Button>
+        </div>
       )}
 
       {/* ── Two-column layout ────────────────────────────────── */}
@@ -306,10 +307,10 @@ export default function ProvidersPage() {
                   <button
                     onClick={() => setSelectedId(pv.id)}
                     className={
-                      "w-full text-left px-4 py-2.5 text-sm flex items-center justify-between transition-colors " +
+                      "w-full text-left px-4 py-2.5 text-sm flex items-center justify-between transition-colors border border-transparent " +
                       (selectedId === pv.id
-                        ? "bg-fg text-bg"
-                        : "hover:bg-muted text-fg")
+                        ? "bg-fg text-bg border-fg"
+                        : "hover:bg-muted text-fg hover:border-fg/20")
                     }
                   >
                     <span className="truncate">{pv.id}</span>
@@ -331,16 +332,6 @@ export default function ProvidersPage() {
                   </button>
                 </div>
               ))}
-            </div>
-            <div className="border-t border-border px-3 py-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start text-muted-fg hover:text-fg"
-                onClick={openCreateProv}
-              >
-                + Add Provider
-              </Button>
             </div>
           </aside>
 

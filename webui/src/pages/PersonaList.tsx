@@ -67,20 +67,25 @@ export default function PersonaList() {
   return (
     <div className="animate-fade-up space-y-6 md:space-y-8">
       {/* Hero header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="t-display">Personas</h1>
-          <p className="t-body text-muted-fg mt-3 max-w-xl">
-            Edit system prompts, tools, and skills. Personas define how
-            the assistant behaves and what it can do.
-          </p>
-        </div>
-        <Button onClick={() => setModalOpen(true)} size="lg">
+      <div>
+        <h1 className="t-display">Personas</h1>
+        <p className="t-body text-muted-fg mt-3 max-w-xl">
+          Edit system prompts, tools, and skills. Personas define how
+          the assistant behaves and what it can do.
+        </p>
+      </div>
+      <div className="rule-heavy" />
+
+      {/* Toolbar */}
+      <div className="flex items-center justify-between">
+        <p className="t-label text-muted-fg">
+          {personas ? `${personas.length} persona${personas.length !== 1 ? "s" : ""}` : "—"}
+        </p>
+        <Button onClick={() => setModalOpen(true)}>
           <Plus size={16} />
           New Persona
         </Button>
       </div>
-      <div className="rule-heavy" />
 
       {isLoading && (
         <div className="py-16 text-center">

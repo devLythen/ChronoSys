@@ -6,7 +6,6 @@ import { api } from "../api/client";
 import type { AccountView, Binding, BotProfile, AccountBody } from "../api/types";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
-import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
 import Input from "../components/ui/Input";
 import Select from "../components/ui/Select";
@@ -187,7 +186,7 @@ export default function PlatformsPage() {
     bindings.find((b) => b.account_id === accountId);
 
   return (
-    <div className="animate-fade-up space-y-6">
+    <div className="animate-fade-up space-y-6 md:space-y-8">
       {/* ── Page header — typographic ── */}
       <div>
         <h1 className="t-display">Platforms</h1>
@@ -200,11 +199,11 @@ export default function PlatformsPage() {
 
       {/* ── Action bar ── */}
       <div className="flex items-center justify-between">
-        <span className="t-label text-muted-fg">
+        <p className="t-label text-muted-fg">
           {accounts.length} bot{accounts.length !== 1 ? "s" : ""}
-        </span>
-        <Button onClick={openNew} size="lg">
-          <Plus size={15} />
+        </p>
+        <Button onClick={openNew}>
+          <Plus size={16} />
           New Bot
         </Button>
       </div>
@@ -221,19 +220,13 @@ export default function PlatformsPage() {
         </div>
       )}
 
-      {/* ── Empty state ── */}
       {!acctsLoading && !acctsError && accounts.length === 0 && (
-        <div className="halftone-light py-20 px-8 text-center border border-border rounded-sm">
-          <p className="t-body text-muted-fg">
-            No bots yet. Create one to get started.
-          </p>
+        <div className="halftone-light py-24 text-center border border-border">
+          <p className="t-headline text-muted-fg/60 mb-3">No bots yet</p>
+          <p className="t-body text-muted-fg/70 mb-6">Create one to get started.</p>
         </div>
       )}
 
-      {/* ── Decorative halftone block ── */}
-      {accounts.length > 0 && (
-        <div className="halftone h-20 rounded-none opacity-30" />
-      )}
 
       {/* ── Account cards ── */}
       {accounts.length > 0 && (
@@ -244,7 +237,7 @@ export default function PlatformsPage() {
 
             return (
               <div key={a.id}>
-                <Card padding="none">
+                <Card padding="none" className="hover:border-fg/30 transition-colors">
                   {/* Card body — horizontal full-width */}
                   <div className="flex items-center justify-between px-4 py-3">
                     <button
