@@ -7,6 +7,7 @@
 3. Fail closed on capabilities; empty allowlist = agent can only talk (if `message.send` granted).
 4. Every side effect audited.
 5. `$CHRONO_HOME` is the only writable root (default XDG).
+6. **No legacy compatibility.** Pre-v1 breaking-change phase: old formats are removed, not deprecated. No dual-path code. Config migrations update existing data.
 
 ---
 
@@ -24,70 +25,70 @@
 
 **Exit:** `cargo build -p chrono-sys` + `bun install && bun run typecheck` green.
 
-### M1 — Agent loop vertical slice (week 1–2)
+### M1 — Agent loop vertical slice (week 1–2) ✅
 
 **Deliverable:** gateway spawns agent-host; inbound message → pi agent → tool `message.send` → log.
 
-- [ ] agent-host: create `Agent` with system prompt + `message.send` tool
-- [ ] tool IPC over UDS to gateway mock
-- [ ] gateway: mock adapter that prints outbound messages
-- [ ] session persistence under `$CHRONO_HOME/sessions`
-- [ ] stream events to stdout JSONL
+- [x] agent-host: create `Agent` with system prompt + `message.send` tool
+- [x] tool IPC via stdin/stdout framed protocol (chrono-ipc)
+- [x] gateway: Telegram adapter with Bot API long-poll
+- [x] session persistence under `$CHRONO_HOME/state/sessions.db` (UUID sessions)
+- [x] agent resilience: try-catch on `resolveBot` at all call sites
 
-**Exit:** end-to-end demo script without real Telegram.
+**Exit:** end-to-end: Telegram DM → agent → reply via `message_send`.
 
-### M1.5 — Configuration store + pi-ai provider wiring (week 2–3)
+### M1.5 — Configuration store + pi-ai provider wiring (week 2–3) ✅
 
 **Deliverable:** multi-entity config DB; real LLM path uses only configured provider/model; no silent defaults.
 
-- [ ] SQLite at `$CHRONO_HOME/state/chrono.db` + schema migrations
-- [ ] Tables: `llm_providers`, `llm_credentials`, `llm_models`, `platform_accounts`, `bot_profiles`, `bindings`, `settings`
-- [ ] Secrets by reference under `$CHRONO_HOME/secrets/` (or keychain)
-- [ ] agent-host: build `createModels` + `CredentialStore` from DB; resolve `BotProfile.model_ref` only
-- [ ] Remove M1 env fallbacks (`CHRONO_MODEL` / first-available model) from the non-fake path
-- [ ] CLI: `chrono init`, `chrono llm …`, `chrono account …`, `chrono bot …`, `chrono bind …`, `chrono config doctor`
-- [ ] `chrono config doctor` prints missing links (credential/model/binding) and exits non-zero if not live-ready
-- [ ] Fail closed: empty DB ⇒ control plane may start; agent sessions and adapters refuse until configured
+- [x] SQLite at `$CHRONO_HOME/state/chrono.db` + schema migrations
+- [x] Tables: `llm_providers`, `llm_credentials`, `llm_models`, `platform_accounts`, `bot_profiles`, `personas`, `bindings`, `settings`
+- [x] agent-host: `buildModels()` + `ChronoCredentialStore` from DB; `resolveModelRef()`
+- [x] Fail closed: empty DB → system starts cleanly, waits for WebUI configuration
+- [x] `display_name` removed from all config entities — `id` is the sole identifier
+- [ ] CLI: `chrono init`, `chrono llm …`, `chrono config doctor` *(deferred — WebUI suffices)*
 
-**Exit:** with only env vars and no DB rows, system starts cleanly and waits for WebUI configuration. After setup, `createModels` + `streamSimple` work for a configured model.
+**Exit:** system starts with empty DB, configures via WebUI; `createModels` + `streamSimple` work for configured model.
 
-### M2 — Telegram adapter + sandbox (week 3–5)
+### M2 — Telegram adapter + sandbox (week 3–5) ✅
 
 **Deliverable:** real bot replies in a private chat **using config DB accounts/bindings**.
 
-- [x] `chrono.adapter.telegram` (Bot API, long poll)
-- [x] Load enabled `platform_accounts` + `bindings` from DB (no hardcoded token)
-- [ ] media download to sandbox workspace *(deferred)*
-- [ ] `sandbox.exec` / `sandbox.read` / `sandbox.write` *(deferred)*
+- [x] `chrono.adapter.telegram` (Bot API)
+- [x] Long-poll with exponential backoff + jitter; timeout 12s; fatal error detection
+- [x] Load enabled `platform_accounts` + `bindings` from DB
 - [x] rate limit + mention-only policy (from bot `policy_json`)
 - [x] basic audit log
-- [x] **Session-strong isolation** in agent-host (per route + UUID session_id)
-- [x] Telegram `/new` command: new UUID session; archive previous transcript
-- [x] `policy_json.context_scope` reserved (`session` default; `bot`/`account` TODO)
+- [x] Session-strong isolation (per route + UUID session_id)
+- [x] Telegram `/new` command (registered via setMyCommands)
 - [x] UUID session persistence (`$CHRONO_HOME/state/sessions.db`)
-- [x] `message_send` supports optional `chat_id` (cross-chat); body-text fallback current-only
-- [x] `policy_json.max_context_messages` hard refuse + error log (compaction/memory later)
+- [x] `message_send` + `message_reply` with optional `chat_id`
+- [x] `policy_json.max_context_messages` hard refuse (compaction later)
 - [x] Bot profile hot-read from config DB each turn
+- [ ] media download to sandbox workspace *(deferred)*
+- [ ] `sandbox.exec` / `sandbox.read` / `sandbox.write` *(deferred)*
 
-**Exit:** support bot answers in DM; cannot touch host FS; token only via account secret_ref.
-Sandbox/media intentionally deferred to a later hardening pass.
+**Exit:** bot answers in DM; token via account secret_ref; model via config DB.
 
-### M3 — Control plane + WebUI MVP (week 5–7)
+### M3 — Control plane + WebUI MVP (week 5–7) 🚧
 
-**Deliverable:** operators manage bots/sessions/providers/accounts in browser against the config DB.
+**Deliverable:** operators manage bots/sessions/providers/accounts/personas in browser.
 
-- [ ] REST + WS API on gateway (CRUD for config entities; no raw secret read-back)
-- [ ] WebUI: overview, sessions detail (transcript + tool trace), bot editor
-- [ ] WebUI: `/providers`, `/accounts`, `/bots`, `/bindings` backed by state DB
-- [ ] bearer token auth (localhost); refuse if auth token unset in non-dev
-- [ ] live steer/abort from UI
-- [ ] config hot-reload notification to agent-host
+- [x] REST API: CRUD for providers, credentials, models, accounts, bots, personas, bindings, sessions, audit
+- [x] Runtime model capabilities query via agent-host IPC (replaces compile-time `model_caps.json`)
+- [x] WebUI: Providers, Configs, Personas, Platforms, Sessions (read-only), Audit, Settings
+- [x] Config editor: structured policy form (max context, commands whitelist, mention toggle)
+- [x] Session detail: chat bubbles + thinking collapse + tool call display
+- [x] Model settings: thinking level dropdown populated from runtime capabilities
+- [x] Persona editor: tools allowlist checkbox grid, skills tag editor
+- [x] Config hot-reload notification to agent-host
+- [x] bearer token auth (loopback bypass)
+- [ ] Live steer/abort from UI *(deferred — needs webui-as-platform architecture)*
+- [ ] WebSocket real-time push *(deferred)*
 
-**Exit:** no need for log diving for normal ops; multi-entity state editable without hand-editing TOML.
+**Exit:** operators configure everything via WebUI; no log diving for normal ops.
 
 ### M4 — Plugin system (week 7–9)
-
-**Deliverable:** install external tool plugin + skill.
 
 - [ ] manifest load + capability grants
 - [ ] TS tool plugins

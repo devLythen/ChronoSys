@@ -37,18 +37,18 @@ export default function ConfigEditor() {
   const [personaId, setPersonaId] = useState("");
   // Policy fields — parsed from bot.policy_json on load
   const [maxContext, setMaxContext] = useState<number | null>(null);
-  const [contextScope, setContextScope] = useState("session");
-  const [newSessionCmd, setNewSessionCmd] = useState(true);
+  const [commandList, setCommandList] = useState("new");
   const [mentionRequired, setMentionRequired] = useState(false);
+
   useEffect(() => {
     if (bot) {
       setModelRef(bot.model_ref);
       setPersonaId(bot.persona_id || "");
-      const p = bot.policy_json ?? {};
-      setMaxContext((p as Record<string,unknown>).max_context_messages as number ?? null);
-      setContextScope(String((p as Record<string,unknown>).context_scope || "session"));
-      setNewSessionCmd(!((p as Record<string,unknown>).commands as Record<string,unknown>)?.new_session === false);
-      setMentionRequired(Boolean((p as Record<string,unknown>).mention_required));
+      const p = bot.policy_json ?? {} as Record<string,unknown>;
+      setMaxContext(p.max_context_messages as number ?? null);
+      const cmds: unknown = p.commands;
+      setCommandList(Array.isArray(cmds) ? (cmds as string[]).join(", ") : "new");
+      setMentionRequired(Boolean(p.mention_required));
     }
   }, [bot]);
   const modelOptions = (() => {
@@ -73,11 +73,10 @@ export default function ConfigEditor() {
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      if (!id) throw new Error("Missing bot id");
       const policy: Record<string, unknown> = {};
       if (maxContext != null) policy.max_context_messages = maxContext;
-      if (contextScope !== "session") policy.context_scope = contextScope;
-      policy.commands = { new_session: newSessionCmd };
+      const cmds = commandList.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+      if (cmds.length > 0) policy.commands = cmds;
       if (mentionRequired) policy.mention_required = true;
       return api.updateBot(id, {
         model_ref: modelRef,
@@ -172,26 +171,19 @@ export default function ConfigEditor() {
               />
             </div>
 
-            <Select
-              label="Context Scope"
-              value={contextScope}
-              onChange={(e) => setContextScope(e.target.value)}
-              options={[
-                { value: "session", label: "Session (default)" },
-                { value: "bot", label: "Bot-wide" },
-                { value: "account", label: "Account-wide" },
-              ]}
-            />
-
-            <label className="flex items-center gap-3 cursor-pointer">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-fg uppercase tracking-wide">
+                Commands
+              </label>
               <input
-                type="checkbox"
-                checked={newSessionCmd}
-                onChange={(e) => setNewSessionCmd(e.target.checked)}
-                className="w-4 h-4 rounded-sm border-border accent-fg"
+                type="text"
+                value={commandList}
+                onChange={(e) => setCommandList(e.target.value)}
+                placeholder="new"
+                className="px-3 py-1.5 text-sm border rounded-sm bg-card text-fg placeholder:text-muted-fg/60 focus:outline-none focus:ring-1 focus:ring-fg transition-colors duration-150 border-border"
               />
-              <span className="text-sm text-fg">Enable /new command</span>
-            </label>
+              <p className="text-[11px] text-muted-fg">Comma-separated command names, e.g. new, reset</p>
+            </div>
 
             <label className="flex items-center gap-3 cursor-pointer">
               <input
