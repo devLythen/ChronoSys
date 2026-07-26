@@ -88,7 +88,7 @@ export default function ProvidersPage() {
     if (selected) {
       setEditKind(selected.kind);
       setEditBaseUrl(selected.base_url ?? "");
-      setApiKey("");
+      setApiKey(selected.secret_ref ?? "");
     }
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -348,7 +348,7 @@ export default function ProvidersPage() {
                   type="text"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={selected?.secret_ref ? "•••••••• (leave blank to keep)" : "sk-..."}
+                  placeholder="sk-..."
                 />
                 <div className="flex justify-end">
                   <Button
@@ -360,7 +360,6 @@ export default function ProvidersPage() {
                 </div>
               </div>
             </Card>
-
             {/* ── Models ──────────────────────────── */}
             <Card padding="md">
               <div className="space-y-4">
