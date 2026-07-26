@@ -35,18 +35,22 @@ export default function ConfigEditor() {
 
   const [modelRef, setModelRef] = useState("");
   const [personaId, setPersonaId] = useState("");
-  const [policyJson, setPolicyJson] = useState("");
-  const [policyError, setPolicyError] = useState("");
-
+  // Policy fields — parsed from bot.policy_json on load
+  const [maxContext, setMaxContext] = useState<number | null>(null);
+  const [contextScope, setContextScope] = useState("session");
+  const [newSessionCmd, setNewSessionCmd] = useState(true);
+  const [mentionRequired, setMentionRequired] = useState(false);
   useEffect(() => {
     if (bot) {
-
       setModelRef(bot.model_ref);
       setPersonaId(bot.persona_id || "");
-      setPolicyJson(JSON.stringify(bot.policy_json ?? {}, null, 2));
+      const p = bot.policy_json ?? {};
+      setMaxContext((p as Record<string,unknown>).max_context_messages as number ?? null);
+      setContextScope(String((p as Record<string,unknown>).context_scope || "session"));
+      setNewSessionCmd(!((p as Record<string,unknown>).commands as Record<string,unknown>)?.new_session === false);
+      setMentionRequired(Boolean((p as Record<string,unknown>).mention_required));
     }
   }, [bot]);
-
   const modelOptions = (() => {
     const opts: { value: string; label: string }[] = [];
     if (!providers) return opts;
@@ -70,16 +74,15 @@ export default function ConfigEditor() {
   const saveMut = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error("Missing bot id");
-      let parsedPolicy;
-      try {
-        parsedPolicy = JSON.parse(policyJson);
-      } catch {
-        throw new Error("Invalid policy JSON");
-      }
+      const policy: Record<string, unknown> = {};
+      if (maxContext != null) policy.max_context_messages = maxContext;
+      if (contextScope !== "session") policy.context_scope = contextScope;
+      policy.commands = { new_session: newSessionCmd };
+      if (mentionRequired) policy.mention_required = true;
       return api.updateBot(id, {
         model_ref: modelRef,
         persona_id: personaId || null,
-        policy_json: parsedPolicy,
+        policy_json: policy,
         json_ext: bot?.json_ext || {},
       });
     },
@@ -93,28 +96,8 @@ export default function ConfigEditor() {
     },
   });
 
-  const handleSave = () => {
-    try {
-      JSON.parse(policyJson);
-      saveMut.mutate();
-    } catch (e) {
-      setPolicyError((e as Error).message);
-    }
-  };
+  const handleSave = () => saveMut.mutate();
 
-  const validatePolicyJson = (val: string) => {
-    setPolicyJson(val);
-    if (!val.trim()) {
-      setPolicyError("");
-      return;
-    }
-    try {
-      JSON.parse(val);
-      setPolicyError("");
-    } catch (e) {
-      setPolicyError((e as Error).message);
-    }
-  };
 
   if (isLoading) {
     return (
@@ -171,20 +154,54 @@ export default function ConfigEditor() {
             onChange={(e) => setModelRef(e.target.value)}
             placeholder="Select a model…"
           />
-          <div className="flex flex-col gap-1.5">
-            <p className="t-label text-muted-fg">Policy JSON</p>
-            <textarea
-              className={`px-4 py-3 text-sm border bg-card text-fg placeholder:text-muted-fg/60 font-mono min-h-[200px] focus:outline-none focus:ring-1 focus:ring-fg transition-colors duration-150 resize-y ${
-                policyError ? "border-destructive" : "border-border"
-              }`}
-              value={policyJson}
-              onChange={(e) => validatePolicyJson(e.target.value)}
-              placeholder='{ "max_context_messages": 50 }'
-              spellCheck={false}
+          <div className="space-y-4">
+            <p className="t-label text-muted-fg">Runtime Policy</p>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-fg uppercase tracking-wide">
+                Max Context Messages
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={maxContext ?? ""}
+                onChange={(e) => setMaxContext(e.target.value ? Number(e.target.value) : null)}
+                placeholder="Unlimited"
+                className="px-3 py-1.5 text-sm border rounded-sm bg-card text-fg placeholder:text-muted-fg/60 focus:outline-none focus:ring-1 focus:ring-fg transition-colors duration-150 border-border"
+              />
+            </div>
+
+            <Select
+              label="Context Scope"
+              value={contextScope}
+              onChange={(e) => setContextScope(e.target.value)}
+              options={[
+                { value: "session", label: "Session (default)" },
+                { value: "bot", label: "Bot-wide" },
+                { value: "account", label: "Account-wide" },
+              ]}
             />
-            {policyError && (
-              <p className="text-xs text-destructive">Invalid JSON: {policyError}</p>
-            )}
+
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newSessionCmd}
+                onChange={(e) => setNewSessionCmd(e.target.checked)}
+                className="w-4 h-4 rounded-sm border-border accent-fg"
+              />
+              <span className="text-sm text-fg">Enable /new command</span>
+            </label>
+
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={mentionRequired}
+                onChange={(e) => setMentionRequired(e.target.checked)}
+                className="w-4 h-4 rounded-sm border-border accent-fg"
+              />
+              <span className="text-sm text-fg">Require @mention in groups</span>
+            </label>
           </div>
         </Card>
 
