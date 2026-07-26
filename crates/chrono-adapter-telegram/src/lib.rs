@@ -6,7 +6,7 @@ use chrono_ipc::adapter::{
 use chrono_ipc::{ChatKind, ChatRef, ChronoEvent, InboundMessageBody, SenderRef};
 use serde_json::Value;
 use teloxide::prelude::*;
-use teloxide::types::{MessageId, Recipient, ReplyParameters, UpdateKind};
+use teloxide::types::{BotCommand, MessageId, Recipient, ReplyParameters, UpdateKind};
 use teloxide::{ApiError, RequestError};
 
 pub struct TelegramAdapter {
@@ -54,6 +54,15 @@ impl PlatformAdapter for TelegramAdapter {
         let username = me.username.as_deref().unwrap_or("unknown");
         eprintln!("[telegram] connected as @{username} (id: {})", me.id.0);
         let _ = self.bot_username.set(username.to_string());
+
+        // Register bot commands so /new appears in Telegram's command menu.
+        let _ = bot
+            .set_my_commands(vec![BotCommand {
+                command: "new".into(),
+                description: "Start a new conversation session".into(),
+            }])
+            .send()
+            .await;
 
         // ── Long-poll with exponential backoff ──────────────────
         // Timeout shorter than typical proxy/NAT idle timeout (~15s) to avoid
