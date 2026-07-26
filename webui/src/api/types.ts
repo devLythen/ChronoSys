@@ -138,26 +138,24 @@ export interface Binding {
 
 export interface SessionSummary {
   session_id: string;
-  bot_profile_id: string;
-  account_id: string;
-  chat_id: string;
   route_key: string;
-  status: string;
-  message_count: number;
-  created_at: string;
+  session_key: string;
+  bot_profile_id: string;
   updated_at: string;
+  created_at: string;
+  message_count: number;
+  active: boolean;
 }
 
 export interface SessionDetail {
   session_id: string;
-  bot_profile_id: string;
-  account_id: string;
-  chat_id: string;
   route_key: string;
-  status: string;
-  messages_json: string;
+  session_key: string;
+  bot_profile_id: string;
+  messages: unknown;
   created_at: string;
   updated_at: string;
+  active: boolean;
 }
 
 // ── Health ─────────────────────────────────────────────────────

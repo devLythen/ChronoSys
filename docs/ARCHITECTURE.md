@@ -10,7 +10,7 @@ Agent-centric chat integration framework: platforms (Telegram / QQ / WeChat / �
 
 **Secrets are plaintext.** `secret_ref` stores the actual API key or bot token directly. No `env:VAR` or `file:PATH` indirection — just the value. The API returns it in responses so the WebUI can display and edit it.
 
----
+**No legacy compatibility.** The project is pre-v1 and in active breaking-change development. When a data format, API contract, or policy schema is redesigned, the old format is removed immediately — not deprecated, not dual-path. Config migrations update existing data; no code carries backward-compatibility branches. This keeps the codebase lean and avoids the accumulation of "temporary" adapters that ossify into permanent complexity.
 
 ## 1. Crate Map
 

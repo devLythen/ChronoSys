@@ -83,9 +83,7 @@
 - [x] Persona editor: tools allowlist checkbox grid, skills tag editor
 - [x] Config hot-reload notification to agent-host
 - [x] bearer token auth (loopback bypass)
-- [ ] Live steer/abort from UI *(deferred — needs webui-as-platform architecture)*
-- [ ] WebSocket real-time push *(deferred)*
-
+- [ ] WebSocket real-time push *(reserved — enables stable long-lived connections for external platforms)*
 **Exit:** operators configure everything via WebUI; no log diving for normal ops.
 
 ### M4 — Plugin system (week 7–9)

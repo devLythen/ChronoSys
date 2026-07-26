@@ -207,8 +207,7 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 需 `Authorization: Bear
 
 ### Sessions
 - 列表：5 秒自动刷新
-- 详情：左侧 transcript 气泡，右侧元数据卡片
-- 支持 Abort 和 Steer（未配置时返回提示）
+- 详情：左侧 transcript 气泡，右侧元数据卡片（只读）
 
 ### Audit
 - 可筛选表格：limit / account_id / session_id / event

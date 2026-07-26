@@ -7,7 +7,7 @@ use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::state::{AgentControl, AppState};
+use crate::state::AppState;
 
 pub async fn handler(
     ws: WebSocketUpgrade,
@@ -21,17 +21,11 @@ pub async fn handler(
 enum WsClient {
     #[serde(rename = "subscribe")]
     Subscribe { topics: Vec<String> },
-    #[serde(rename = "session.prompt")]
-    SessionPrompt { session_id: String, text: String },
-    #[serde(rename = "session.steer")]
-    SessionSteer { session_id: String, text: String },
-    #[serde(rename = "session.abort")]
-    SessionAbort { session_id: String },
     #[serde(rename = "ping")]
     Ping,
 }
 
-async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
+async fn handle_socket(mut socket: WebSocket, _state: Arc<AppState>) {
     let _ = socket
         .send(Message::Text(
             json!({ "type": "hello", "protocol": "chrono.ws.v1" }).to_string().into(),
@@ -49,8 +43,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
             _ => continue,
         };
 
-        let parsed: Result<WsClient, _> = serde_json::from_str(&text);
-        match parsed {
+        match serde_json::from_str::<WsClient>(&text) {
             Ok(WsClient::Subscribe { topics }) => {
                 let _ = socket
                     .send(Message::Text(
@@ -60,49 +53,8 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
                     ))
                     .await;
             }
-            Ok(WsClient::SessionSteer { session_id, text }) => {
-                let _ = state.agent_tx.send(AgentControl::Steer {
-                    session_id: session_id.clone(),
-                    text,
-                });
-                let _ = socket
-                    .send(Message::Text(
-                        json!({ "type": "ack", "action": "steer", "session_id": session_id })
-                            .to_string()
-                            .into(),
-                    ))
-                    .await;
-            }
-            Ok(WsClient::SessionAbort { session_id }) => {
-                let _ = state.agent_tx.send(AgentControl::Abort {
-                    session_id: session_id.clone(),
-                });
-                let _ = socket
-                    .send(Message::Text(
-                        json!({ "type": "ack", "action": "abort", "session_id": session_id })
-                            .to_string()
-                            .into(),
-                    ))
-                    .await;
-            }
-            Ok(WsClient::SessionPrompt { session_id, text }) => {
-                // MVP: treat prompt like steer (inject as control message).
-                let _ = state.agent_tx.send(AgentControl::Steer {
-                    session_id: session_id.clone(),
-                    text,
-                });
-                let _ = socket
-                    .send(Message::Text(
-                        json!({ "type": "ack", "action": "prompt", "session_id": session_id })
-                            .to_string()
-                            .into(),
-                    ))
-                    .await;
-            }
             Ok(WsClient::Ping) => {
-                let _ = socket
-                    .send(Message::Text(json!({ "type": "pong" }).to_string().into()))
-                    .await;
+                let _ = socket.send(Message::Text("pong".into())).await;
             }
             Err(e) => {
                 let _ = socket

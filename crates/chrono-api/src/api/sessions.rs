@@ -1,21 +1,19 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
 use rusqlite::{params, Connection, OpenFlags};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::error::{ApiError, ApiResult};
-use crate::state::{AgentControl, AppState};
+use crate::state::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_sessions))
         .route("/{session_id}", get(get_session))
-        .route("/{session_id}/steer", post(steer_session))
-        .route("/{session_id}/abort", post(abort_session))
 }
 
 #[derive(Serialize)]
@@ -42,20 +40,12 @@ pub struct SessionDetail {
     pub active: bool,
 }
 
-#[derive(Deserialize)]
-pub struct SteerBody {
-    pub text: String,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SessionsSchema {
-    /// UUID sessions + active_sessions pointer (agent-host migration 002).
     V2,
-    /// Legacy generation-based conversation_sessions (logical_key PK).
     Legacy,
     Empty,
 }
-
 fn open_sessions_ro(path: &std::path::Path) -> ApiResult<Connection> {
     if !path.exists() {
         return Err(ApiError::not_found("sessions database not found"));
@@ -354,63 +344,4 @@ fn get_session_legacy(conn: &Connection, session_id: &str) -> ApiResult<Json<Ses
         updated_at,
         active: true,
     }))
-}
-
-async fn steer_session(
-    State(state): State<Arc<AppState>>,
-    Path(session_id): Path<String>,
-    Json(body): Json<SteerBody>,
-) -> ApiResult<Json<Value>> {
-    if body.text.trim().is_empty() {
-        return Err(ApiError::bad_request("text is required"));
-    }
-    // Best-effort existence check when sessions.db is present and schema known.
-    if state.sessions_db_path.exists() {
-        if let Ok(conn) = open_sessions_ro(&state.sessions_db_path) {
-            let exists = match detect_schema(&conn) {
-                SessionsSchema::V2 => conn
-                    .query_row(
-                        "SELECT 1 FROM conversation_sessions WHERE session_id=?1",
-                        params![&session_id],
-                        |_| Ok(true),
-                    )
-                    .unwrap_or(false),
-                SessionsSchema::Legacy => {
-                    // Always allow steer for legacy — id may be synthetic.
-                    true
-                }
-                SessionsSchema::Empty => true,
-            };
-            if !exists {
-                return Err(ApiError::not_found(format!(
-                    "session '{session_id}' not found"
-                )));
-            }
-        }
-    }
-    state
-        .agent_tx
-        .send(AgentControl::Steer {
-            session_id: session_id.clone(),
-            text: body.text,
-        })
-        .map_err(|_| ApiError::internal("agent control channel closed"))?;
-    Ok(Json(
-        json!({ "ok": true, "session_id": session_id, "action": "steer" }),
-    ))
-}
-
-async fn abort_session(
-    State(state): State<Arc<AppState>>,
-    Path(session_id): Path<String>,
-) -> ApiResult<Json<Value>> {
-    state
-        .agent_tx
-        .send(AgentControl::Abort {
-            session_id: session_id.clone(),
-        })
-        .map_err(|_| ApiError::internal("agent control channel closed"))?;
-    Ok(Json(
-        json!({ "ok": true, "session_id": session_id, "action": "abort" }),
-    ))
 }

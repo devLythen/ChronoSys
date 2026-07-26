@@ -172,16 +172,9 @@ function maxContextMessages(bot: ResolvedBot): number {
 
 function newSessionCommandEnabled(bot: ResolvedBot): boolean {
   const commands = bot.policy.commands;
-  // New format: commands is a whitelist array
   if (Array.isArray(commands)) {
     return commands.includes("new");
   }
-  // Legacy format: commands.new_session boolean
-  if (commands && typeof commands === "object" && !Array.isArray(commands)) {
-    const flag = (commands as Record<string, unknown>).new_session;
-    if (typeof flag === "boolean") return flag;
-  }
-  // Default: allow /new
   return true;
 }
 

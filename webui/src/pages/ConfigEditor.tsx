@@ -4,11 +4,18 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { BotProfile, Persona } from "../api/types";
 import Card from "../components/ui/Card";
+import Toggle from "../components/ui/Toggle";
+import Modal from "../components/ui/Modal";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Select from "../components/ui/Select";
 import { useToast } from "../components/ui/Toast";
-import { ArrowLeft, Save, Loader2, ExternalLink } from "lucide-react";
+import { ArrowLeft, Save, Loader2, ExternalLink, Pencil } from "lucide-react";
+import { cn } from "../lib/utils";
+
+const KNOWN_COMMANDS = [
+  { name: "new", desc: "Start a new conversation session" },
+];
 
 export default function ConfigEditor() {
   const { id } = useParams<{ id: string }>();
@@ -32,13 +39,12 @@ export default function ConfigEditor() {
     queryFn: () => api.listPersonas(),
   });
 
-
   const [modelRef, setModelRef] = useState("");
   const [personaId, setPersonaId] = useState("");
-  // Policy fields — parsed from bot.policy_json on load
   const [maxContext, setMaxContext] = useState<number | null>(null);
-  const [commandList, setCommandList] = useState("new");
+  const [selectedCommands, setSelectedCommands] = useState<string[]>(["new"]);
   const [mentionRequired, setMentionRequired] = useState(false);
+  const [commandModalOpen, setCommandModalOpen] = useState(false);
 
   useEffect(() => {
     if (bot) {
@@ -47,10 +53,11 @@ export default function ConfigEditor() {
       const p = bot.policy_json ?? {} as Record<string,unknown>;
       setMaxContext(p.max_context_messages as number ?? null);
       const cmds: unknown = p.commands;
-      setCommandList(Array.isArray(cmds) ? (cmds as string[]).join(", ") : "new");
+      setSelectedCommands(Array.isArray(cmds) ? cmds as string[] : ["new"]);
       setMentionRequired(Boolean(p.mention_required));
     }
   }, [bot]);
+
   const modelOptions = (() => {
     const opts: { value: string; label: string }[] = [];
     if (!providers) return opts;
@@ -73,10 +80,10 @@ export default function ConfigEditor() {
 
   const saveMut = useMutation({
     mutationFn: async () => {
+      if (!id) throw new Error("Missing bot id");
       const policy: Record<string, unknown> = {};
       if (maxContext != null) policy.max_context_messages = maxContext;
-      const cmds = commandList.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
-      if (cmds.length > 0) policy.commands = cmds;
+      if (selectedCommands.length > 0) policy.commands = selectedCommands;
       if (mentionRequired) policy.mention_required = true;
       return api.updateBot(id, {
         model_ref: modelRef,
@@ -97,6 +104,11 @@ export default function ConfigEditor() {
 
   const handleSave = () => saveMut.mutate();
 
+  const toggleCommand = (cmd: string) => {
+    setSelectedCommands((prev) =>
+      prev.includes(cmd) ? prev.filter((c) => c !== cmd) : [...prev, cmd]
+    );
+  };
 
   if (isLoading) {
     return (
@@ -122,7 +134,6 @@ export default function ConfigEditor() {
 
   return (
     <div className="animate-fade-up space-y-6 md:space-y-8">
-      {/* Back link */}
       <Link
         to="/config"
         className="t-label text-muted-fg hover:text-fg transition-colors inline-flex items-center gap-1"
@@ -131,7 +142,6 @@ export default function ConfigEditor() {
         Configs
       </Link>
 
-      {/* Hero header */}
       <div>
         <h1 className="t-display">{bot.id}</h1>
         <p className="t-mono text-muted-fg mt-2">{bot.id}</p>
@@ -153,6 +163,7 @@ export default function ConfigEditor() {
             onChange={(e) => setModelRef(e.target.value)}
             placeholder="Select a model…"
           />
+
           <div className="space-y-4">
             <p className="t-label text-muted-fg">Runtime Policy</p>
 
@@ -175,24 +186,20 @@ export default function ConfigEditor() {
               <label className="text-xs font-medium text-muted-fg uppercase tracking-wide">
                 Commands
               </label>
-              <input
-                type="text"
-                value={commandList}
-                onChange={(e) => setCommandList(e.target.value)}
-                placeholder="new"
-                className="px-3 py-1.5 text-sm border rounded-sm bg-card text-fg placeholder:text-muted-fg/60 focus:outline-none focus:ring-1 focus:ring-fg transition-colors duration-150 border-border"
-              />
-              <p className="text-[11px] text-muted-fg">Comma-separated command names, e.g. new, reset</p>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-fg tabular-nums">
+                  {selectedCommands.length} selected
+                </span>
+                <Button variant="secondary" size="sm" onClick={() => setCommandModalOpen(true)}>
+                  <Pencil size={12} />
+                  Edit
+                </Button>
+              </div>
             </div>
 
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={mentionRequired}
-                onChange={(e) => setMentionRequired(e.target.checked)}
-                className="w-4 h-4 rounded-sm border-border accent-fg"
-              />
+            <label className="flex items-center justify-between cursor-pointer">
               <span className="text-sm text-fg">Require @mention in groups</span>
+              <Toggle checked={mentionRequired} onChange={setMentionRequired} />
             </label>
           </div>
         </Card>
@@ -258,6 +265,42 @@ export default function ConfigEditor() {
           Save
         </Button>
       </div>
+
+      {/* ── Commands Modal ── */}
+      <Modal
+        open={commandModalOpen}
+        onClose={() => setCommandModalOpen(false)}
+        title="Commands"
+        size="sm"
+      >
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 gap-2 max-h-[280px] overflow-y-auto">
+            {KNOWN_COMMANDS.map((cmd) => (
+              <label
+                key={cmd.name}
+                className={cn(
+                  "flex items-center gap-2.5 px-3 py-2 border cursor-pointer transition-colors select-none",
+                  selectedCommands.includes(cmd.name)
+                    ? "border-fg/30 bg-fg/[0.03]"
+                    : "border-border hover:bg-muted/50"
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedCommands.includes(cmd.name)}
+                  onChange={() => toggleCommand(cmd.name)}
+                  className="w-4 h-4 border-border accent-fg"
+                />
+                <div>
+                  <span className="t-mono !text-xs">/{cmd.name}</span>
+                  <p className="text-[11px] text-muted-fg mt-0.5 leading-tight">{cmd.desc}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+
+        </div>
+      </Modal>
     </div>
   );
 }

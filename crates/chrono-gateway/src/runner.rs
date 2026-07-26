@@ -666,27 +666,6 @@ fn handle_agent_control(
     ctrl: AgentControl,
 ) -> Result<()> {
     match ctrl {
-        AgentControl::Steer { session_id, text } => {
-            let body = json!({
-                "type": "steer",
-                "session_id": session_id,
-                "text": text,
-            });
-            let payload = serde_json::to_vec(&body)?;
-            let state = state.lock().unwrap();
-            state.child.write_frame(&payload)?;
-            eprintln!("[gateway] wrote steer for session {session_id}");
-        }
-        AgentControl::Abort { session_id } => {
-            let body = json!({
-                "type": "abort",
-                "session_id": session_id,
-            });
-            let payload = serde_json::to_vec(&body)?;
-            let state = state.lock().unwrap();
-            state.child.write_frame(&payload)?;
-            eprintln!("[gateway] wrote abort for session {session_id}");
-        }
         AgentControl::ReloadConfig => {
             sync_from_config(state, chrono_home, event_tx, adapter_count)?;
         }

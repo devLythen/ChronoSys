@@ -218,6 +218,13 @@ class ApiClient {
     });
   }
 
+  createSession(botProfileId: string) {
+    return this.request<import("./types").SessionDetail>("/sessions", {
+      method: "POST",
+      body: JSON.stringify({ bot_profile_id: botProfileId }),
+    });
+  }
+
   // ── Audit ───────────────────────────────────────────────────
   listAudit(params?: { limit?: number; account_id?: string; session_id?: string; event?: string }) {
     const qs = new URLSearchParams();

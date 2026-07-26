@@ -13,8 +13,6 @@ use tokio::sync::oneshot;
 /// Messages the API can send to the agent-host control loop.
 #[derive(Debug, Clone)]
 pub enum AgentControl {
-    Steer { session_id: String, text: String },
-    Abort { session_id: String },
     ReloadConfig,
 }
 
