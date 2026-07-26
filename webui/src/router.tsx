@@ -11,7 +11,9 @@ import SessionsList from "./pages/SessionsList";
 import SessionDetail from "./pages/SessionDetail";
 import AuditPage from "./pages/AuditPage";
 import SettingsPage from "./pages/SettingsPage";
-
+import PluginsExtensions from "./pages/PluginsExtensions";
+import PluginsMcp from "./pages/PluginsMcp";
+import PluginsSkills from "./pages/PluginsSkills";
 export const router = createHashRouter([
   {
     element: <Shell />,
@@ -28,6 +30,9 @@ export const router = createHashRouter([
       { path: "sessions/:id", element: <SessionDetail /> },
       { path: "audit", element: <AuditPage /> },
       { path: "settings", element: <SettingsPage /> },
+      { path: "plugins/extensions", element: <PluginsExtensions /> },
+      { path: "plugins/mcp", element: <PluginsMcp /> },
+      { path: "plugins/skills", element: <PluginsSkills /> },
     ],
   },
 ]);
