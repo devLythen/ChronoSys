@@ -7,6 +7,7 @@ use chrono_ipc::{ChatKind, ChatRef, ChronoEvent, InboundMessageBody, SenderRef};
 use serde_json::Value;
 use teloxide::prelude::*;
 use teloxide::types::{MessageId, Recipient, ReplyParameters, UpdateKind};
+use teloxide::{ApiError, RequestError};
 
 pub struct TelegramAdapter {
     bot: Arc<Bot>,
@@ -46,7 +47,7 @@ impl PlatformAdapter for TelegramAdapter {
         let account_id = self.account_id.clone();
         let on_event = Arc::new(on_event);
 
-        // Verify token first
+        // Verify token first — fatal if invalid.
         let me = bot.get_me().send().await.map_err(|e| {
             AdapterError::Other(format!("telegram auth failed: {e}"))
         })?;
@@ -54,32 +55,80 @@ impl PlatformAdapter for TelegramAdapter {
         eprintln!("[telegram] connected as @{username} (id: {})", me.id.0);
         let _ = self.bot_username.set(username.to_string());
 
-        // Manual long-polling loop — cooperative cancel via task abort / drop.
+        // ── Long-poll with exponential backoff ──────────────────
+        const LONG_POLL_TIMEOUT: u32 = 25; // seconds, Telegram allows up to ~30
+        const MAX_BACKOFF_SECS: u64 = 30;
+        const INITIAL_BACKOFF_MS: u64 = 1000;
+
         let mut offset: i32 = 0;
+        let mut backoff_ms: u64 = 0; // 0 = connected, >0 = in retry backoff
+        let mut consecutive_errors: u32 = 0;
+
         loop {
-            // Yield so AbortHandle can land between poll iterations.
             tokio::task::yield_now().await;
 
-            let start = std::time::Instant::now();
-            let updates = match bot.get_updates().offset(offset).timeout(1).send().await {
-                Ok(updates) => updates,
-                Err(e) => {
-                    // Cancellation surfaces as a join error on the JoinHandle, not here.
-                    eprintln!("[telegram] getUpdates error: {e}, retrying in 5s...");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    continue;
-                }
-            };
-            let elapsed = start.elapsed();
-
-            if !updates.is_empty() {
-                eprintln!("[telegram] got {} update(s) in {elapsed:.2?}", updates.len());
+            if backoff_ms > 0 {
+                // Jitter: ±25% to avoid thundering herd (time-based, no rand dep)
+                let jitter_range = ((backoff_ms as f64) * 0.25) as u64;
+                let tick = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos() as u64;
+                let jitter = tick % (jitter_range.max(1) * 2 + 1);
+                let sleep_ms = (backoff_ms + jitter).saturating_sub(jitter_range).max(100);
+                eprintln!(
+                    "[telegram] backoff {sleep_ms}ms (consecutive_errors={consecutive_errors})"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(sleep_ms)).await;
             }
 
-            for update in updates {
-                offset = update.id.0 as i32 + 1;
-                if let UpdateKind::Message(msg) = update.kind {
-                    handle_message(&account_id, &on_event, &msg);
+            match bot
+                .get_updates()
+                .offset(offset)
+                .timeout(LONG_POLL_TIMEOUT)
+                .send()
+                .await
+            {
+                Ok(updates) => {
+                    if consecutive_errors > 0 {
+                        eprintln!("[telegram] reconnected after {consecutive_errors} error(s)");
+                    }
+                    backoff_ms = 0;
+                    consecutive_errors = 0;
+
+                    if !updates.is_empty() {
+                        eprintln!("[telegram] got {} update(s)", updates.len());
+                    }
+
+                    for update in updates {
+                        offset = update.id.0 as i32 + 1;
+                        if let UpdateKind::Message(msg) = update.kind {
+                            handle_message(&account_id, &on_event, &msg);
+                        }
+                    }
+                }
+                Err(e) => {
+                    let is_fatal = matches!(
+                        &e,
+                        RequestError::Api(api_err)
+                            if *api_err == ApiError::InvalidToken
+                               || *api_err == ApiError::BotKicked
+                    );
+
+                    if is_fatal {
+                        eprintln!("[telegram] fatal error, stopping adapter: {e}");
+                        return Err(AdapterError::Other(format!("telegram fatal: {e}")));
+                    }
+
+                    consecutive_errors += 1;
+                    backoff_ms = if backoff_ms == 0 {
+                        INITIAL_BACKOFF_MS
+                    } else {
+                        (backoff_ms * 2).min(MAX_BACKOFF_SECS * 1000)
+                    };
+                    eprintln!(
+                        "[telegram] getUpdates error (retry #{consecutive_errors}): {e}"
+                    );
                 }
             }
         }
