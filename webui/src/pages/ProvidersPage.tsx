@@ -88,6 +88,7 @@ export default function ProvidersPage() {
     if (selected) {
       setEditKind(selected.kind);
       setEditBaseUrl(selected.base_url ?? "");
+      setApiKey("");
     }
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -258,9 +259,6 @@ export default function ProvidersPage() {
         </p>
       </div>
 
-      <div className="rule-heavy" />
-
-      {/* Toolbar */}
       <div className="flex items-center justify-between">
         <p className="t-label text-muted-fg">
           {list ? `${list.length} provider${list.length !== 1 ? "s" : ""}` : "—"}
@@ -270,6 +268,8 @@ export default function ProvidersPage() {
           New Provider
         </Button>
       </div>
+
+      <div className="rule-heavy" />
 
       {isLoading && (
         <div className="py-16 text-center">
@@ -379,7 +379,7 @@ export default function ProvidersPage() {
                       type="text"
                       value={apiKey}
                       onChange={(e) => setApiKey(e.target.value)}
-                      placeholder="sk-..."
+                      placeholder={selected?.secret_ref ? "•••••••• (leave blank to keep)" : "sk-..."}
                     />
                   </div>
                 </Card>

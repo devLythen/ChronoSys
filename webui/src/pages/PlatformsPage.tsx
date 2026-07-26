@@ -195,19 +195,17 @@ export default function PlatformsPage() {
         </p>
       </div>
 
-      <div className="rule-heavy" />
-
-      {/* ── Action bar ── */}
       <div className="flex items-center justify-between">
         <p className="t-label text-muted-fg">
           {accounts.length} bot{accounts.length !== 1 ? "s" : ""}
         </p>
-        <Button onClick={openNew}>
+        <Button onClick={() => { setEditing(false); setAcctForm(emptyAcctForm()); setAcctModal(true); }}>
           <Plus size={16} />
-          New Bot
+          New Account
         </Button>
       </div>
 
+      <div className="rule-heavy" />
       {/* ── Loading / Error ── */}
       {acctsLoading && (
         <div className="py-16 text-center">

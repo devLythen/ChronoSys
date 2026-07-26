@@ -88,9 +88,7 @@ export default function ConfigList() {
           with runtime policy settings.
         </p>
       </div>
-      <div className="rule-heavy" />
 
-      {/* Toolbar */}
       <div className="flex items-center justify-between">
         <p className="t-label text-muted-fg">
           {bots ? `${bots.length} config${bots.length !== 1 ? "s" : ""}` : "—"}
@@ -100,6 +98,8 @@ export default function ConfigList() {
           New Config
         </Button>
       </div>
+
+      <div className="rule-heavy" />
 
       {isLoading && (
         <div className="py-16 text-center">

@@ -74,9 +74,7 @@ export default function PersonaList() {
           the assistant behaves and what it can do.
         </p>
       </div>
-      <div className="rule-heavy" />
 
-      {/* Toolbar */}
       <div className="flex items-center justify-between">
         <p className="t-label text-muted-fg">
           {personas ? `${personas.length} persona${personas.length !== 1 ? "s" : ""}` : "—"}
@@ -86,6 +84,7 @@ export default function PersonaList() {
           New Persona
         </Button>
       </div>
+      <div className="rule-heavy" />
 
       {isLoading && (
         <div className="py-16 text-center">
