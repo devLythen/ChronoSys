@@ -743,6 +743,8 @@ async function main() {
         pendingCalls,
         agent.signal,
       );
+      writeControl({ type: "done" });
+      continue;
     }
 
     // ── Load active UUID session transcript ──────────────────────
