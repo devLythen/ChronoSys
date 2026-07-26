@@ -1,4 +1,5 @@
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
+import { estimateContextTokens, generateSummary, estimateTokens } from "@earendil-works/pi-agent-core";
 import type { Model, Api, MutableModels, ThinkingLevel } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { ChronoEvent, ToolIpcMessage } from "./ipc/types.ts";
@@ -193,6 +194,59 @@ function isNewSessionCommand(text: string): boolean {
   return n === "/new" || n === "/newsession" || n === "/reset";
 }
 
+function isCompactCommand(text: string): boolean {
+  return normalizeCommand(text).toLowerCase() === "/compact";
+}
+
+async function compactSessionMessages(
+  messages: AgentMessage[],
+  models: MutableModels,
+  model: Model<Api>,
+  signal?: AbortSignal,
+): Promise<AgentMessage[]> {
+  const countCut = Math.max(1, Math.floor(messages.length * 0.4));
+  const keepTokens = Math.floor(model.contextWindow * 0.5);
+  let cutIndex: number;
+  if (messages.length < 20) {
+    cutIndex = countCut;
+  } else {
+    let accum = 0;
+    cutIndex = messages.length;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      accum += estimateTokens(messages[i]!);
+      if (accum >= keepTokens) { cutIndex = i; break; }
+    }
+    if (cutIndex <= 0) cutIndex = countCut;
+  }
+  const oldMessages = messages.slice(0, cutIndex);
+  const recentMessages = messages.slice(cutIndex);
+
+  const result = await generateSummary(
+    oldMessages,
+    models,
+    model,
+    keepTokens,
+    signal,
+  );
+
+  if (!result.ok) {
+    logEvent({ type: "host_warn", message: `compaction failed: ${result.error.message}` });
+    return messages;
+  }
+
+  const summaryMsg: AgentMessage = {
+    role: "assistant",
+    content: [{ type: "text", text: `[Previous conversation summary]\n${result.value}` }],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "stop",
+    timestamp: Date.now(),
+  };
+
+  return [summaryMsg, ...recentMessages];
+}
 /** Collect plain text blocks from an assistant message (ignore toolCall parts). */
 function extractAssistantText(message: AgentMessage | undefined): string {
   if (!message || message.role !== "assistant") return "";
@@ -655,6 +709,42 @@ async function main() {
       continue;
     }
 
+    // ── /compact — manual context compaction ─────────────────
+    if (isCompactCommand(event.message.text)) {
+      const bucket = getOrCreateBucket(route, event.session_key, bot.id);
+      if (bucket.messages.length < 2) {
+        await sendBodyTextToCurrentChat(
+          event.session_key,
+          "对话太短，无需压缩。",
+          pendingCalls,
+          agent.signal,
+        );
+        writeControl({ type: "done" });
+        continue;
+      }
+      const compacted = await compactSessionMessages(
+        bucket.messages,
+        models!,
+        bot.resolvedModel.model,
+        agent.signal,
+      );
+      const origCount = bucket.messages.length;
+      const origEst = estimateContextTokens(bucket.messages);
+      const origPct = Math.round((origEst.tokens / bot.resolvedModel.model.contextWindow) * 100);
+      bucket.messages = compacted;
+      agent.state.messages = compacted;
+      persistBucket(bucket);
+      const newEst = estimateContextTokens(compacted);
+      const newPct = Math.round((newEst.tokens / bot.resolvedModel.model.contextWindow) * 100);
+      const summary = `上下文已压缩：${origCount} → ${compacted.length} 条消息，占用 ${newPct}%（压缩前 ${origPct}%）。`;
+      await sendBodyTextToCurrentChat(
+        event.session_key,
+        summary,
+        pendingCalls,
+        agent.signal,
+      );
+    }
+
     // ── Load active UUID session transcript ──────────────────────
     const bucket = getOrCreateBucket(route, event.session_key, bot.id);
 
@@ -707,6 +797,25 @@ async function main() {
       await agent.prompt(event.message.text);
       bucket.messages = agent.state.messages.slice();
       persistBucket(bucket);
+
+      // ── Auto-compact when context exceeds 80% threshold ──────
+      if (bucket.messages.length >= 5 && models) {
+        const compacted = await compactSessionMessages(
+          bucket.messages,
+          models,
+          bot.resolvedModel.model,
+          agent.signal,
+        );
+        if (compacted !== bucket.messages) {
+          bucket.messages = compacted;
+          agent.state.messages = compacted;
+          persistBucket(bucket);
+          logEvent({
+            type: "host_info",
+            message: `auto-compacted session ${bucket.sessionId.slice(0, 8)}… ${bucket.messages.length} messages`,
+          });
+        }
+      }
 
       // Fallback: plain assistant body → current chat only (no cross-chat).
       // Prefer message_send (optional chat_id) for intentional / cross-chat delivery.

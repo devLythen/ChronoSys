@@ -15,6 +15,7 @@ import { cn } from "../lib/utils";
 
 const KNOWN_COMMANDS = [
   { name: "new", desc: "Start a new conversation session" },
+  { name: "compact", desc: "Compress conversation context" },
 ];
 
 export default function ConfigEditor() {

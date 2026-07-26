@@ -57,10 +57,10 @@ impl PlatformAdapter for TelegramAdapter {
 
         // Register bot commands so /new appears in Telegram's command menu.
         let _ = bot
-            .set_my_commands(vec![BotCommand {
-                command: "new".into(),
-                description: "Start a new conversation session".into(),
-            }])
+            .set_my_commands(vec![
+                BotCommand { command: "new".into(), description: "Start a new conversation session".into() },
+                BotCommand { command: "compact".into(), description: "Compress conversation context".into() },
+            ])
             .send()
             .await;
 

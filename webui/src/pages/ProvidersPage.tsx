@@ -88,7 +88,6 @@ export default function ProvidersPage() {
     if (selected) {
       setEditKind(selected.kind);
       setEditBaseUrl(selected.base_url ?? "");
-      setApiKey(selected.secret_ref ?? "");
     }
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
