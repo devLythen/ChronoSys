@@ -7,7 +7,7 @@ import type { ChronoEvent, ToolIpcMessage } from "./types.ts";
 
 const fixturesDir = join(
   dirname(fileURLToPath(import.meta.url)),
-  "../../../schemas/fixtures",
+  "__fixtures__",
 );
 
 function loadJson<T>(name: string): T {

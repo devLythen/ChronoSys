@@ -1,0 +1,15 @@
+{
+  "type": "inbound.message",
+  "session_key": "acct1:chat1:shared",
+  "event_id": "evt_001",
+  "platform": "telegram",
+  "bot_profile_id": "greeter",
+  "chat": { "id": "chat1", "kind": "group", "title": "Test" },
+  "sender": { "id": "user1", "name": "Alice" },
+  "message": {
+    "id": "msg1",
+    "text": "hello",
+    "attachments": []
+  },
+  "received_at": "2026-07-24T00:00:00Z"
+}

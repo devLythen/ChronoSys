@@ -1,0 +1,6 @@
+{
+  "type": "tool.response",
+  "tool_call_id": "call_001",
+  "ok": true,
+  "result": { "message_id": "msg_out_1" }
+}

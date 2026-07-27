@@ -58,7 +58,7 @@ fn frame_too_large() {
 
 fn fixture_path(name: &str) -> String {
     format!(
-        "{}/../../schemas/fixtures/{}",
+        "{}/tests/fixtures/{}",
         env!("CARGO_MANIFEST_DIR"),
         name
     )
