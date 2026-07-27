@@ -45,6 +45,12 @@ export default function PlatformsPage() {
     onError: (e: Error) => toast.add("error", e.message),
   });
 
+  const handleDelete = (a: AccountView) => {
+    if (window.confirm(`Delete "${a.id}"? This cannot be undone.`)) {
+      deleteAcct.mutate(a.id);
+    }
+  };
+
   const handleCreate = () => {
     const trimmed = newId.trim();
     if (!trimmed || !/^[a-zA-Z0-9_-]+$/.test(trimmed)) return;
@@ -96,48 +102,44 @@ export default function PlatformsPage() {
       {accounts.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {accounts.map((a) => (
-            <Card key={a.id} padding="none" className="hover:border-fg/30 transition-colors flex flex-col">
-              <div className="p-4 flex-1">
+            <Card
+              key={a.id}
+              className="cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
+              padding="none"
+            >
+              <div
+                onClick={() => navigate(`/platforms/${a.id}`)}
+                className="p-4 flex-1"
+              >
                 <div className="flex items-start justify-between mb-3">
-                  <h3
-                    className="t-headline !text-xl truncate cursor-pointer hover:underline"
-                    onClick={() => navigate(`/platforms/${a.id}`)}
-                  >
+                  <h3 className="t-headline !text-xl truncate">
                     {a.id}
                   </h3>
-                  <button
-                    onClick={() => toggleEnabled.mutate(a)}
-                    className={cn(
-                      "relative w-8 h-5 rounded-full transition-colors duration-200 shrink-0 ml-2",
-                      a.enabled ? "bg-fg" : "bg-border"
-                    )}
-                  >
-                    <span className={cn(
-                      "absolute top-[3px] left-0 w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm",
-                      a.enabled ? "translate-x-[15px]" : "translate-x-[2px]"
-                    )} />
-                  </button>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-muted-fg">
-                  <span className="t-mono">{a.platform}</span>
-                  <span>{a.enabled ? "● enabled" : "○ disabled"}</span>
+                <p className="t-mono text-muted-fg mb-3 truncate">
+                  {a.id}
+                </p>
+                <div className="flex items-center gap-2 text-sm text-muted-fg mb-4">
+                  <span className="t-mono text-[11px]">{a.platform}</span>
+                  <span>·</span>
+                  <span className="t-mono text-[11px]">{a.adapter_id}</span>
                 </div>
               </div>
-              <div className="flex border-t border-border">
-                <button
-                  onClick={() => navigate(`/platforms/${a.id}`)}
-                  className="flex-1 py-2 text-xs text-muted-fg hover:text-fg hover:bg-muted/50 transition-colors"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => {
-                    if (window.confirm(`Delete "${a.id}"?`)) deleteAcct.mutate(a.id);
+
+              <div className="flex items-center gap-1 px-4 py-2 border-t border-border bg-muted/30">
+                <div className="flex-1" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(a);
                   }}
-                  className="px-3 py-2 text-xs text-destructive hover:bg-destructive/5 transition-colors border-l border-border"
+                  className="text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Delete"
                 >
-                  <Trash2 size={13} />
-                </button>
+                  <Trash2 size={14} />
+                </Button>
               </div>
             </Card>
           ))}
