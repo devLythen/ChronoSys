@@ -8,6 +8,7 @@ import ConfigEditor from "./pages/ConfigEditor";
 import PersonaList from "./pages/PersonaList";
 import PersonaEditor from "./pages/PersonaEditor";
 import PlatformsPage from "./pages/PlatformsPage";
+import AccountEditor from "./pages/AccountEditor";
 import SessionsList from "./pages/SessionsList";
 import SessionDetail from "./pages/SessionDetail";
 import AuditPage from "./pages/AuditPage";
@@ -22,6 +23,7 @@ export const router = createHashRouter([
       { index: true, element: <Navigate to="/overview" replace /> },
       { path: "overview", element: <Overview /> },
       { path: "platforms", element: <PlatformsPage /> },
+      { path: "platforms/:id", element: <AccountEditor /> },
       { path: "config", element: <ConfigList /> },
       { path: "config/:id", element: <ConfigEditor /> },
       { path: "providers", element: <ProvidersPage /> },

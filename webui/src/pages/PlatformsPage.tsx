@@ -1,9 +1,9 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Plus, ChevronDown, ChevronRight, X, Trash2, Link2 } from "lucide-react";
 import { api } from "../api/client";
-import type { AccountView, Binding, BotProfile, AccountBody } from "../api/types";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Modal from "../components/ui/Modal";
@@ -28,19 +28,10 @@ const emptyForm: AccountForm = {
   secret_ref: "",
 };
 
-function accountToForm(a: AccountView): AccountForm {
-  return {
-    id: a.id,
-    platform: a.platform,
-    mode: a.adapter_id,
-    enabled: a.enabled,
-    secret_ref: a.secret_ref,
-  };
-}
 
 export default function PlatformsPage() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
-  const toast = useToast();
 
   const { data: accounts = [], isLoading: acctsLoading, error: acctsError } = useQuery({
     queryKey: ["accounts"],
@@ -68,19 +59,11 @@ export default function PlatformsPage() {
     });
   }, []);
 
-  // -- account modal --
   const [acctModal, setAcctModal] = useState(false);
-  const [editing, setEditing] = useState<AccountView | null>(null);
   const [acctForm, setAcctForm] = useState<AccountForm>(emptyForm);
 
   const openNew = () => {
-    setEditing(null);
     setAcctForm(emptyForm);
-    setAcctModal(true);
-  };
-  const openEdit = (a: AccountView) => {
-    setEditing(a);
-    setAcctForm(accountToForm(a));
     setAcctModal(true);
   };
 
@@ -91,25 +74,17 @@ export default function PlatformsPage() {
         platform: acctForm.platform,
         adapter_id: acctForm.mode,
         enabled: acctForm.enabled,
+        secret_ref: acctForm.secret_ref || undefined,
         adapter_config_json: {},
         json_ext: {},
       };
-
-      if (editing) {
-        if (acctForm.secret_ref) {
-          body.secret_ref = acctForm.secret_ref;
-        }
-        await api.updateAccount(editing.id, body);
-      } else {
-        body.secret_ref = acctForm.secret_ref || undefined;
-        await api.createAccount(body);
-      }
+      await api.createAccount(body);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["bindings"] });
       setAcctModal(false);
-      toast.add("success", editing ? "Bot updated." : "Bot created.");
+      toast.add("success", "Bot created.");
     },
     onError: (e: Error) => toast.add("error", e.message),
   });
@@ -269,7 +244,7 @@ export default function PlatformsPage() {
                           )}
                         />
                       </button>
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(a)}>
+                      <Button variant="ghost" size="sm" onClick={() => navigate(`/platforms/${a.id}`)}>
                         Edit
                       </Button>
                       <Button
@@ -337,8 +312,7 @@ export default function PlatformsPage() {
       <Modal
         open={acctModal}
         onClose={() => setAcctModal(false)}
-        title={editing ? "Edit Bot" : "New Bot"}
-        size="lg"
+        title="New Bot"
       >
         <div className="space-y-5">
           {/* Row 1: ID + Platform */}
@@ -348,7 +322,7 @@ export default function PlatformsPage() {
               value={acctForm.id}
               onChange={(e) => setAcctForm({ ...acctForm, id: e.target.value })}
               placeholder="e.g. my-telegram-bot"
-              disabled={!!editing}
+
             />
             <Select
               label="Platform"
@@ -386,7 +360,7 @@ export default function PlatformsPage() {
               onClick={() => acctMut.mutate()}
               disabled={acctMut.isPending || !acctForm.id}
             >
-              {acctMut.isPending ? "Saving…" : editing ? "Save Changes" : "Create Bot"}
+              {acctMut.isPending ? "Creating…" : "Create Bot"}
             </Button>
           </div>
         </div>
