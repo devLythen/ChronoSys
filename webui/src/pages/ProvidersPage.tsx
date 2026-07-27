@@ -147,7 +147,7 @@ export default function ProvidersPage() {
         open={provModalOpen}
         onClose={() => setProvModalOpen(false)}
         title="Add Provider"
-        size="md"
+        size="sm"
       >
         <form
           onSubmit={(e) => {

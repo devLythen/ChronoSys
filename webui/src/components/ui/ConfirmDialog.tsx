@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import Modal from "./Modal";
 import Button from "./Button";
@@ -21,6 +22,12 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const [cached, setCached] = useState<{ title: string; message: string } | null>(null);
+  if (open && (!cached || cached.title !== title || cached.message !== message)) {
+    setCached({ title, message });
+  }
+  const display = cached ?? { title, message };
+
   return (
     <Modal open={open} onClose={onCancel} size="sm">
       <div className="flex items-start gap-3 mb-4">
@@ -28,14 +35,12 @@ export default function ConfirmDialog({
           <AlertTriangle size={18} className="text-destructive shrink-0 mt-0.5" />
         )}
         <div>
-          <h3 className="t-title font-medium">{title}</h3>
-          <p className="text-sm text-muted-fg mt-1">{message}</p>
+          <h3 className="t-title font-medium">{display.title}</h3>
+          <p className="text-sm text-muted-fg mt-1">{display.message}</p>
         </div>
       </div>
       <div className="flex justify-end gap-2">
-        <Button variant="secondary" size="sm" onClick={onCancel}>
-          Cancel
-        </Button>
+        <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
         <Button
           variant={variant === "destructive" ? "destructive" : "default"}
           size="sm"
