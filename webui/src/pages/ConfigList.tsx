@@ -8,6 +8,7 @@ import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
 import Modal from "../components/ui/Modal";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { Plus, Trash2, Cpu, ExternalLink } from "lucide-react";
 
 
@@ -17,6 +18,8 @@ export default function ConfigList() {
   const [modalOpen, setModalOpen] = useState(false);
   const [newId, setNewId] = useState("");
   const [idError, setIdError] = useState("");
+
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const { data: bots, isLoading, error } = useQuery({
     queryKey: ["bots"],
@@ -32,9 +35,7 @@ export default function ConfigList() {
   });
 
   const handleDelete = (bot: BotProfile) => {
-    if (window.confirm(`Delete config "${bot.id}"? This cannot be undone.`)) {
-      deleteMut.mutate(bot.id);
-    }
+    setDeleteConfirm(bot.id);
   };
 
 
@@ -191,6 +192,16 @@ export default function ConfigList() {
           </div>
         </div>
       </Modal>
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        title="Delete Config"
+        message={`Delete "${deleteConfirm}"? This cannot be undone.`}
+        onConfirm={() => {
+          deleteMut.mutate(deleteConfirm!);
+          setDeleteConfirm(null);
+        }}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }

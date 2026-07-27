@@ -9,6 +9,7 @@ import Input from "../components/ui/Input";
 import Card from "../components/ui/Card";
 import Modal from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 
 
 // ── Page component ─────────────────────────────────────────────
@@ -30,6 +31,7 @@ export default function ProvidersPage() {
   // ── Add Provider modal ───────────────────────────────────────
   const [provModalOpen, setProvModalOpen] = useState(false);
   const [newProvId, setNewProvId] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   // ── Derived ──────────────────────────────────────────────────
   const list = providers ?? [];
@@ -127,7 +129,7 @@ export default function ProvidersPage() {
                   size="sm"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (window.confirm(`Delete provider "${pv.id}"?`)) deleteProvMutation.mutate(pv.id);
+                    setDeleteConfirm(pv.id);
                   }}
                   className="text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
                   title="Delete"
@@ -177,6 +179,17 @@ export default function ProvidersPage() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        title="Delete Provider"
+        message={`Delete "${deleteConfirm}"? This cannot be undone.`}
+        onConfirm={() => {
+          deleteProvMutation.mutate(deleteConfirm!);
+          setDeleteConfirm(null);
+        }}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }

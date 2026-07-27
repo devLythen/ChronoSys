@@ -11,6 +11,7 @@ import Badge from "../components/ui/Badge";
 import type { Persona } from "../api/types";
 import { truncate } from "../lib/utils";
 import { Wrench, Puzzle, Plus, Trash2 } from "lucide-react";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 
 export default function PersonaList() {
   const navigate = useNavigate();
@@ -20,6 +21,8 @@ export default function PersonaList() {
   const [modalOpen, setModalOpen] = useState(false);
   const [newId, setNewId] = useState("");
   const [idError, setIdError] = useState("");
+
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const { data: personas, isLoading, error } = useQuery({
     queryKey: ["personas"],
@@ -36,9 +39,7 @@ export default function PersonaList() {
   });
 
   const handleDelete = (p: Persona) => {
-    if (window.confirm(`Delete persona "${p.id}"? This cannot be undone.`)) {
-      deleteMut.mutate(p.id);
-    }
+    setDeleteConfirm(p.id);
   };
 
   const handleCreate = () => {
@@ -164,6 +165,16 @@ export default function PersonaList() {
           </div>
         </div>
       </Modal>
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        title="Delete Persona"
+        message={`Delete "${deleteConfirm}"? This cannot be undone.`}
+        onConfirm={() => {
+          deleteMut.mutate(deleteConfirm!);
+          setDeleteConfirm(null);
+        }}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }

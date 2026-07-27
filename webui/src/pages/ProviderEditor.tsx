@@ -16,6 +16,7 @@ import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
 import Select from "../components/ui/Select";
 import { useToast } from "../components/ui/Toast";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { ArrowLeft, Save, Loader2 } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────
@@ -73,6 +74,7 @@ export default function ProviderEditor() {
   const [extraBodyJsonText, setExtraBodyJsonText] = useState("");
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [modelInfoLoading, setModelInfoLoading] = useState(false);
+  const [deleteModelConfirm, setDeleteModelConfirm] = useState<string | null>(null);
 
   // Sync edit form when provider data arrives or changes
   useEffect(() => {
@@ -310,11 +312,7 @@ export default function ProviderEditor() {
                     variant="ghost"
                     size="sm"
                     className="text-destructive hover:text-destructive"
-                    onClick={() => {
-                      if (window.confirm(`Delete model "${m.model_id}"?`)) {
-                        deleteModelMutation.mutate({ providerId: provider.id, modelId: m.model_id });
-                      }
-                    }}
+                    onClick={() => setDeleteModelConfirm(m.model_id)}
                     title="Delete model"
                   >✕</Button>
                 </div>
@@ -513,6 +511,17 @@ export default function ProviderEditor() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={deleteModelConfirm !== null}
+        title="Delete Model"
+        message={`Delete "${deleteModelConfirm}"? This cannot be undone.`}
+        onConfirm={() => {
+          deleteModelMutation.mutate({ providerId: provider.id, modelId: deleteModelConfirm! });
+          setDeleteModelConfirm(null);
+        }}
+        onCancel={() => setDeleteModelConfirm(null)}
+      />
     </div>
   );
 }

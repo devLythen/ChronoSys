@@ -10,6 +10,7 @@ import Modal from "../components/ui/Modal";
 import Input from "../components/ui/Input";
 import { cn } from "../lib/utils";
 import { useToast } from "../components/ui/Toast";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 
 export default function PlatformsPage() {
   const navigate = useNavigate();
@@ -23,6 +24,8 @@ export default function PlatformsPage() {
 
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [newId, setNewId] = useState("");
+
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const toggleEnabled = useMutation({
     mutationFn: async (a: AccountView) => {
@@ -46,9 +49,7 @@ export default function PlatformsPage() {
   });
 
   const handleDelete = (a: AccountView) => {
-    if (window.confirm(`Delete "${a.id}"? This cannot be undone.`)) {
-      deleteAcct.mutate(a.id);
-    }
+    setDeleteConfirm(a.id);
   };
 
   const handleCreate = () => {
@@ -162,6 +163,16 @@ export default function PlatformsPage() {
           </div>
         </div>
       </Modal>
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        title="Delete Account"
+        message={`Delete "${deleteConfirm}"? This cannot be undone.`}
+        onConfirm={() => {
+          deleteAcct.mutate(deleteConfirm!);
+          setDeleteConfirm(null);
+        }}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }

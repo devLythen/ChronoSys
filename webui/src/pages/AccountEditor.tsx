@@ -8,6 +8,7 @@ import Button from "../components/ui/Button";
 import Select from "../components/ui/Select";
 import Modal from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 
 const ADAPTERS = [
   { value: "chrono.adapter.telegram", label: "Telegram" },
@@ -44,6 +45,8 @@ export default function AccountEditor() {
 
   const [attachModalOpen, setAttachModalOpen] = useState(false);
   const [attachConfigId, setAttachConfigId] = useState("");
+  const [deleteAccountConfirm, setDeleteAccountConfirm] = useState(false);
+  const [detachConfirm, setDetachConfirm] = useState<{ id: string; name: string } | null>(null);
 
   const [platform, setPlatform] = useState("telegram");
   const [adapterId, setAdapterId] = useState("chrono.adapter.telegram");
@@ -181,11 +184,7 @@ export default function AccountEditor() {
           <Button
             variant="destructive"
             className="w-full"
-            onClick={() => {
-              if (window.confirm(`Delete account "${account.id}"? This cannot be undone.`)) {
-                deleteMut.mutate();
-              }
-            }}
+            onClick={() => setDeleteAccountConfirm(true)}
             disabled={deleteMut.isPending}
           >
             <Trash2 size={14} />
@@ -215,11 +214,7 @@ export default function AccountEditor() {
               <div key={b.id} className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-0">
                 <span className="t-mono text-sm">{b.bot_profile_id}</span>
                 <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive"
-                  onClick={() => {
-                    if (window.confirm(`Detach config "${b.bot_profile_id}"?`)) {
-                      api.deleteBinding(b.id).then(() => qc.invalidateQueries({ queryKey: ["bindings"] }));
-                    }
-                  }}>
+                  onClick={() => setDetachConfirm({ id: b.id, name: b.bot_profile_id })}>
                   <X size={14} />
                 </Button>
               </div>
@@ -270,6 +265,30 @@ export default function AccountEditor() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={deleteAccountConfirm}
+        title="Delete Account"
+        message={`Delete "${account.id}"? This cannot be undone.`}
+        onConfirm={() => {
+          deleteMut.mutate();
+          setDeleteAccountConfirm(false);
+        }}
+        onCancel={() => setDeleteAccountConfirm(false)}
+      />
+
+      <ConfirmDialog
+        open={detachConfirm !== null}
+        title="Detach Config"
+        message={`Detach config "${detachConfirm?.name}"?`}
+        onConfirm={() => {
+          api.deleteBinding(detachConfirm!.id).then(() =>
+            qc.invalidateQueries({ queryKey: ["bindings"] })
+          );
+          setDetachConfirm(null);
+        }}
+        onCancel={() => setDetachConfirm(null)}
+      />
     </div>
   );
 }
