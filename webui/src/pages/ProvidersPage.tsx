@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { ProviderView } from "../api/types";
 import Button from "../components/ui/Button";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import Input from "../components/ui/Input";
 import Card from "../components/ui/Card";
 import Modal from "../components/ui/Modal";
@@ -105,19 +105,35 @@ export default function ProvidersPage() {
           {list.map((pv) => (
             <Card
               key={pv.id}
-              className="cursor-pointer hover:border-fg/30 transition-colors flex flex-col"
+              className="cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
               padding="none"
-              onClick={() => navigate(`/providers/${pv.id}`)}
             >
-              <div className="p-4 flex-1">
+              <div
+                onClick={() => navigate(`/providers/${pv.id}`)}
+                className="p-4 flex-1"
+              >
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="t-headline !text-xl truncate">{pv.id}</h3>
                   <span className="t-mono text-[11px] text-muted-fg">{pv.kind}</span>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-fg">
                   <span>{pv.models.length} model{pv.models.length !== 1 ? "s" : ""}</span>
-                  {pv.secret_ref && <span className="text-success">● credential set</span>}
                 </div>
+              </div>
+              <div className="flex items-center gap-1 px-4 py-2 border-t border-border bg-muted/30">
+                <div className="flex-1" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`Delete provider "${pv.id}"?`)) deleteProvMutation.mutate(pv.id);
+                  }}
+                  className="text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Delete"
+                >
+                  <Trash2 size={14} />
+                </Button>
               </div>
             </Card>
           ))}
