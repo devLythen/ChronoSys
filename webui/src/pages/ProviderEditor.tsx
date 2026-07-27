@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { usePageEnter } from "../hooks/useAnimations";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -201,6 +202,8 @@ export default function ProviderEditor() {
 
   // ── Loading / Error states ───────────────────────────────────
 
+
+  const pageRef = usePageEnter<HTMLDivElement>();
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -226,7 +229,7 @@ export default function ProviderEditor() {
   // ── Render ───────────────────────────────────────────────────
 
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       <Link
         to="/providers"
         className="t-label text-muted-fg hover:text-fg transition-colors inline-flex items-center gap-1"

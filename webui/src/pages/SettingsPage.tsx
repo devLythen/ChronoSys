@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { usePageEnter } from "../hooks/useAnimations";
 import { useAuthStore } from "../store";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
@@ -9,6 +10,8 @@ export default function SettingsPage() {
   const token = useAuthStore((s) => s.token);
   const setToken = useAuthStore((s) => s.setToken);
   const toast = useToast();
+
+  const pageRef = usePageEnter<HTMLDivElement>();
 
   const [tokenInput, setTokenInput] = useState("");
   const [showToken, setShowToken] = useState(false);
@@ -27,7 +30,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       {/* Page header — typographic */}
       <div>
         <h1 className="t-display">Settings</h1>

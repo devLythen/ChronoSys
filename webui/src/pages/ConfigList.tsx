@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { BotProfile } from "../api/types";
@@ -9,8 +9,9 @@ import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
 import Modal from "../components/ui/Modal";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
-import { Plus, Trash2, Cpu, ExternalLink } from "lucide-react";
+import { Plus, Trash2, Cpu, ExternalLink, User, Box } from "lucide-react";
 
+import { usePageEnter, useStaggerList } from "../hooks/useAnimations";
 
 export default function ConfigList() {
   const navigate = useNavigate();
@@ -25,6 +26,8 @@ export default function ConfigList() {
     queryKey: ["bots"],
     queryFn: () => api.listBots(),
   });
+  const pageRef = usePageEnter<HTMLDivElement>();
+  const gridRef = useStaggerList<HTMLDivElement>([bots]);
 
 
   const deleteMut = useMutation({
@@ -56,7 +59,7 @@ export default function ConfigList() {
     navigate(`/config/${trimmed}`);
   };
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       {/* Hero header */}
       <div>
         <h1 className="t-display">Configs</h1>
@@ -103,11 +106,11 @@ export default function ConfigList() {
       )}
 
       {bots && bots.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {bots.map((bot) => (
             <Card
               key={bot.id}
-              className="cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
+              className="anim-item cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
               padding="none"
             >
               <div
@@ -119,18 +122,39 @@ export default function ConfigList() {
                     {bot.id}
                   </h3>
                 </div>
-
-                <p className="t-mono text-muted-fg mb-3 truncate">
-                  {bot.id}
+                <p className="t-mono text-muted-fg mb-2 truncate text-sm">
+                  <Cpu size={13} className="inline mr-1.5 -mt-0.5" />
+                  {bot.model_ref || "No model"}
                 </p>
-
-                <div className="flex items-center gap-2 text-sm text-muted-fg mb-4">
-                  <Cpu size={14} />
-                  <span className="t-mono truncate font-medium">{bot.model_ref || "—"}</span>
+                <div className="flex items-center gap-3 text-xs text-muted-fg mb-2">
+                  {bot.persona_id ? (
+                    <span className="t-mono inline-flex items-center gap-1">
+                      <User size={11} />
+                      {bot.persona_id}
+                    </span>
+                  ) : (
+                    <span className="text-muted-fg/50 inline-flex items-center gap-1">
+                      <User size={11} /> No persona
+                    </span>
+                  )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 px-4 py-2 border-t border-border bg-muted/30">
+              <div className="flex items-center gap-1 pl-2 pr-4 py-2 border-t border-border bg-muted/30">
+                {bot.model_ref?.includes("/") && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/providers/${bot.model_ref.split("/")[0]}`);
+                    }}
+                    title="Open provider"
+                  >
+                    <Box size={14} />
+                    Provider
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"

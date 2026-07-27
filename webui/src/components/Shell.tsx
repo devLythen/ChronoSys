@@ -1,8 +1,8 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { useState } from "react";
-import { PanelLeftClose, PanelLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { useState, useRef, useLayoutEffect } from "react";
+import { PanelLeftClose, PanelLeft, ChevronRight } from "lucide-react";
+import gsap from "gsap";
 import { cn } from "../lib/utils";
-
 interface NavItem {
   to?: string;
   label: string;
@@ -55,6 +55,31 @@ function SidebarSection({
   defaultExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded ?? true);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const chevronRef = useRef<SVGSVGElement>(null);
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    const chevron = chevronRef.current;
+    if (!content || !chevron) return;
+
+    const mm = gsap.matchMedia();
+    mm.add("(prefers-reduced-motion: no-preference)", () => {
+      if (expanded) {
+        gsap.fromTo(content, { height: 0, opacity: 0 }, { height: "auto", opacity: 1, duration: 0.2, ease: "power2.out" });
+        gsap.fromTo(chevron, { rotation: 0 }, { rotation: 90, duration: 0.2, ease: "power2.out" });
+      } else {
+        gsap.to(content, { height: 0, opacity: 0, duration: 0.15, ease: "power2.in" });
+        gsap.to(chevron, { rotation: 0, duration: 0.15, ease: "power2.in" });
+      }
+    });
+    mm.add("(prefers-reduced-motion: reduce)", () => {
+      gsap.set(content, { height: expanded ? "auto" : 0, opacity: expanded ? 1 : 0, clearProps: expanded ? "" : "height" });
+      gsap.set(chevron, { rotation: expanded ? 90 : 0 });
+    });
+
+    return () => mm.revert();
+  }, [expanded]);
 
   if (collapsed) {
     return (
@@ -77,9 +102,9 @@ function SidebarSection({
         className="w-full flex items-center justify-between px-4 py-1.5 text-[11px] font-semibold text-muted-fg uppercase tracking-wider hover:text-fg transition-colors"
       >
         {label}
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <ChevronRight ref={chevronRef} size={12} />
       </button>
-      {expanded && (
+      <div ref={contentRef} className="overflow-hidden">
         <div className="mt-0.5">
           {items.map((item) => (
             <NavLink
@@ -98,7 +123,7 @@ function SidebarSection({
             </NavLink>
           ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -117,14 +142,17 @@ export default function Shell() {
         {/* Branding */}
         <div
           className={cn(
-            "flex items-center h-12 border-b border-border shrink-0",
+            "flex items-center h-12 border-b border-border shrink-0 gap-2",
             collapsed ? "justify-center px-2" : "px-5",
           )}
         >
           {!collapsed && (
-            <NavLink to="/overview" className="text-[15px] font-bold tracking-tight select-none">
+            <NavLink to="/overview" className="text-[15px] font-bold tracking-tight select-none shrink-0">
               ChronoSys
             </NavLink>
+          )}
+          {!collapsed && (
+            <span className="text-[10px] text-muted-fg mt-0.5">v0.1</span>
           )}
           <button
             onClick={() => setCollapsed(!collapsed)}
@@ -149,13 +177,6 @@ export default function Shell() {
             />
           ))}
         </nav>
-
-        {/* Footer */}
-        <div className="border-t border-border px-4 py-3">
-          <p className={cn("text-[10px] text-muted-fg", collapsed && "text-center")}>
-            {collapsed ? "v0.1" : "ChronoSys v0.1"}
-          </p>
-        </div>
       </aside>
 
       {/* Main */}

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { usePageEnter } from "../hooks/useAnimations";
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -135,6 +136,8 @@ export default function SessionDetail() {
     return Array.isArray(raw) ? raw as AgentMessage[] : [];
   }, [session?.messages]);
 
+
+  const pageRef = usePageEnter<HTMLDivElement>();
   if (isLoading) {
     return (
       <div className="animate-fade-up py-24 text-center">
@@ -158,7 +161,7 @@ export default function SessionDetail() {
   }
 
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       <Link
         to="/sessions"
         className="t-label text-muted-fg hover:text-fg transition-colors inline-flex items-center gap-1.5"

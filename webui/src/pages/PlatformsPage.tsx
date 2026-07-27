@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Globe } from "lucide-react";
 import { api } from "../api/client";
 import type { AccountView } from "../api/types";
 import Button from "../components/ui/Button";
@@ -10,6 +10,7 @@ import Modal from "../components/ui/Modal";
 import Input from "../components/ui/Input";
 import { cn } from "../lib/utils";
 import { useToast } from "../components/ui/Toast";
+import { usePageEnter, useStaggerList } from "../hooks/useAnimations";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 
 export default function PlatformsPage() {
@@ -21,6 +22,8 @@ export default function PlatformsPage() {
     queryKey: ["accounts"],
     queryFn: () => api.listAccounts(),
   });
+  const pageRef = usePageEnter<HTMLDivElement>();
+  const gridRef = useStaggerList<HTMLDivElement>([accounts]);
 
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [newId, setNewId] = useState("");
@@ -61,7 +64,7 @@ export default function PlatformsPage() {
   };
 
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       <div>
         <h1 className="t-display">Platforms</h1>
         <p className="t-body text-muted-fg mt-3 max-w-xl">
@@ -101,11 +104,11 @@ export default function PlatformsPage() {
       )}
 
       {accounts.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {accounts.map((a) => (
             <Card
               key={a.id}
-              className="cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
+              className="anim-item cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
               padding="none"
             >
               <div
@@ -113,21 +116,30 @@ export default function PlatformsPage() {
                 className="p-4 flex-1"
               >
                 <div className="flex items-start justify-between mb-3">
-                  <h3 className="t-headline !text-xl truncate">
-                    {a.id}
-                  </h3>
+                  <h3 className="t-headline !text-xl truncate">{a.id}</h3>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={a.enabled}
+                    onClick={(e) => { e.stopPropagation(); toggleEnabled.mutate(a); }}
+                    className={`relative w-8 h-5 rounded-full transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-fg shrink-0 ml-2 ${
+                      a.enabled ? "bg-fg" : "bg-border"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-[3px] left-0 w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm ${
+                        a.enabled ? "translate-x-[15px]" : "translate-x-[2px]"
+                      }`}
+                    />
+                  </button>
                 </div>
-                <p className="t-mono text-muted-fg mb-3 truncate">
-                  {a.id}
+                <p className="t-mono text-muted-fg text-xs truncate inline-flex items-center gap-1.5">
+                  <Globe size={11} />
+                  {a.platform.charAt(0).toUpperCase() + a.platform.slice(1)}
                 </p>
-                <div className="flex items-center gap-2 text-sm text-muted-fg mb-4">
-                  <span className="t-mono text-[11px]">{a.platform}</span>
-                  <span>·</span>
-                  <span className="t-mono text-[11px]">{a.adapter_id}</span>
-                </div>
               </div>
 
-              <div className="flex items-center gap-1 px-4 py-2 border-t border-border bg-muted/30">
+              <div className="flex items-center gap-1 pl-2 pr-4 py-2 border-t border-border bg-muted/30">
                 <div className="flex-1" />
                 <Button
                   variant="ghost"

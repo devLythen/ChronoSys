@@ -4,12 +4,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { ProviderView } from "../api/types";
 import Button from "../components/ui/Button";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Link, Cpu } from "lucide-react";
 import Input from "../components/ui/Input";
 import Card from "../components/ui/Card";
 import Modal from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
+import { usePageEnter, useStaggerList } from "../hooks/useAnimations";
 
 
 // ── Page component ─────────────────────────────────────────────
@@ -53,10 +54,11 @@ export default function ProvidersPage() {
     onError: (err: Error) => toast.add("error", err.message),
   });
 
-  // ── Render ───────────────────────────────────────────────────
+  const pageRef = usePageEnter<HTMLDivElement>();
+  const gridRef = useStaggerList<HTMLDivElement>([list]);
 
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       {/* ── Header ──────────────────────────────────────────── */}
       <div>
         <h1 className="t-display">Providers</h1>
@@ -103,11 +105,11 @@ export default function ProvidersPage() {
 
       {/* ── Provider cards ──────────────────────────────────── */}
       {list.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {list.map((pv) => (
             <Card
               key={pv.id}
-              className="cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
+              className="anim-item cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
               padding="none"
             >
               <div
@@ -118,11 +120,16 @@ export default function ProvidersPage() {
                   <h3 className="t-headline !text-xl truncate">{pv.id}</h3>
                   <span className="t-mono text-[11px] text-muted-fg">{pv.kind}</span>
                 </div>
-                <div className="flex items-center gap-3 text-xs text-muted-fg">
+                <p className="t-mono text-muted-fg mb-2 truncate text-sm inline-flex items-center gap-1.5">
+                  <Link size={11} />
+                  {pv.base_url || pv.kind}
+                </p>
+                <div className="flex items-center gap-2 text-xs text-muted-fg">
+                  <Cpu size={11} />
                   <span>{pv.models.length} model{pv.models.length !== 1 ? "s" : ""}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-1 px-4 py-2 border-t border-border bg-muted/30">
+              <div className="flex items-center gap-1 pl-2 pr-4 py-2 border-t border-border bg-muted/30">
                 <div className="flex-1" />
                 <Button
                   variant="ghost"

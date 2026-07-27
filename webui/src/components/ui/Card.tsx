@@ -13,7 +13,11 @@ export default function Card({ children, className, padding = "md", onClick }: C
   const Tag = onClick ? "button" : "div";
   return (
     <Tag
-      className={cn("bg-card border border-border rounded-sm text-left w-full", pad, className)}
+      className={cn(
+        "bg-card border border-border rounded-sm text-left w-full transition-all duration-150 hover:-translate-y-0.5 hover:border-fg/20 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04)]",
+        pad,
+        className,
+      )}
       onClick={onClick}
       type={onClick ? "button" : undefined}
     >

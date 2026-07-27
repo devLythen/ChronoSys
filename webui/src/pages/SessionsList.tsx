@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { SessionSummary } from "../api/types";
+import { usePageEnter } from "../hooks/useAnimations";
 import Table from "../components/ui/Table";
 import Badge from "../components/ui/Badge";
 import { formatDate, truncate } from "../lib/utils";
@@ -17,8 +18,10 @@ export default function SessionsList() {
     refetchInterval: 5000,
   });
 
+  const pageRef = usePageEnter<HTMLDivElement>();
+
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       <div>
         <h1 className="t-display">Sessions</h1>
         <p className="t-body text-muted-fg mt-3 max-w-xl">

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { usePageEnter } from "../hooks/useAnimations";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -89,6 +90,8 @@ export default function PersonaEditor() {
     },
   });
 
+
+  const pageRef = usePageEnter<HTMLDivElement>();
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -112,7 +115,7 @@ export default function PersonaEditor() {
   }
 
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       {/* Back link */}
       <Link
         to="/persona"

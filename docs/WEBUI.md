@@ -8,7 +8,7 @@ ChronoSys 的管理与观测面板。操作员通过浏览器管理平台账号�
 
 **编辑式布局，非仪表盘。** 页面自上而下阅读，具有清晰的排版层次。表格只在数据需要时才出现。内容决定形式。
 
-**极简动效。** 页面进入和滚动揭示动画服务于可读性，非炫技。尊重 `prefers-reduced-motion`。
+**GSAP 驱动的极简动效。** 页面入场（fade-up）、卡片网格交错（stagger）、数字滚动（count-up）、侧栏折叠展开均使用 GSAP + ScrollTrigger。动效服务于可读性，非炫技。尊重 `prefers-reduced-motion`。
 
 ---
 
@@ -171,37 +171,42 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 需 `Authorization: Bear
 ## 6. 页面规格
 
 ### Shell
-- 顶部固定导航栏，水平文字链接（无图标、无侧栏）
-- 激活项：黑底白字
+- 左侧可折叠边栏（展开 224px / 折叠 48px），品牌名 + 版本号同行显示
+- 导航分组：Overview → Configuration → Plugins → Observability，每组可展开/折叠（GSAP 动画）
+- 激活项：黑底白字 pill
 - 内容区 `max-w-6xl` 居中，响应式 padding
-- 页脚显示版本号
 
 ### Overview
-- 统计卡片网格：uptime、agent 状态、adapter 数、session 数
-- 五步闭环检查清单，每项带状态标记和跳转链接
-- 半调装饰块分隔区块
+- Agent 存活状态指示器（绿/红圆点 + "alive"/"down"）
+- 5 张统计卡片：Uptime、Adapters、Sessions、Accounts、Bot Profiles（数字使用 GSAP count-up 动画）
+- Closure Checklist 标题旁显示进度 badge（"All Clear" 或 "X/5"）
+- 五步闭环检查清单，每项带状态标记和跳转链接，使用 GSAP staggered 入场
+- 半调装饰块分隔统计区与检查清单
 
 ### Platforms
-- 账号卡片：横向全宽，左信息右操作
-- 展开显示已 attach 的 config 列表
-- Attach 表单：config 下拉 / chat_pattern / session_mode / priority
+- 卡片网格展示账号，右上角 Enabled 开关直接切换
+- 卡片显示平台名（Globe 图标），底栏 hover 显示删除按钮
+- 详情页配置区：Platform / Adapter 下拉 + Bot Token 输入
+- Attached Config 为单选绑定：显示当前配置名 + 快捷跳转图标，Change / 解绑按钮
+- Attach 弹窗：Config 下拉选择，替换时先删旧绑定再建新绑定
 - Secret 输入提示：「留空保留现有 secret」
 - 术语：「Attach config」/「Detach」，禁用「Binding」
 
 ### Config
+- 卡片网格：标题(ID) + 模型(Cpu 图标) + 人格(User 图标) + Provider 跳转(Box 图标)
+- 底栏按钮：Provider 跳转 → Persona 跳转 → Delete
 - **model_ref 是 Select 下拉**，数据源：enabled provider + enabled model 的交集
 - Policy 编辑器：JSON textarea，保存前 `JSON.parse` 校验
 - Persona 字段只读预览，链接到 Persona 页编辑
 - 创建时 model 必选
 
 ### Persona
+- 卡片网格：标题(ID) + prompt 预览(FileText 图标，两行截断) + tools/skills 数量 Badge
+- Editor：System prompt 大文本框 / Tools checkbox 网格 / Skills 标签增删
 - **独立于 Config**：可直接创建、编辑，不依赖 Config 页
-- System prompt：大文本框，等宽字体
-- Tools：从 `/api/v1/tools` 动态获取，checkbox 网格，带 label 说明
-- Skills：标签式增删
 
 ### Providers
-- 横向全宽卡片，可展开显示 model 列表
+- 卡片网格：标题(ID) + kind badge + base_url(Link 图标) + 模型数量(Cpu 图标)
 - Credential 弹窗：auth_kind 选择 + secret_ref 输入
 - Model 弹窗：model_id / display_name / temperature / max_tokens / thinking_level
 

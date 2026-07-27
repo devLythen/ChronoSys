@@ -10,8 +10,9 @@ import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import type { Persona } from "../api/types";
 import { truncate } from "../lib/utils";
-import { Wrench, Puzzle, Plus, Trash2 } from "lucide-react";
+import { Wrench, Puzzle, Plus, Trash2, FileText } from "lucide-react";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
+import { usePageEnter, useStaggerList } from "../hooks/useAnimations";
 
 export default function PersonaList() {
   const navigate = useNavigate();
@@ -55,8 +56,11 @@ export default function PersonaList() {
     navigate(`/persona/${trimmed}`);
   };
 
+
+  const pageRef = usePageEnter<HTMLDivElement>();
+  const gridRef = useStaggerList<HTMLDivElement>([personas]);
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       <div>
         <h1 className="t-display">Personas</h1>
         <p className="t-body text-muted-fg mt-3 max-w-xl">
@@ -96,11 +100,11 @@ export default function PersonaList() {
       )}
 
       {personas && personas.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {personas.map((persona) => (
             <Card
               key={persona.id}
-              className="cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
+              className="anim-item cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
               padding="none"
             >
               <div
@@ -110,7 +114,8 @@ export default function PersonaList() {
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="t-headline !text-xl truncate">{persona.id}</h3>
                 </div>
-                <div className="mb-3 min-h-[2.5em]">
+                <div className="mb-3 min-h-[2.5em] inline-flex items-start gap-1.5">
+                  <FileText size={12} className="mt-0.5 text-muted-fg shrink-0" />
                   {persona.system_prompt ? (
                     <p className="t-body text-muted-fg line-clamp-2">
                       {truncate(persona.system_prompt, 120)}
@@ -130,7 +135,7 @@ export default function PersonaList() {
                   </Badge>
                 </div>
               </div>
-              <div className="flex items-center gap-1 px-4 py-2 border-t border-border bg-muted/30">
+              <div className="flex items-center gap-1 pl-2 pr-4 py-2 border-t border-border bg-muted/30">
                 <div className="flex-1" />
                 <Button
                   variant="ghost"

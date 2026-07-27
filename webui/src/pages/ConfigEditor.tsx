@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { usePageEnter } from "../hooks/useAnimations";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -111,6 +112,8 @@ export default function ConfigEditor() {
     );
   };
 
+
+  const pageRef = usePageEnter<HTMLDivElement>();
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -134,7 +137,7 @@ export default function ConfigEditor() {
   }
 
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       <Link
         to="/config"
         className="t-label text-muted-fg hover:text-fg transition-colors inline-flex items-center gap-1"

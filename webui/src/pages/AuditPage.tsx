@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import { usePageEnter } from "../hooks/useAnimations";
 import type { AuditEntry } from "../api/types";
 import Table from "../components/ui/Table";
 import Badge from "../components/ui/Badge";
@@ -16,6 +17,8 @@ export default function AuditPage() {
   const [sessionId, setSessionId] = useState("");
   const [event, setEvent] = useState("");
   const [applied, setApplied] = useState(false);
+
+  const pageRef = usePageEnter<HTMLDivElement>();
 
   const {
     data = [],
@@ -125,7 +128,7 @@ export default function AuditPage() {
   ];
 
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       {/* ── Hero header ────────────────────────────────────────── */}
       <div>
         <h1 className="t-display">Audit Log</h1>

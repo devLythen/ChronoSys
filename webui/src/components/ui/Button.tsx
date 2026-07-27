@@ -32,7 +32,7 @@ export default function Button({
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-sm font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg disabled:opacity-40 disabled:pointer-events-none",
+        "inline-flex items-center justify-center gap-1.5 rounded-sm font-medium transition-all duration-150 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg disabled:opacity-40 disabled:pointer-events-none",
         variantClasses[variant],
         sizeClasses[size],
         className,

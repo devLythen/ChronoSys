@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import Badge from "../components/ui/Badge";
 import { formatUptime } from "../lib/utils";
+import { usePageEnter, useStaggerList, useCountUp } from "../hooks/useAnimations";
 
 type CheckResult = { ok: boolean; label: string; detail: string; link: string };
 
@@ -27,15 +28,6 @@ export default function Overview() {
     queryKey: ["personas"],
     queryFn: () => api.listPersonas(),
   });
-
-  if (healthLoading) {
-    return (
-      <div className="animate-fade-up">
-        <p className="t-body text-muted-fg py-12">Loading…</p>
-      </div>
-    );
-  }
-
   // ── Closure checks ──────────────────────────────────────────
   const checks: CheckResult[] = [
     {
@@ -70,11 +62,23 @@ export default function Overview() {
     },
   ];
 
+  const pageRef = usePageEnter<HTMLDivElement>();
+  const checklistRef = useStaggerList<HTMLDivElement>([checks], { scroll: false, stagger: 0.04 });
+
+  if (healthLoading) {
+    return (
+      <div ref={pageRef}>
+        <p className="t-body text-muted-fg py-12">Loading…</p>
+      </div>
+    );
+  }
+
+
   const allPassed = checks.every((c) => c.ok);
   const passedCount = checks.filter((c) => c.ok).length;
 
   return (
-    <div className="animate-fade-up space-y-6 md:space-y-8">
+    <div ref={pageRef} className="space-y-6 md:space-y-8">
       {/* ── Hero header ────────────────────────────────────────── */}
       <div>
         <h1 className="t-display">Overview</h1>
@@ -85,28 +89,25 @@ export default function Overview() {
       </div>
       <div className="rule-heavy" />
 
-      {/* ── Status badge ───────────────────────────────────────── */}
-      <div className="flex items-center gap-4">
-        <Badge variant={allPassed ? "success" : "warning"} className="px-3 py-1 text-xs">
-          {allPassed ? "All Clear" : `${passedCount}/${checks.length} Ready`}
-        </Badge>
-        {!allPassed && (
-          <span className="t-body text-muted-fg">
-            {checks.length - passedCount} step{(checks.length - passedCount) !== 1 ? "s" : ""} need
-            attention
-          </span>
-        )}
-      </div>
 
-      {/* ── Stats grid ─────────────────────────────────────────── */}
+      {/* ── Agent status ──────────────────────────────────────── */}
       {health && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+        <div className="flex items-center gap-1.5 text-xs text-muted-fg">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              health.agent_host === "alive" ? "bg-success" : "bg-destructive"
+            }`}
+          />
+          Agent {health.agent_host === "alive" ? "alive" : "down"}
+        </div>
+      )}
+      {health && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <StatCard label="Uptime" value={formatUptime(health.uptime_secs)} />
-          <StatCard label="Agent Host" value={health.agent_host} mono />
-          <StatCard label="Adapters" value={String(health.adapter_count)} />
-          <StatCard label="Sessions" value={String(health.session_count)} />
-          <StatCard label="Accounts" value={String(health.account_count)} />
-          <StatCard label="Bot Profiles" value={String(health.bot_count)} />
+          <StatCard label="Adapters" countUp={health.adapter_count} value={String(health.adapter_count)} />
+          <StatCard label="Sessions" countUp={health.session_count} value={String(health.session_count)} />
+          <StatCard label="Accounts" countUp={health.account_count} value={String(health.account_count)} />
+          <StatCard label="Bot Profiles" countUp={health.bot_count} value={String(health.bot_count)} />
         </div>
       )}
 
@@ -115,19 +116,21 @@ export default function Overview() {
 
       {/* ── Closure checklist ──────────────────────────────────── */}
       <div>
-        <h2 className="t-headline mb-6">Closure Checklist</h2>
-        <div className="space-y-4">
+        <div className="flex items-center gap-3 mb-5">
+          <h2 className="t-headline">Closure Checklist</h2>
+          <Badge variant={allPassed ? "success" : "warning"} className="px-2.5 py-0.5 text-[11px]">
+            {allPassed ? "All Clear" : `${passedCount}/${checks.length}`}
+          </Badge>
+        </div>
+        <div ref={checklistRef} className="space-y-4">
           {checks.map((check, i) => (
             <div
               key={check.label}
-              className="bg-card border border-border px-4 py-4 flex items-center gap-6 group"
+              className="anim-item bg-card border border-border px-4 py-4 flex items-center gap-6 group"
             >
-              {/* Step number */}
               <span className="t-display text-[2rem] text-muted-fg/20 leading-none tabular-nums w-12 flex-shrink-0">
                 {(i + 1).toString().padStart(2, "0")}
               </span>
-
-              {/* Status icon */}
               <span
                 className={`flex-shrink-0 w-7 h-7 flex items-center justify-center text-sm font-bold ${
                   check.ok
@@ -137,14 +140,10 @@ export default function Overview() {
               >
                 {check.ok ? "\u2713" : "\u2717"}
               </span>
-
-              {/* Content */}
               <div className="flex-1 min-w-0">
                 <p className="t-title font-medium">{check.label}</p>
                 <p className="t-body text-muted-fg mt-0.5">{check.detail}</p>
               </div>
-
-              {/* Action link */}
               {!check.ok && (
                 <Link
                   to={check.link}
@@ -164,20 +163,19 @@ export default function Overview() {
 function StatCard({
   label,
   value,
-  mono,
+  countUp,
 }: {
   label: string;
   value: string;
-  mono?: boolean;
+  countUp?: number;
 }) {
+  const animated = useCountUp(countUp ?? 0, { enabled: countUp !== undefined });
+  const display = countUp !== undefined ? String(animated) : value;
+
   return (
     <div className="bg-card border border-border px-4 py-4">
-      <p
-        className={`t-display text-[1.75rem] md:text-[2.25rem] leading-none ${
-          mono ? "t-mono" : ""
-        }`}
-      >
-        {value}
+      <p className="t-display text-[1.75rem] md:text-[2.25rem] leading-none tabular-nums">
+        {display}
       </p>
       <p className="t-label text-muted-fg mt-2">{label}</p>
     </div>
