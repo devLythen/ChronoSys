@@ -195,7 +195,8 @@ export default function PlatformsPage() {
         </p>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
         <p className="t-label text-muted-fg">
           {accounts.length} bot{accounts.length !== 1 ? "s" : ""}
         </p>
@@ -206,6 +207,7 @@ export default function PlatformsPage() {
       </div>
 
       <div className="rule-heavy" />
+      </div>
       {/* ── Loading / Error ── */}
       {acctsLoading && (
         <div className="py-16 text-center">

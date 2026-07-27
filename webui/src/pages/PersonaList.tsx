@@ -75,7 +75,8 @@ export default function PersonaList() {
         </p>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
         <p className="t-label text-muted-fg">
           {personas ? `${personas.length} persona${personas.length !== 1 ? "s" : ""}` : "—"}
         </p>
@@ -85,6 +86,7 @@ export default function PersonaList() {
         </Button>
       </div>
       <div className="rule-heavy" />
+      </div>
 
       {isLoading && (
         <div className="py-16 text-center">

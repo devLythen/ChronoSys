@@ -89,17 +89,18 @@ export default function ConfigList() {
         </p>
       </div>
 
-      <div className="flex items-center justify-between">
-        <p className="t-label text-muted-fg">
-          {bots ? `${bots.length} config${bots.length !== 1 ? "s" : ""}` : "—"}
-        </p>
-        <Button onClick={() => setModalOpen(true)}>
-          <Plus size={16} />
-          New Config
-        </Button>
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <p className="t-label text-muted-fg">
+            {bots ? `${bots.length} config${bots.length !== 1 ? "s" : ""}` : "—"}
+          </p>
+          <Button onClick={() => setModalOpen(true)}>
+            <Plus size={16} />
+            New Config
+          </Button>
+        </div>
+        <div className="rule-heavy" />
       </div>
-
-      <div className="rule-heavy" />
 
       {isLoading && (
         <div className="py-16 text-center">

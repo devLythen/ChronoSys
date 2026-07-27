@@ -1,6 +1,7 @@
 import { createHashRouter, Navigate } from "react-router-dom";
 import Shell from "./components/Shell";
 import Overview from "./pages/Overview";
+import ProviderEditor from "./pages/ProviderEditor";
 import ProvidersPage from "./pages/ProvidersPage";
 import ConfigList from "./pages/ConfigList";
 import ConfigEditor from "./pages/ConfigEditor";
@@ -24,6 +25,7 @@ export const router = createHashRouter([
       { path: "config", element: <ConfigList /> },
       { path: "config/:id", element: <ConfigEditor /> },
       { path: "providers", element: <ProvidersPage /> },
+      { path: "providers/:id", element: <ProviderEditor /> },
       { path: "persona", element: <PersonaList /> },
       { path: "persona/:id", element: <PersonaEditor /> },
       { path: "sessions", element: <SessionsList /> },
