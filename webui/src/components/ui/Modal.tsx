@@ -22,7 +22,9 @@ export default function Modal({ open, onClose, title, children, className, size 
   useEffect(() => {
     if (open) {
       setVisible(true);
-      requestAnimationFrame(() => setAnimating(true));
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => setAnimating(true));
+      });
     } else {
       setAnimating(false);
       const timer = setTimeout(() => setVisible(false), 200);
