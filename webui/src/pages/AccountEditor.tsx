@@ -3,12 +3,11 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { AccountView } from "../api/types";
-import Card from "../components/ui/Card";
+import { ArrowLeft, Save, Loader2, Trash2, Link2, X } from "lucide-react";
 import Button from "../components/ui/Button";
-import Input from "../components/ui/Input";
 import Select from "../components/ui/Select";
+import Modal from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
-import { ArrowLeft, Save, Loader2, Trash2 } from "lucide-react";
 
 const ADAPTERS = [
   { value: "chrono.adapter.telegram", label: "Telegram" },
@@ -29,6 +28,22 @@ export default function AccountEditor() {
     queryFn: () => api.getAccount(id!),
     enabled: !!id,
   });
+
+  const { data: bindings = [] } = useQuery({
+    queryKey: ["bindings"],
+    queryFn: () => api.listBindings(),
+  });
+
+  const { data: bots = [] } = useQuery({
+    queryKey: ["bots"],
+    queryFn: () => api.listBots(),
+  });
+
+  const accountBindings = bindings.filter((b: { account_id: string }) => b.account_id === id);
+  const botsById = new Map(bots.map((b: { id: string }) => [b.id, b]));
+
+  const [attachModalOpen, setAttachModalOpen] = useState(false);
+  const [attachConfigId, setAttachConfigId] = useState("");
 
   const [platform, setPlatform] = useState("telegram");
   const [adapterId, setAdapterId] = useState("chrono.adapter.telegram");
@@ -179,6 +194,42 @@ export default function AccountEditor() {
         </Card>
       </div>
 
+      {/* ── Bindings ──────────────────────────────────────────── */}
+      <Card className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="t-headline !text-lg">Attached Configs</h2>
+            <p className="t-label text-muted-fg mt-1">
+              {accountBindings.length} config{accountBindings.length !== 1 ? "s" : ""} attached
+            </p>
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => { setAttachConfigId(""); setAttachModalOpen(true); }}>
+            <Link2 size={14} />
+            Attach
+          </Button>
+        </div>
+
+        {accountBindings.length > 0 ? (
+          <div className="border border-border rounded-sm overflow-hidden">
+            {accountBindings.map((b: { id: string; bot_profile_id: string }) => (
+              <div key={b.id} className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-0">
+                <span className="t-mono text-sm">{b.bot_profile_id}</span>
+                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive"
+                  onClick={() => {
+                    if (window.confirm(`Detach config "${b.bot_profile_id}"?`)) {
+                      api.deleteBinding(b.id).then(() => qc.invalidateQueries({ queryKey: ["bindings"] }));
+                    }
+                  }}>
+                  <X size={14} />
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="t-body text-muted-fg py-4">No configs attached. Attach one to route messages.</p>
+        )}
+      </Card>
+
       <div className="rule-thin" />
       <div className="flex justify-end">
         <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending} size="lg">
@@ -186,6 +237,39 @@ export default function AccountEditor() {
           Save
         </Button>
       </div>
+
+      {/* ── Attach Modal ── */}
+      <Modal
+        open={attachModalOpen}
+        onClose={() => setAttachModalOpen(false)}
+        title="Attach Config"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <Select
+            label="Config"
+            value={attachConfigId}
+            onChange={(e) => setAttachConfigId(e.target.value)}
+            options={[
+              { value: "", label: "Select a config…" },
+              ...bots.map((b: { id: string }) => ({ value: b.id, label: b.id })),
+            ]}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setAttachModalOpen(false)}>Cancel</Button>
+            <Button disabled={!attachConfigId} onClick={async () => {
+              const bindingId = `${id}-${attachConfigId}-${Date.now().toString(36)}`;
+              await api.createBinding({
+                id: bindingId, account_id: id!, bot_profile_id: attachConfigId,
+                chat_pattern: "dm:*", session_mode: "dm", priority: 10, enabled: true,
+              });
+              qc.invalidateQueries({ queryKey: ["bindings"] });
+              setAttachModalOpen(false);
+              setAttachConfigId("");
+            }}>Attach</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

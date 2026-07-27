@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import Modal from "../components/ui/Modal";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
-import { useToast } from "../components/ui/Toast";
 import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import type { Persona } from "../api/types";
@@ -15,8 +14,6 @@ import { Wrench, Puzzle, BookOpen, Plus } from "lucide-react";
 export default function PersonaList() {
   const navigate = useNavigate();
 
-  const queryClient = useQueryClient();
-  const toast = useToast();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [newId, setNewId] = useState("");
@@ -28,27 +25,6 @@ export default function PersonaList() {
     queryFn: () => api.listPersonas(),
   });
 
-  const createMut = useMutation({
-    mutationFn: () =>
-      api.createPersona({
-        id: newId.trim(),
-        system_prompt: "",
-        tools_allowlist_json: ["message_send"],
-        skills_allowlist_json: [],
-        json_ext: {},
-      }),
-    onSuccess: (created) => {
-      queryClient.invalidateQueries({ queryKey: ["personas"] });
-      setModalOpen(false);
-      setNewId("");
-      setIdError("");
-      toast.add("success", "Persona created");
-      navigate(`/persona/${created.id}`);
-    },
-    onError: (err: Error) => {
-      setIdError(err.message);
-    },
-  });
 
   const handleCreate = () => {
     const trimmed = newId.trim();
@@ -61,7 +37,9 @@ export default function PersonaList() {
       return;
     }
     setIdError("");
-    createMut.mutate();
+    setModalOpen(false);
+    setNewId("");
+    navigate(`/persona/${trimmed}`);
   };
 
   return (
@@ -75,8 +53,8 @@ export default function PersonaList() {
         </p>
       </div>
 
-      <div className="space-y-1">
-        <div className="flex items-center justify-between">
+      <div className="rule-heavy" />
+      <div className="flex items-center justify-between">
         <p className="t-label text-muted-fg">
           {personas ? `${personas.length} persona${personas.length !== 1 ? "s" : ""}` : "—"}
         </p>
@@ -84,8 +62,6 @@ export default function PersonaList() {
           <Plus size={16} />
           New Persona
         </Button>
-      </div>
-      <div className="rule-heavy" />
       </div>
 
       {isLoading && (
@@ -166,7 +142,7 @@ export default function PersonaList() {
             <Button variant="secondary" onClick={() => { setModalOpen(false); setNewId(""); setIdError(""); }}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={createMut.isPending}>
+            <Button onClick={handleCreate}>
               Create
             </Button>
           </div>

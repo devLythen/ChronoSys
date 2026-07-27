@@ -2,31 +2,14 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type {
-  ProviderView,
-  ProviderBody,
-} from "../api/types";
+import type { ProviderView } from "../api/types";
 import Button from "../components/ui/Button";
 import { Plus } from "lucide-react";
 import Input from "../components/ui/Input";
-import Select from "../components/ui/Select";
 import Card from "../components/ui/Card";
 import Modal from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
 
-// ── Constants ──────────────────────────────────────────────────
-
-const PROVIDER_KINDS = [
-  { value: "openai", label: "OpenAI / OpenAI-Compatible" },
-  { value: "deepseek", label: "DeepSeek" },
-  { value: "anthropic", label: "Anthropic" },
-];
-
-const DEFAULT_BASE_URLS: Record<string, string> = {
-  openai: "https://api.openai.com/v1",
-  deepseek: "https://api.deepseek.com/v1",
-  anthropic: "https://api.anthropic.com/v1",
-};
 
 // ── Page component ─────────────────────────────────────────────
 
@@ -46,37 +29,18 @@ export default function ProvidersPage() {
 
   // ── Add Provider modal ───────────────────────────────────────
   const [provModalOpen, setProvModalOpen] = useState(false);
-  const [provForm, setProvForm] = useState<ProviderBody>({ id: "", kind: "openai", base_url: DEFAULT_BASE_URLS["openai"] });
-  const [apiKey, setApiKey] = useState("");
+  const [newProvId, setNewProvId] = useState("");
 
   // ── Derived ──────────────────────────────────────────────────
   const list = providers ?? [];
 
   const openCreateProv = () => {
-    setProvForm({ id: "", kind: "openai", base_url: DEFAULT_BASE_URLS["openai"] });
-    setApiKey("");
+    setNewProvId("");
     setProvModalOpen(true);
   };
 
-  // ── Provider mutations ───────────────────────────────────────
 
-  const provCreateMutation = useMutation({
-    mutationFn: async (body: ProviderBody) => {
-      const prov = await api.createProvider(body);
-      if (apiKey) {
-        await api.upsertCredential(prov.id, {
-          auth_kind: "api_key",
-          secret_ref: apiKey,
-        });
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["providers"] });
-      toast.add("success", "Provider created.");
-      setProvModalOpen(false);
-    },
-    onError: (err: Error) => toast.add("error", err.message),
-  });
+  // ── Provider mutations ───────────────────────────────────────
 
   const deleteProvMutation = useMutation({
     mutationFn: (id: string) => api.deleteProvider(id),
@@ -99,17 +63,15 @@ export default function ProvidersPage() {
         </p>
       </div>
 
-      <div className="space-y-1">
-        <div className="flex items-center justify-between">
-          <p className="t-label text-muted-fg">
-            {list ? `${list.length} provider${list.length !== 1 ? "s" : ""}` : "—"}
-          </p>
-          <Button onClick={openCreateProv}>
-            <Plus size={16} />
-            New Provider
-          </Button>
-        </div>
-        <div className="rule-heavy" />
+      <div className="rule-heavy" />
+      <div className="flex items-center justify-between">
+        <p className="t-label text-muted-fg">
+          {list ? `${list.length} provider${list.length !== 1 ? "s" : ""}` : "—"}
+        </p>
+        <Button onClick={openCreateProv}>
+          <Plus size={16} />
+          New Provider
+        </Button>
       </div>
 
       {isLoading && (
@@ -172,46 +134,18 @@ export default function ProvidersPage() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            provCreateMutation.mutate({
-              ...provForm,
-            });
+            if (newProvId.trim()) {
+              navigate(`/providers/${newProvId.trim()}`);
+            }
           }}
           className="flex flex-col gap-5"
         >
           <Input
             label="ID"
-            value={provForm.id ?? ""}
-            onChange={(e) => setProvForm({ ...provForm, id: e.target.value })}
+            value={newProvId}
+            onChange={(e) => setNewProvId(e.target.value)}
             required
             hint="Unique identifier, e.g. my-openai"
-          />
-          <Select
-            label="Kind"
-            options={PROVIDER_KINDS}
-            value={provForm.kind}
-            onChange={(e) => {
-              const kind = e.target.value;
-              setProvForm({
-                ...provForm,
-                kind,
-                base_url: DEFAULT_BASE_URLS[kind] ?? provForm.base_url,
-              });
-            }}
-          />
-          <Input
-            label="Base URL"
-            value={provForm.base_url ?? ""}
-            onChange={(e) =>
-              setProvForm({ ...provForm, base_url: e.target.value || null })
-            }
-            placeholder="https://api.openai.com/v1"
-          />
-          <Input
-            label="API Key"
-            type="text"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-..."
           />
           <div className="flex justify-end gap-2 pt-2">
             <Button
@@ -221,8 +155,8 @@ export default function ProvidersPage() {
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={provCreateMutation.isPending}>
-              {provCreateMutation.isPending ? "Creating..." : "Create"}
+            <Button type="submit" disabled={!newProvId.trim()}>
+              Create
             </Button>
           </div>
         </form>

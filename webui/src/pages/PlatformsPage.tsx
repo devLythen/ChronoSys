@@ -1,91 +1,38 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { Plus, ChevronDown, ChevronRight, X, Trash2, Link2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { api } from "../api/client";
+import type { AccountView } from "../api/types";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Modal from "../components/ui/Modal";
 import Input from "../components/ui/Input";
-import Select from "../components/ui/Select";
 import { cn } from "../lib/utils";
 import { useToast } from "../components/ui/Toast";
-
-type AccountForm = {
-  id: string;
-  platform: string;
-  mode: string;
-  enabled: boolean;
-  secret_ref: string;
-};
-
-const emptyForm: AccountForm = {
-  id: "",
-  platform: "telegram",
-  mode: "telegram",
-  enabled: true,
-  secret_ref: "",
-};
-
 
 export default function PlatformsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const toast = useToast();
 
-  const { data: accounts = [], isLoading: acctsLoading, error: acctsError } = useQuery({
+  const { data: accounts = [], isLoading, error } = useQuery({
     queryKey: ["accounts"],
     queryFn: () => api.listAccounts(),
   });
-  const { data: bindings = [] } = useQuery({
-    queryKey: ["bindings"],
-    queryFn: () => api.listBindings(),
-  });
-  const { data: bots = [] } = useQuery({
-    queryKey: ["bots"],
-    queryFn: () => api.listBots(),
-  });
 
-  const botsById = new Map(bots.map((b: BotProfile) => [b.id, b]));
+  const [newModalOpen, setNewModalOpen] = useState(false);
+  const [newId, setNewId] = useState("");
 
-  // -- expand/collapse state --
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const toggleExpanded = useCallback((id: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const [acctModal, setAcctModal] = useState(false);
-  const [acctForm, setAcctForm] = useState<AccountForm>(emptyForm);
-
-  const openNew = () => {
-    setAcctForm(emptyForm);
-    setAcctModal(true);
-  };
-
-  const acctMut = useMutation({
-    mutationFn: async () => {
-      const body: AccountBody = {
-        id: acctForm.id,
-        platform: acctForm.platform,
-        adapter_id: acctForm.mode,
-        enabled: acctForm.enabled,
-        secret_ref: acctForm.secret_ref || undefined,
-        adapter_config_json: {},
-        json_ext: {},
-      };
-      await api.createAccount(body);
+  const toggleEnabled = useMutation({
+    mutationFn: async (a: AccountView) => {
+      await api.updateAccount(a.id, {
+        id: a.id, platform: a.platform, adapter_id: a.adapter_id,
+        enabled: !a.enabled,
+        adapter_config_json: a.adapter_config_json, json_ext: a.json_ext,
+      });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["accounts"] });
-      qc.invalidateQueries({ queryKey: ["bindings"] });
-      setAcctModal(false);
-      toast.add("success", "Bot created.");
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
     onError: (e: Error) => toast.add("error", e.message),
   });
 
@@ -93,307 +40,126 @@ export default function PlatformsPage() {
     mutationFn: (id: string) => api.deleteAccount(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["accounts"] });
-      qc.invalidateQueries({ queryKey: ["bindings"] });
       toast.add("success", "Bot deleted.");
     },
     onError: (e: Error) => toast.add("error", e.message),
   });
 
-  const toggleEnabled = useMutation({
-    mutationFn: async (a: AccountView) => {
-      await api.updateAccount(a.id, {
-        id: a.id,
-        platform: a.platform,
-        adapter_id: a.adapter_id,
-        enabled: !a.enabled,
-        adapter_config_json: a.adapter_config_json,
-        json_ext: a.json_ext,
-      });
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
-    onError: (e: Error) => toast.add("error", e.message),
-  });
-
-
-  // -- attach modal --
-  const [attachModalOpen, setAttachModalOpen] = useState(false);
-  const [attachAcct, setAttachAcct] = useState<string>("");
-  const [attachConfigId, setAttachConfigId] = useState("");
-
-  const attachMut = useMutation({
-    mutationFn: async (accountId: string) => {
-      const bindingId = `${accountId}-${attachConfigId}-${Date.now().toString(36)}`;
-      await api.createBinding({
-        id: bindingId,
-        account_id: accountId,
-        bot_profile_id: attachConfigId,
-        chat_pattern: "dm:*",
-        session_mode: "dm",
-        priority: 10,
-        enabled: true,
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["bindings"] });
-      setAttachModalOpen(false);
-      setAttachConfigId("");
-      toast.add("success", "Config attached.");
-    },
-    onError: (e: Error) => toast.add("error", e.message),
-  });
-
-  const detachMut = useMutation({
-    mutationFn: (id: string) => api.deleteBinding(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["bindings"] });
-      toast.add("success", "Config detached.");
-    },
-    onError: (e: Error) => toast.add("error", e.message),
-  });
-
-  const confirmDetach = (bindingId: string) => {
-    if (window.confirm("Detach this config?")) {
-      detachMut.mutate(bindingId);
-    }
+  const handleCreate = () => {
+    const trimmed = newId.trim();
+    if (!trimmed || !/^[a-zA-Z0-9_-]+$/.test(trimmed)) return;
+    setNewModalOpen(false);
+    setNewId("");
+    navigate(`/platforms/${trimmed}`);
   };
-
-  const accountBinding = (accountId: string): Binding | undefined =>
-    bindings.find((b) => b.account_id === accountId);
 
   return (
     <div className="animate-fade-up space-y-6 md:space-y-8">
-      {/* ── Page header — typographic ── */}
       <div>
         <h1 className="t-display">Platforms</h1>
-        <p className="t-body text-muted-fg mt-3 max-w-lg">
-          Manage messaging accounts and attached configs
+        <p className="t-body text-muted-fg mt-3 max-w-xl">
+          Manage messaging accounts and platform connections.
         </p>
       </div>
+      <div className="rule-heavy" />
 
-      <div className="space-y-1">
-        <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between">
         <p className="t-label text-muted-fg">
           {accounts.length} bot{accounts.length !== 1 ? "s" : ""}
         </p>
-        <Button onClick={() => { setEditing(false); setAcctForm(emptyAcctForm()); setAcctModal(true); }}>
+        <Button onClick={() => { setNewId(""); setNewModalOpen(true); }}>
           <Plus size={16} />
-          New Account
+          New Bot
         </Button>
       </div>
 
-      <div className="rule-heavy" />
-      </div>
-      {/* ── Loading / Error ── */}
-      {acctsLoading && (
+      {isLoading && (
         <div className="py-16 text-center">
-          <span className="t-body text-muted-fg">Loading accounts…</span>
+          <p className="t-body text-muted-fg">Loading&hellip;</p>
         </div>
       )}
-      {acctsError && (
+      {error && (
         <div className="py-16 text-center">
-          <span className="t-body text-destructive">{(acctsError as Error).message}</span>
+          <p className="text-sm text-destructive font-medium">{(error as Error).message}</p>
         </div>
       )}
-
-      {!acctsLoading && !acctsError && accounts.length === 0 && (
+      {!isLoading && !error && accounts.length === 0 && (
         <div className="halftone-light py-24 text-center border border-border">
           <p className="t-headline text-muted-fg/60 mb-3">No bots yet</p>
-          <p className="t-body text-muted-fg/70 mb-6">Create one to get started.</p>
+          <p className="t-body text-muted-fg/70 mb-6">Add a platform account to get started.</p>
+          <Button onClick={() => { setNewId(""); setNewModalOpen(true); }}>
+            <Plus size={16} /> New Bot
+          </Button>
         </div>
       )}
 
-
-      {/* ── Account cards ── */}
       {accounts.length > 0 && (
-        <div className="space-y-4">
-          {accounts.map((a) => {
-            const isOpen = expanded.has(a.id);
-            const attached = accountBinding(a.id);
-
-            return (
-              <div key={a.id}>
-                <Card padding="none" className="hover:border-fg/30 transition-colors">
-                  {/* Card body — horizontal full-width */}
-                  <div className="flex items-center justify-between px-4 py-3">
-                    <button
-                      className="flex items-center gap-3 text-left flex-1 min-w-0 cursor-pointer"
-                      onClick={() => toggleExpanded(a.id)}
-                    >
-                      <span className="text-muted-fg shrink-0">
-                        {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                      </span>
-                      <div className="min-w-0">
-                        <h3 className="t-headline truncate">{a.id}</h3>
-                        <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
-                          <code className="t-mono text-[11px] text-muted-fg">{a.id}</code>
-                        </div>
-                      </div>
-                    </button>
-                    <div className="flex items-center gap-1 shrink-0 ml-4">
-                      <button
-                        onClick={() => toggleEnabled.mutate(a)}
-                        className={cn(
-                          "relative w-8 h-5 rounded-full transition-colors duration-200",
-                          a.enabled ? "bg-fg" : "bg-border"
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "absolute top-[3px] left-0 w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm",
-                            a.enabled ? "translate-x-[15px]" : "translate-x-[2px]"
-                          )}
-                        />
-                      </button>
-                      <Button variant="ghost" size="sm" onClick={() => navigate(`/platforms/${a.id}`)}>
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => {
-                          if (window.confirm(`Delete bot "${a.id}"?`)) {
-                            deleteAcct.mutate(a.id);
-                          }
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* ── Expanded: Attached config ── */}
-                  {isOpen && (
-                    <div className="border-t border-border px-5 py-4 space-y-3 bg-muted/20">
-                      <span className="t-label text-muted-fg">Attached Config</span>
-
-                      {attached ? (
-                        <div className="flex items-center justify-between py-2 px-3 border border-border rounded-sm bg-card text-xs">
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <Link
-                              to={`/config/${attached.bot_profile_id}`}
-                              className="t-headline !text-sm hover:underline truncate"
-                            >
-                              {attached.bot_profile_id}
-                            </Link>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:text-destructive shrink-0 ml-2"
-                            onClick={() => confirmDetach(attached.id)}
-                          >
-                            <X size={14} />
-                            Detach
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="py-3 text-center halftone-light rounded-sm">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => { setAttachAcct(a.id); setAttachConfigId(""); setAttachModalOpen(true); }}
-                          >
-                            <Link2 size={14} />
-                            Attach Config
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </Card>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {accounts.map((a) => (
+            <Card key={a.id} padding="none" className="hover:border-fg/30 transition-colors flex flex-col">
+              <div className="p-4 flex-1">
+                <div className="flex items-start justify-between mb-3">
+                  <h3
+                    className="t-headline !text-xl truncate cursor-pointer hover:underline"
+                    onClick={() => navigate(`/platforms/${a.id}`)}
+                  >
+                    {a.id}
+                  </h3>
+                  <button
+                    onClick={() => toggleEnabled.mutate(a)}
+                    className={cn(
+                      "relative w-8 h-5 rounded-full transition-colors duration-200 shrink-0 ml-2",
+                      a.enabled ? "bg-fg" : "bg-border"
+                    )}
+                  >
+                    <span className={cn(
+                      "absolute top-[3px] left-0 w-3.5 h-3.5 rounded-full bg-white transition-transform duration-200 shadow-sm",
+                      a.enabled ? "translate-x-[15px]" : "translate-x-[2px]"
+                    )} />
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-fg">
+                  <span className="t-mono">{a.platform}</span>
+                  <span>{a.enabled ? "● enabled" : "○ disabled"}</span>
+                </div>
               </div>
-            );
-          })}
+              <div className="flex border-t border-border">
+                <button
+                  onClick={() => navigate(`/platforms/${a.id}`)}
+                  className="flex-1 py-2 text-xs text-muted-fg hover:text-fg hover:bg-muted/50 transition-colors"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Delete "${a.id}"?`)) deleteAcct.mutate(a.id);
+                  }}
+                  className="px-3 py-2 text-xs text-destructive hover:bg-destructive/5 transition-colors border-l border-border"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </Card>
+          ))}
         </div>
       )}
 
-      {/* ── Account Modal ── */}
-      <Modal
-        open={acctModal}
-        onClose={() => setAcctModal(false)}
-        title="New Bot"
-      >
-        <div className="space-y-5">
-          {/* Row 1: ID + Platform */}
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="ID"
-              value={acctForm.id}
-              onChange={(e) => setAcctForm({ ...acctForm, id: e.target.value })}
-              placeholder="e.g. my-telegram-bot"
-
-            />
-            <Select
-              label="Platform"
-              value={acctForm.platform}
-              onChange={(e) => setAcctForm({ ...acctForm, platform: e.target.value })}
-              options={[{ value: "telegram", label: "Telegram" }]}
-            />
-          </div>
-
-          {/* Row 2: Mode + Secret Ref */}
-          <div className="grid grid-cols-2 gap-4">
-            <Select
-              label="Connection Mode"
-              value={acctForm.mode}
-              onChange={(e) => setAcctForm({ ...acctForm, mode: e.target.value })}
-              options={[
-                { value: "telegram", label: "Long Polling (getUpdates)" },
-              ]}
-            />
-            <Input
-              label="Secret Ref"
-              value={acctForm.secret_ref}
-              onChange={(e) => setAcctForm({ ...acctForm, secret_ref: e.target.value })}
-              placeholder="Bot token from @BotFather"
-            />
-
-          </div>
-
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <Button variant="secondary" onClick={() => setAcctModal(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => acctMut.mutate()}
-              disabled={acctMut.isPending || !acctForm.id}
-            >
-              {acctMut.isPending ? "Creating…" : "Create Bot"}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* ── Attach Config Modal ── */}
-      <Modal
-        open={attachModalOpen}
-        onClose={() => setAttachModalOpen(false)}
-        title="Attach Config"
-        size="sm"
-      >
+      <Modal open={newModalOpen} onClose={() => setNewModalOpen(false)} title="New Bot" size="sm">
         <div className="space-y-4">
-          <Select
-            label="Config"
-            value={attachConfigId}
-            onChange={(e) => setAttachConfigId(e.target.value)}
-            options={[
-              { value: "", label: "Select a config…" },
-              ...bots.map((b) => ({ value: b.id, label: b.id })),
-            ]}
+          <Input
+            label="ID"
+            value={newId}
+            onChange={(e) => setNewId(e.target.value)}
+            placeholder="e.g. my-telegram-bot"
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
           />
+          <p className="text-[11px] text-muted-fg">After creation you&apos;ll be redirected to configure the bot.</p>
           <div className="flex justify-end gap-2">
-            <Button
-              disabled={!attachConfigId || attachMut.isPending}
-              onClick={() => attachMut.mutate(attachAcct)}
-            >
-              {attachMut.isPending ? "Attaching…" : "Attach"}
-            </Button>
+            <Button variant="secondary" onClick={() => setNewModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreate} disabled={!newId.trim()}>Create</Button>
           </div>
         </div>
       </Modal>
-
     </div>
   );
 }

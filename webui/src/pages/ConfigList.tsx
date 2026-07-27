@@ -10,47 +10,19 @@ import Input from "../components/ui/Input";
 import Modal from "../components/ui/Modal";
 import { Plus, Trash2, Cpu, ExternalLink } from "lucide-react";
 
-interface CreateForm {
-  id: string;
-}
-
-const emptyForm: CreateForm = {
-  id: "",
-};
 
 export default function ConfigList() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState<CreateForm>(emptyForm);
-  const [formErrors, setFormErrors] = useState<Partial<Record<keyof CreateForm, string>>>({});
+  const [newId, setNewId] = useState("");
+  const [idError, setIdError] = useState("");
 
   const { data: bots, isLoading, error } = useQuery({
     queryKey: ["bots"],
     queryFn: () => api.listBots(),
   });
 
-  const createMut = useMutation({
-    mutationFn: () =>
-      api.createBot({
-        id: form.id,
-
-        model_ref: "",
-        persona_id: null,
-        policy_json: {},
-        json_ext: {},
-      }),
-    onSuccess: (created) => {
-      queryClient.invalidateQueries({ queryKey: ["bots"] });
-      setModalOpen(false);
-      setForm(emptyForm);
-      setFormErrors({});
-      navigate(`/config/${created.id}`);
-    },
-    onError: (err: Error) => {
-      setFormErrors({ id: err.message });
-    },
-  });
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.deleteBot(id),
@@ -65,19 +37,23 @@ export default function ConfigList() {
     }
   };
 
-  const validateForm = (): boolean => {
-    const errs: Partial<Record<keyof CreateForm, string>> = {};
-    if (!form.id.trim()) errs.id = "ID is required";
-    else if (!/^[a-zA-Z0-9_-]+$/.test(form.id)) errs.id = "Only letters, digits, hyphens, underscores";
-    setFormErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
+
 
   const handleCreate = () => {
-    if (!validateForm()) return;
-    createMut.mutate();
+    const trimmed = newId.trim();
+    if (!trimmed) {
+      setIdError("ID is required");
+      return;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(trimmed)) {
+      setIdError("Only letters, digits, hyphens, underscores");
+      return;
+    }
+    setIdError("");
+    setModalOpen(false);
+    setNewId("");
+    navigate(`/config/${trimmed}`);
   };
-
   return (
     <div className="animate-fade-up space-y-6 md:space-y-8">
       {/* Hero header */}
@@ -89,17 +65,15 @@ export default function ConfigList() {
         </p>
       </div>
 
-      <div className="space-y-1">
-        <div className="flex items-center justify-between">
-          <p className="t-label text-muted-fg">
-            {bots ? `${bots.length} config${bots.length !== 1 ? "s" : ""}` : "—"}
-          </p>
-          <Button onClick={() => setModalOpen(true)}>
-            <Plus size={16} />
-            New Config
-          </Button>
-        </div>
-        <div className="rule-heavy" />
+      <div className="rule-heavy" />
+      <div className="flex items-center justify-between">
+        <p className="t-label text-muted-fg">
+          {bots ? `${bots.length} config${bots.length !== 1 ? "s" : ""}` : "—"}
+        </p>
+        <Button onClick={() => setModalOpen(true)}>
+          <Plus size={16} />
+          New Config
+        </Button>
       </div>
 
       {isLoading && (
@@ -191,34 +165,28 @@ export default function ConfigList() {
         open={modalOpen}
         onClose={() => {
           setModalOpen(false);
-          setForm(emptyForm);
-          setFormErrors({});
+          setNewId("");
+          setIdError("");
         }}
         title="New Config"
+        size="sm"
       >
-        <div className="flex flex-col space-y-6">
+        <div className="space-y-4">
           <Input
             label="ID"
             placeholder="e.g. my-assistant"
-            value={form.id}
-            onChange={(e) => setForm({ ...form, id: e.target.value })}
-            error={formErrors.id}
+            value={newId}
+            onChange={(e) => { setNewId(e.target.value); setIdError(""); }}
+            error={idError}
             hint="Unique identifier — cannot be changed later"
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
           />
-          <div className="rule-thin" />
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setModalOpen(false);
-                setForm(emptyForm);
-                setFormErrors({});
-              }}
-            >
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="secondary" onClick={() => { setModalOpen(false); setNewId(""); setIdError(""); }}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={createMut.isPending}>
-              {createMut.isPending ? "Creating…" : "Create"}
+            <Button onClick={handleCreate}>
+              Create
             </Button>
           </div>
         </div>
