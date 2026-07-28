@@ -42,7 +42,7 @@ export default function ConfirmDialog({
       <div className="flex justify-end gap-2">
         <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
         <Button
-          variant={variant === "destructive" ? "destructive" : "default"}
+          variant={variant === "destructive" ? "destructive" : "primary"}
           size="sm"
           onClick={onConfirm}
         >

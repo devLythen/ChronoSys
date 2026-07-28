@@ -43,6 +43,17 @@ export default function ProvidersPage() {
   };
 
 
+  const createProvMutation = useMutation({
+    mutationFn: (id: string) => api.createProvider({ id, kind: "openai", base_url: "https://api.openai.com/v1" }),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["providers"] });
+      setProvModalOpen(false);
+      setNewProvId("");
+      navigate(`/providers/${id}`);
+    },
+    onError: (err: Error) => toast.add("error", err.message),
+  });
+
   // ── Provider mutations ───────────────────────────────────────
 
   const deleteProvMutation = useMutation({
@@ -59,22 +70,20 @@ export default function ProvidersPage() {
 
   return (
     <div ref={pageRef} className="space-y-6 md:space-y-8">
-      {/* ── Header ──────────────────────────────────────────── */}
       <div>
         <h1 className="t-display">Providers</h1>
         <p className="t-body text-muted-fg mt-3 max-w-xl">
-          Configure LLM providers and their models for the ChronoSys gateway.
+          Manage LLM providers, API credentials, and available models.
         </p>
       </div>
-
       <div className="rule-heavy" />
+
       <div className="flex items-center justify-between">
         <p className="t-label text-muted-fg">
-          {list ? `${list.length} provider${list.length !== 1 ? "s" : ""}` : "—"}
+          {list.length} provider{list.length !== 1 ? "s" : ""}
         </p>
         <Button onClick={openCreateProv}>
-          <Plus size={16} />
-          New Provider
+          <Plus size={16} /> Add Provider
         </Button>
       </div>
 
@@ -83,27 +92,21 @@ export default function ProvidersPage() {
           <p className="t-body text-muted-fg">Loading providers&hellip;</p>
         </div>
       )}
-
       {error && (
         <div className="py-16 text-center">
-          <p className="text-sm text-destructive font-medium">
-            Failed to load providers: {(error as Error).message}
-          </p>
+          <p className="text-sm text-destructive font-medium">{(error as Error).message}</p>
         </div>
       )}
-
-      {!isLoading && !error && list.length === 0 && (
+      {list.length === 0 && !isLoading && (
         <div className="halftone-light py-24 text-center border border-border">
           <p className="t-headline text-muted-fg/60 mb-3">No providers yet</p>
-          <p className="t-body text-muted-fg/70 mb-6">Add one to get started.</p>
+          <p className="t-body text-muted-fg/70 mb-6">Add an LLM provider to get started.</p>
           <Button onClick={openCreateProv}>
-            <Plus size={16} />
-            New Provider
+            <Plus size={16} /> Add Provider
           </Button>
         </div>
       )}
 
-      {/* ── Provider cards ──────────────────────────────────── */}
       {list.length > 0 && (
         <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {list.map((pv) => (
@@ -112,35 +115,19 @@ export default function ProvidersPage() {
               className="anim-item cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
               padding="none"
             >
-              <div
-                onClick={() => navigate(`/providers/${pv.id}`)}
-                className="p-4 flex-1"
-              >
+              <div onClick={() => navigate(`/providers/${pv.id}`)} className="p-4 flex-1">
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="t-headline !text-xl truncate">{pv.id}</h3>
-                  <span className="t-mono text-[11px] text-muted-fg">{pv.kind}</span>
+                  <span className="t-label text-muted-fg shrink-0">{pv.kind}</span>
                 </div>
-                <p className="t-mono text-muted-fg mb-2 truncate text-sm inline-flex items-center gap-1.5">
-                  <Link size={11} />
-                  {pv.base_url || pv.kind}
-                </p>
-                <div className="flex items-center gap-2 text-xs text-muted-fg">
-                  <Cpu size={11} />
-                  <span>{pv.models.length} model{pv.models.length !== 1 ? "s" : ""}</span>
+                <div className="text-xs text-muted-fg space-y-1">
+                  {pv.base_url && <div className="flex items-center gap-1"><Link size={11} /> <span className="t-mono truncate">{pv.base_url}</span></div>}
+                  <div className="flex items-center gap-1"><Cpu size={11} /> {pv.models.length} model{pv.models.length !== 1 ? "s" : ""}</div>
                 </div>
               </div>
               <div className="flex items-center gap-1 pl-2 pr-4 py-2 border-t border-border bg-muted/30">
                 <div className="flex-1" />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDeleteConfirm(pv.id);
-                  }}
-                  className="text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Delete"
-                >
+                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setDeleteConfirm(pv.id); }} className="text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity" title="Delete">
                   <Trash2 size={14} />
                 </Button>
               </div>
@@ -149,40 +136,12 @@ export default function ProvidersPage() {
         </div>
       )}
 
-      {/* ── Add Provider modal ──────────────────────────────── */}
-      <Modal
-        open={provModalOpen}
-        onClose={() => setProvModalOpen(false)}
-        title="Add Provider"
-        size="sm"
-      >
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (newProvId.trim()) {
-              navigate(`/providers/${newProvId.trim()}`);
-            }
-          }}
-          className="flex flex-col gap-5"
-        >
-          <Input
-            label="ID"
-            value={newProvId}
-            onChange={(e) => setNewProvId(e.target.value)}
-            required
-            hint="Unique identifier, e.g. my-openai"
-          />
+      <Modal open={provModalOpen} onClose={() => setProvModalOpen(false)} title="Add Provider" size="sm">
+        <form onSubmit={(e) => { e.preventDefault(); const t = newProvId.trim(); if (t) createProvMutation.mutate(t); }} className="flex flex-col gap-5">
+          <Input label="ID" value={newProvId} onChange={(e) => setNewProvId(e.target.value)} required hint="Unique identifier, e.g. my-openai" />
           <div className="flex justify-end gap-2 pt-2">
-            <Button
-              variant="secondary"
-              type="button"
-              onClick={() => setProvModalOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!newProvId.trim()}>
-              Create
-            </Button>
+            <Button variant="secondary" type="button" onClick={() => setProvModalOpen(false)}>Cancel</Button>
+            <Button type="submit" disabled={!newProvId.trim()}>Create</Button>
           </div>
         </form>
       </Modal>
@@ -191,10 +150,7 @@ export default function ProvidersPage() {
         open={deleteConfirm !== null}
         title="Delete Provider"
         message={`Delete "${deleteConfirm}"? This cannot be undone.`}
-        onConfirm={() => {
-          deleteProvMutation.mutate(deleteConfirm!);
-          setDeleteConfirm(null);
-        }}
+        onConfirm={() => { deleteProvMutation.mutate(deleteConfirm!); setDeleteConfirm(null); }}
         onCancel={() => setDeleteConfirm(null)}
       />
     </div>

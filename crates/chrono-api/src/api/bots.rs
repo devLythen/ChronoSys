@@ -22,6 +22,7 @@ pub fn router() -> Router<Arc<AppState>> {
 #[derive(Deserialize)]
 pub struct BotBody {
     pub id: Option<String>,
+    #[serde(default)]
     pub model_ref: String,
     #[serde(default)]
     pub persona_id: Option<String>,

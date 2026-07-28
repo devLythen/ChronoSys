@@ -18,6 +18,7 @@ import type { LlmModel } from "./config-types.ts";
 import {
   buildModels,
   resolveBot,
+  resolveModelRef,
   queryModelCaps,
   resolveThinkingLevel,
   buildStreamOverrides,
@@ -162,13 +163,52 @@ function contextScopeOf(bot: ResolvedBot): ContextScope {
   return "session";
 }
 
-/** Max transcript messages allowed before refusing a new prompt. 0 / missing = unlimited. */
-function maxContextMessages(bot: ResolvedBot): number {
-  const raw = bot.policy.max_context_messages;
-  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
-    return Math.floor(raw);
+
+// ── Context policy ─────────────────────────────────────────────
+
+type CompactStrategy = "compact" | "drop";
+
+interface ContextPolicy {
+  /** Max turns before compaction triggers. -1 = disabled. Default -1. */
+  maxTurns: number;
+  /** Turns to discard when LLM compaction unavailable. Default 1. */
+  dropTurns: number;
+  /** Strategy when over limit. Default "drop". */
+  compactStrategy: CompactStrategy;
+  /** Model ref ("provider/model") for compaction LLM. Empty = use chat model. */
+  compactModelRef: string;
+  /** Custom system prompt for the compaction LLM call. */
+  compactPrompt: string;
+  /** Fallback context window when model unknown. Default 128000. */
+  contextWindowFallback: number;
+}
+
+function readContextPolicy(bot: ResolvedBot): ContextPolicy {
+  const p = bot.policy;
+  return {
+    maxTurns: typeof p.max_turns === "number" ? p.max_turns : -1,
+    dropTurns: typeof p.drop_turns === "number" && p.drop_turns > 0 ? p.drop_turns : 1,
+    compactStrategy: p.compact_strategy === "compact" ? "compact" : "drop",
+    compactModelRef: typeof p.compact_model_ref === "string" ? p.compact_model_ref : "",
+    compactPrompt: typeof p.compact_prompt === "string" ? p.compact_prompt : "",
+    contextWindowFallback:
+      typeof p.context_window_fallback === "number" && p.context_window_fallback > 0
+        ? p.context_window_fallback
+        : 128000,
+  };
+}
+
+function resolveContextWindow(model: Model<Api>, policy: ContextPolicy): number {
+  return model.contextWindow > 0 ? model.contextWindow : policy.contextWindowFallback;
+}
+
+/** Count user→assistant rounds. Each role:"user" message opens a new turn. */
+function countTurns(messages: readonly AgentMessage[]): number {
+  let n = 0;
+  for (const m of messages) {
+    if (m.role === "user") n++;
   }
-  return 0;
+  return n;
 }
 
 function newSessionCommandEnabled(bot: ResolvedBot): boolean {
@@ -203,6 +243,7 @@ async function compactSessionMessages(
   models: MutableModels,
   model: Model<Api>,
   signal?: AbortSignal,
+  customInstructions?: string,
 ): Promise<AgentMessage[]> {
   const countCut = Math.max(1, Math.floor(messages.length * 0.4));
   const keepTokens = Math.floor(model.contextWindow * 0.5);
@@ -227,8 +268,8 @@ async function compactSessionMessages(
     model,
     keepTokens,
     signal,
+    customInstructions || undefined,
   );
-
   if (!result.ok) {
     logEvent({ type: "host_warn", message: `compaction failed: ${result.error.message}` });
     return messages;
@@ -722,11 +763,17 @@ async function main() {
         writeControl({ type: "done" });
         continue;
       }
+      const ccp = readContextPolicy(bot);
+      let cm = bot.resolvedModel.model;
+      if (ccp.compactModelRef && models) {
+        try { cm = resolveModelRef(config, models, ccp.compactModelRef).model; } catch { /* fall through */ }
+      }
       const compacted = await compactSessionMessages(
         bucket.messages,
         models!,
-        bot.resolvedModel.model,
+        cm,
         agent.signal,
+        ccp.compactPrompt || undefined,
       );
       const origCount = bucket.messages.length;
       const origEst = estimateContextTokens(bucket.messages);
@@ -750,29 +797,55 @@ async function main() {
     // ── Load active UUID session transcript ──────────────────────
     const bucket = getOrCreateBucket(route, event.session_key, bot.id);
 
-    // Context limit (bot policy). Refuse before LLM if over cap.
-    // Future: compaction + long-term memory should replace hard refuse.
-    const maxMsgs = maxContextMessages(bot);
-    if (maxMsgs > 0 && bucket.messages.length >= maxMsgs) {
-      logEvent({
-        type: "host_error",
-        message: `context overflow refused bot=${bot.id} session_id=${bucket.sessionId} history=${bucket.messages.length} max_context_messages=${maxMsgs}`,
-      });
+    // ── Context management (bot policy) ──────────────────────────
+    const ctxPolicy = readContextPolicy(bot);
+    const ctxWindow = resolveContextWindow(bot.resolvedModel.model, ctxPolicy);
+    const turnCount = countTurns(bucket.messages);
+
+    // Resolve compaction model (falls back to chat model if empty / unavailable)
+    let compactModel = bot.resolvedModel.model;
+    if (ctxPolicy.compactModelRef && models) {
       try {
-        await sendBodyTextToCurrentChat(
-          event.session_key,
-          `上下文已满（${bucket.messages.length}/${maxMsgs} 条消息），本轮请求已拒绝。请发送 /new 开启新会话，或提高 bot policy.max_context_messages。`,
-          pendingCalls,
-          agent.signal,
-        );
-      } catch (err) {
-        logEvent({
-          type: "host_warn",
-          message: `failed to notify context overflow: ${err instanceof Error ? err.message : String(err)}`,
-        });
+        compactModel = resolveModelRef(config, models, ctxPolicy.compactModelRef).model;
+      } catch (e) {
+        logEvent({ type: "host_warn", message: `compact model ${ctxPolicy.compactModelRef} unavailable: ${e instanceof Error ? e.message : String(e)}` });
       }
-      writeControl({ type: "done" });
-      continue;
+    }
+
+    if (ctxPolicy.maxTurns !== -1 && turnCount > ctxPolicy.maxTurns && bucket.messages.length >= 2) {
+      if (ctxPolicy.compactStrategy === "compact" && models) {
+        const compacted = await compactSessionMessages(
+          bucket.messages,
+          models,
+          compactModel,
+          agent.signal,
+          ctxPolicy.compactPrompt || undefined,
+        );
+        if (compacted !== bucket.messages) {
+          bucket.messages = compacted;
+          persistBucket(bucket);
+          logEvent({
+            type: "host_info",
+            message: `auto-compacted (policy) bot=${bot.id} turns=${turnCount}/${ctxPolicy.maxTurns} messages=${bucket.messages.length}`,
+          });
+        }
+      } else {
+        const dropCount = ctxPolicy.dropTurns;
+        let cut = 0;
+        let dropped = 0;
+        for (let i = 0; i < bucket.messages.length && dropped < dropCount; i++) {
+          if (bucket.messages[i]!.role === "user") dropped++;
+          cut = i + 1;
+        }
+        if (cut > 0 && cut < bucket.messages.length) {
+          bucket.messages = bucket.messages.slice(cut);
+          persistBucket(bucket);
+          logEvent({
+            type: "host_info",
+            message: `dropped old turns bot=${bot.id} turns=${turnCount}/${ctxPolicy.maxTurns} kept=${bucket.messages.length}`,
+          });
+        }
+      }
     }
 
     agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
@@ -794,28 +867,55 @@ async function main() {
       message: `turn bot=${bot.id} model=${bot.modelRef} tools=${JSON.stringify(bot.toolsAllowlist)} route=${route} session_id=${bucket.sessionId} history=${bucket.messages.length}`,
     });
 
+    // ── Request-time context window guard ──────────────────────────
+    const preEst = estimateContextTokens(bucket.messages);
+    if (preEst.tokens > ctxWindow * 0.85 && bucket.messages.length >= 2) {
+      if (ctxPolicy.compactStrategy === "compact" && models) {
+        const compacted = await compactSessionMessages(
+          bucket.messages, models, compactModel, agent.signal,
+          ctxPolicy.compactPrompt || undefined,
+        );
+        if (compacted !== bucket.messages) {
+          bucket.messages = compacted;
+          agent.state.messages = compacted;
+          persistBucket(bucket);
+          logEvent({ type: "host_info", message: `pre-prompt compact bot=${bot.id} tokens=${preEst.tokens}/${ctxWindow}` });
+        }
+      } else {
+        const dropCount = ctxPolicy.dropTurns;
+        let cut = 0;
+        let dropped = 0;
+        for (let i = 0; i < bucket.messages.length && dropped < dropCount; i++) {
+          if (bucket.messages[i]!.role === "user") dropped++;
+          cut = i + 1;
+        }
+        if (cut > 0 && cut < bucket.messages.length) {
+          bucket.messages = bucket.messages.slice(cut);
+          agent.state.messages = bucket.messages;
+          persistBucket(bucket);
+          logEvent({ type: "host_info", message: `pre-prompt drop bot=${bot.id} tokens=${preEst.tokens}/${ctxWindow}` });
+        }
+      }
+    }
+
     try {
       const historyBefore = bucket.messages.length;
       await agent.prompt(event.message.text);
       bucket.messages = agent.state.messages.slice();
       persistBucket(bucket);
 
-      // ── Auto-compact when context exceeds 80% threshold ──────
-      if (bucket.messages.length >= 5 && models) {
+      // ── Post-turn auto-compact when context exceeds 80% threshold ──
+      const postEst = estimateContextTokens(bucket.messages);
+      if (postEst.tokens > ctxWindow * 0.8 && bucket.messages.length >= 4 && ctxPolicy.compactStrategy === "compact" && models) {
         const compacted = await compactSessionMessages(
-          bucket.messages,
-          models,
-          bot.resolvedModel.model,
-          agent.signal,
+          bucket.messages, models, compactModel, agent.signal,
+          ctxPolicy.compactPrompt || undefined,
         );
         if (compacted !== bucket.messages) {
           bucket.messages = compacted;
           agent.state.messages = compacted;
           persistBucket(bucket);
-          logEvent({
-            type: "host_info",
-            message: `auto-compacted session ${bucket.sessionId.slice(0, 8)}… ${bucket.messages.length} messages`,
-          });
+          logEvent({ type: "host_info", message: `post-turn compact bot=${bot.id} tokens=${postEst.tokens}/${ctxWindow}` });
         }
       }
 

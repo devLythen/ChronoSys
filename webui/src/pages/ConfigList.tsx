@@ -9,13 +9,15 @@ import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
 import Modal from "../components/ui/Modal";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
-import { Plus, Trash2, Cpu, ExternalLink, User, Box } from "lucide-react";
+import { useToast } from "../components/ui/Toast";
+import { Plus, Trash2, Cpu, ExternalLink, User, Box, Loader2 } from "lucide-react";
 
 import { usePageEnter, useStaggerList } from "../hooks/useAnimations";
 
 export default function ConfigList() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [modalOpen, setModalOpen] = useState(false);
   const [newId, setNewId] = useState("");
   const [idError, setIdError] = useState("");
@@ -29,6 +31,16 @@ export default function ConfigList() {
   const pageRef = usePageEnter<HTMLDivElement>();
   const gridRef = useStaggerList<HTMLDivElement>([bots]);
 
+  const createMut = useMutation({
+    mutationFn: (id: string) => api.createBot({ id }),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["bots"] });
+      setModalOpen(false);
+      setNewId("");
+      navigate(`/config/${id}`);
+    },
+    onError: (e: Error) => toast.add("error", e.message),
+  });
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.deleteBot(id),
@@ -41,8 +53,6 @@ export default function ConfigList() {
     setDeleteConfirm(bot.id);
   };
 
-
-
   const handleCreate = () => {
     const trimmed = newId.trim();
     if (!trimmed) {
@@ -54,13 +64,11 @@ export default function ConfigList() {
       return;
     }
     setIdError("");
-    setModalOpen(false);
-    setNewId("");
-    navigate(`/config/${trimmed}`);
+    createMut.mutate(trimmed);
   };
+
   return (
     <div ref={pageRef} className="space-y-6 md:space-y-8">
-      {/* Hero header */}
       <div>
         <h1 className="t-display">Configs</h1>
         <p className="t-body text-muted-fg mt-3 max-w-xl">

@@ -87,11 +87,7 @@ async fn create_account(
         .clone()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ApiError::bad_request("id is required"))?;
-    let secret_ref = body
-        .secret_ref
-        .clone()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| ApiError::bad_request("secret_ref is required"))?;
+    let secret_ref = body.secret_ref.clone().filter(|s| !s.is_empty()).unwrap_or_default();
 
     let account = PlatformAccount {
         id: id.clone(),

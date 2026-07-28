@@ -42,6 +42,17 @@ export default function PlatformsPage() {
     onError: (e: Error) => toast.add("error", e.message),
   });
 
+  const createMut = useMutation({
+    mutationFn: (id: string) => api.createAccount({ id, platform: "telegram", adapter_id: "chrono.adapter.telegram" }),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      setNewModalOpen(false);
+      setNewId("");
+      navigate(`/platforms/${id}`);
+    },
+    onError: (e: Error) => toast.add("error", e.message),
+  });
+
   const deleteAcct = useMutation({
     mutationFn: (id: string) => api.deleteAccount(id),
     onSuccess: () => {
@@ -58,9 +69,7 @@ export default function PlatformsPage() {
   const handleCreate = () => {
     const trimmed = newId.trim();
     if (!trimmed || !/^[a-zA-Z0-9_-]+$/.test(trimmed)) return;
-    setNewModalOpen(false);
-    setNewId("");
-    navigate(`/platforms/${trimmed}`);
+    createMut.mutate(trimmed);
   };
 
   return (

@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import Badge from "../components/ui/Badge";
 import { formatDate, cn } from "../lib/utils";
+import Button from "../components/ui/Button";
 import { ArrowLeft, Brain, Wrench, ChevronDown, ChevronRight } from "lucide-react";
 
 const STATUS_VARIANT: Record<string, "success" | "default" | "destructive" | "info"> = {

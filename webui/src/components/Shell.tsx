@@ -1,11 +1,17 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useState, useRef, useLayoutEffect } from "react";
-import { PanelLeftClose, PanelLeft, ChevronRight } from "lucide-react";
+import {
+  PanelLeftClose, PanelLeft, ChevronRight,
+  LayoutDashboard, Globe, Sliders, Server, User,
+  Puzzle, Plug, Wrench, MessageSquare, ScrollText, Cog,
+} from "lucide-react";
 import gsap from "gsap";
 import { cn } from "../lib/utils";
+
 interface NavItem {
   to?: string;
   label: string;
+  icon: React.ReactNode;
   children?: NavItem[];
 }
 
@@ -13,32 +19,32 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: "Overview",
     items: [
-      { to: "/overview", label: "Dashboard" },
+      { to: "/overview", label: "Dashboard", icon: <LayoutDashboard size={16} /> },
     ],
   },
   {
     label: "Configuration",
     items: [
-      { to: "/platforms", label: "Platforms" },
-      { to: "/config", label: "Config" },
-      { to: "/providers", label: "Providers" },
-      { to: "/persona", label: "Persona" },
+      { to: "/platforms", label: "Platforms", icon: <Globe size={16} /> },
+      { to: "/config", label: "Config", icon: <Sliders size={16} /> },
+      { to: "/providers", label: "Providers", icon: <Server size={16} /> },
+      { to: "/persona", label: "Persona", icon: <User size={16} /> },
     ],
   },
   {
     label: "Plugins",
     items: [
-      { to: "/plugins/extensions", label: "Extensions" },
-      { to: "/plugins/mcp", label: "MCP" },
-      { to: "/plugins/skills", label: "Skills" },
+      { to: "/plugins/extensions", label: "Extensions", icon: <Puzzle size={16} /> },
+      { to: "/plugins/mcp", label: "MCP", icon: <Plug size={16} /> },
+      { to: "/plugins/skills", label: "Skills", icon: <Wrench size={16} /> },
     ],
   },
   {
     label: "Observability",
     items: [
-      { to: "/sessions", label: "Sessions" },
-      { to: "/audit", label: "Audit" },
-      { to: "/settings", label: "Settings" },
+      { to: "/sessions", label: "Sessions", icon: <MessageSquare size={16} /> },
+      { to: "/audit", label: "Audit", icon: <ScrollText size={16} /> },
+      { to: "/settings", label: "Settings", icon: <Cog size={16} /> },
     ],
   },
 ];
@@ -60,66 +66,73 @@ function SidebarSection({
 
   useLayoutEffect(() => {
     const content = contentRef.current;
-    const chevron = chevronRef.current;
-    if (!content || !chevron) return;
+    if (!content) return;
 
     const mm = gsap.matchMedia();
+    const targetHeight = content.scrollHeight;
+
     mm.add("(prefers-reduced-motion: no-preference)", () => {
       if (expanded) {
-        gsap.fromTo(content, { height: 0, opacity: 0 }, { height: "auto", opacity: 1, duration: 0.2, ease: "power2.out" });
-        gsap.fromTo(chevron, { rotation: 0 }, { rotation: 90, duration: 0.2, ease: "power2.out" });
+        gsap.fromTo(content, { height: 0, opacity: 0 }, { height: targetHeight, opacity: 1, duration: 0.2, ease: "power2.out", clearProps: "height" });
       } else {
-        gsap.to(content, { height: 0, opacity: 0, duration: 0.15, ease: "power2.in" });
-        gsap.to(chevron, { rotation: 0, duration: 0.15, ease: "power2.in" });
+        gsap.fromTo(content, { height: targetHeight, opacity: 1 }, { height: 0, opacity: 0, duration: 0.15, ease: "power2.in" });
       }
     });
     mm.add("(prefers-reduced-motion: reduce)", () => {
-      gsap.set(content, { height: expanded ? "auto" : 0, opacity: expanded ? 1 : 0, clearProps: expanded ? "" : "height" });
-      gsap.set(chevron, { rotation: expanded ? 90 : 0 });
+      gsap.set(content, { height: expanded ? "auto" : 0, opacity: expanded ? 1 : 0, clearProps: expanded ? "height" : undefined as unknown as string });
     });
 
     return () => mm.revert();
   }, [expanded]);
 
-  if (collapsed) {
-    return (
-      <div className="mt-1">
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center justify-center py-2 text-muted-fg hover:text-fg hover:bg-muted transition-colors"
-          title={label}
-        >
-          <span className="text-[10px] font-bold uppercase">{label[0]}</span>
-        </button>
-      </div>
-    );
-  }
+  const labelEl = collapsed ? (
+    <span className="text-[10px] font-bold uppercase">{label[0]}</span>
+  ) : (
+    <>
+      {label}
+      <ChevronRight size={12} className={cn("transition-transform", expanded && "rotate-90")} />
+    </>
+  );
 
   return (
     <div className="mt-1">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-4 py-1.5 text-[11px] font-semibold text-muted-fg uppercase tracking-wider hover:text-fg transition-colors"
+        className={cn(
+          "w-full flex items-center transition-colors",
+          collapsed
+            ? "justify-center py-2 text-muted-fg hover:text-fg hover:bg-muted"
+            : "justify-between px-4 py-1.5 text-[11px] font-semibold text-muted-fg uppercase tracking-wider hover:text-fg",
+        )}
+        title={label}
       >
-        {label}
-        <ChevronRight ref={chevronRef} size={12} />
+        {labelEl}
       </button>
-      <div ref={contentRef} className="overflow-hidden">
-        <div className="mt-0.5">
+      <div ref={contentRef} className="overflow-hidden" style={{ height: 0, opacity: 0 }}>
+        <div className={cn("mt-0.5", collapsed && "flex flex-col items-center")}>
           {items.map((item) => (
             <NavLink
               key={item.to}
               to={item.to!}
               className={({ isActive }) =>
                 cn(
-                  "flex items-center gap-2.5 pl-6 pr-4 py-1.5 text-[13px] transition-colors duration-150",
+                  "flex items-center gap-2.5 transition-colors duration-150",
+                  collapsed
+                    ? "justify-center w-8 h-8 my-0.5 text-[13px]"
+                    : "pl-6 pr-4 py-1.5 text-[13px]",
                   isActive
-                    ? "bg-fg text-bg font-medium"
-                    : "text-muted-fg hover:text-fg hover:bg-muted",
+                    ? collapsed
+                      ? "bg-fg text-bg font-medium rounded-sm"
+                      : "bg-fg text-bg font-medium"
+                    : collapsed
+                      ? "text-muted-fg hover:text-fg hover:bg-muted rounded-sm"
+                      : "text-muted-fg hover:text-fg hover:bg-muted",
                 )
               }
+              title={collapsed ? item.label : undefined}
             >
-              {item.label}
+              {item.icon}
+              {!collapsed && item.label}
             </NavLink>
           ))}
         </div>

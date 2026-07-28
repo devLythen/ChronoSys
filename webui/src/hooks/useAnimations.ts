@@ -129,7 +129,7 @@ export function useCountUp(to: number, opts?: { from?: number; duration?: number
 
   useEffect(() => {
     if (enabled) start();
-    return () => tweenRef.current?.kill();
+    return () => { tweenRef.current?.kill(); };
   }, [enabled, start]);
 
   return display;

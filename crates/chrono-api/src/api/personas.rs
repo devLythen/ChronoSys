@@ -35,9 +35,9 @@ pub struct PersonaBody {
     pub id: Option<String>,
     #[serde(default)]
     pub system_prompt: String,
-    #[serde(default = "default_obj")]
+    #[serde(default = "default_arr")]
     pub tools_allowlist_json: Value,
-    #[serde(default = "default_obj")]
+    #[serde(default = "default_arr")]
     pub skills_allowlist_json: Value,
     #[serde(default = "default_obj")]
     pub json_ext: Value,
@@ -45,6 +45,10 @@ pub struct PersonaBody {
 
 fn default_obj() -> Value {
     json!({})
+}
+
+fn default_arr() -> Value {
+    json!([])
 }
 
 fn view(p: Persona) -> PersonaView {

@@ -43,6 +43,7 @@ export default function AccountEditor() {
     queryFn: () => api.listBots(),
   });
 
+
   const accountBindings = bindings.filter((b: { account_id: string }) => b.account_id === id);
   const currentBinding = accountBindings[0] ?? null;
   const [attachModalOpen, setAttachModalOpen] = useState(false);
@@ -118,8 +119,8 @@ export default function AccountEditor() {
       </Link>
 
       <div>
-        <h1 className="t-display">{account.id}</h1>
-        <p className="t-mono text-muted-fg mt-2">{account.id}</p>
+        <h1 className="t-display">{id}</h1>
+        <p className="t-mono text-muted-fg mt-2">{id}</p>
       </div>
       <div className="rule-heavy" />
 
@@ -147,12 +148,10 @@ export default function AccountEditor() {
           type="text"
           value={secretRef}
           onChange={(e) => setSecretRef(e.target.value)}
-          placeholder={account.secret_ref ? "(unchanged if blank)" : "Bot token"}
+          placeholder={account?.secret_ref ? "(unchanged if blank)" : "Bot token"}
         />
 
       </Card>
-
-      {/* ── Config Binding ────────────────────────────────────── */}
       <Card className="space-y-4">
         <div className="flex items-center justify-between">
           <div>

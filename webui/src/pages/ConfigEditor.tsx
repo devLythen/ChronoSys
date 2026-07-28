@@ -41,19 +41,30 @@ export default function ConfigEditor() {
     queryFn: () => api.listPersonas(),
   });
 
+
+
   const [modelRef, setModelRef] = useState("");
   const [personaId, setPersonaId] = useState("");
-  const [maxContext, setMaxContext] = useState<number | null>(null);
+  const [maxTurns, setMaxTurns] = useState<number>(-1);
+  const [dropTurns, setDropTurns] = useState<number>(1);
+  const [compactStrategy, setCompactStrategy] = useState<string>("drop");
+  const [compactModelRef, setCompactModelRef] = useState("");
+  const [compactPrompt, setCompactPrompt] = useState("");
+  const [contextWindowFallback, setContextWindowFallback] = useState<number>(128000);
   const [selectedCommands, setSelectedCommands] = useState<string[]>(["new"]);
   const [mentionRequired, setMentionRequired] = useState(false);
   const [commandModalOpen, setCommandModalOpen] = useState(false);
-
   useEffect(() => {
     if (bot) {
       setModelRef(bot.model_ref);
       setPersonaId(bot.persona_id || "");
       const p = bot.policy_json ?? {} as Record<string,unknown>;
-      setMaxContext(p.max_context_messages as number ?? null);
+      setMaxTurns(typeof p.max_turns === "number" ? p.max_turns : -1);
+      setDropTurns(typeof p.drop_turns === "number" && p.drop_turns > 0 ? p.drop_turns : 1);
+      setCompactStrategy(p.compact_strategy === "compact" ? "compact" : "drop");
+      setCompactModelRef(typeof p.compact_model_ref === "string" ? p.compact_model_ref : "");
+      setCompactPrompt(typeof p.compact_prompt === "string" ? p.compact_prompt : "");
+      setContextWindowFallback(typeof p.context_window_fallback === "number" && p.context_window_fallback > 0 ? p.context_window_fallback : 128000);
       const cmds: unknown = p.commands;
       setSelectedCommands(Array.isArray(cmds) ? cmds as string[] : ["new"]);
       setMentionRequired(Boolean(p.mention_required));
@@ -77,14 +88,17 @@ export default function ConfigEditor() {
     if (!personas) return [];
     return personas.map((p) => ({ value: p.id, label: p.id }));
   })();
-
   const selectedPersona = personaId ? personas?.find((p: Persona) => p.id === personaId) : null;
 
   const saveMut = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error("Missing bot id");
       const policy: Record<string, unknown> = {};
-      if (maxContext != null) policy.max_context_messages = maxContext;
+      policy.max_turns = maxTurns;
+      policy.drop_turns = dropTurns;
+      policy.compact_strategy = compactStrategy;
+      if (compactModelRef) policy.compact_model_ref = compactModelRef;
+      policy.context_window_fallback = contextWindowFallback;
       if (selectedCommands.length > 0) policy.commands = selectedCommands;
       if (mentionRequired) policy.mention_required = true;
       return api.updateBot(id, {
@@ -147,12 +161,12 @@ export default function ConfigEditor() {
       </Link>
 
       <div>
-        <h1 className="t-display">{bot.id}</h1>
-        <p className="t-mono text-muted-fg mt-2">{bot.id}</p>
+        <h1 className="t-display">{id}</h1>
+        <p className="t-mono text-muted-fg mt-2">{id}</p>
       </div>
       <div className="rule-heavy" />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6">
         {/* Config Section */}
         <Card className="space-y-6">
           <div>
@@ -163,64 +177,14 @@ export default function ConfigEditor() {
           <Select
             label="Model"
             options={modelOptions}
-            value={modelRef}
-            onChange={(e) => setModelRef(e.target.value)}
-            placeholder="Select a model…"
           />
-
-          <div className="space-y-4">
-            <p className="t-label text-muted-fg">Runtime Policy</p>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-fg uppercase tracking-wide">
-                Max Context Messages
-              </label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={maxContext ?? ""}
-                onChange={(e) => setMaxContext(e.target.value ? Number(e.target.value) : null)}
-                placeholder="Unlimited"
-                className="px-3 py-1.5 text-sm border rounded-sm bg-card text-fg placeholder:text-muted-fg/60 focus:outline-none focus:ring-1 focus:ring-fg transition-colors duration-150 border-border"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-fg uppercase tracking-wide">
-                Commands
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-fg tabular-nums">
-                  {selectedCommands.length} selected
-                </span>
-                <Button variant="secondary" size="sm" onClick={() => setCommandModalOpen(true)}>
-                  <Pencil size={12} />
-                  Edit
-                </Button>
-              </div>
-            </div>
-
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-sm text-fg">Require @mention in groups</span>
-              <Toggle checked={mentionRequired} onChange={setMentionRequired} />
-            </label>
-          </div>
-        </Card>
-
-        {/* Persona Section */}
-        <Card className="space-y-5">
-          <div>
-            <h2 className="t-headline !text-lg">Persona</h2>
-            <p className="t-label text-muted-fg mt-1">Select the persona for this config</p>
-          </div>
 
           <Select
             label="Persona"
             options={personaOptions}
             value={personaId}
             onChange={(e) => setPersonaId(e.target.value)}
-            placeholder="Select a persona…"
+            placeholder="No persona selected"
           />
 
           {selectedPersona && (
@@ -254,6 +218,106 @@ export default function ConfigEditor() {
           {!selectedPersona && personaId && (
             <p className="text-sm text-muted-fg italic">Persona not found</p>
           )}
+
+          <div className="space-y-4">
+            <p className="t-label text-muted-fg">Context Management</p>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-fg uppercase tracking-wide">
+                Max Turns
+              </label>
+              <input
+                type="number" min={-1} step={1}
+                value={maxTurns}
+                onChange={(e) => setMaxTurns(Number(e.target.value))}
+                className="px-3 py-1.5 text-sm border rounded-sm bg-card text-fg placeholder:text-muted-fg/60 focus:outline-none focus:ring-1 focus:ring-fg transition-colors duration-150 border-border"
+              />
+              <span className="text-[11px] text-muted-fg/70">Max conversation turns before compaction. -1 = unlimited.</span>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-fg uppercase tracking-wide">
+                Drop Turns
+              </label>
+              <input
+                type="number" min={1} step={1}
+                value={dropTurns}
+                onChange={(e) => setDropTurns(Number(e.target.value) || 1)}
+                className="px-3 py-1.5 text-sm border rounded-sm bg-card text-fg placeholder:text-muted-fg/60 focus:outline-none focus:ring-1 focus:ring-fg transition-colors duration-150 border-border"
+              />
+              <span className="text-[11px] text-muted-fg/70">Turns to drop when over limit and compaction unavailable.</span>
+            </div>
+
+            <Select
+              label="Overflow Strategy"
+              options={[
+                { value: "drop", label: "Drop old turns" },
+                { value: "compact", label: "LLM compaction (summary)" },
+              ]}
+              value={compactStrategy}
+              onChange={(e) => setCompactStrategy(e.target.value)}
+            />
+
+            {compactStrategy === "compact" && (
+              <>
+                <Select
+                  label="Compaction Model"
+                  options={[
+                    { value: "", label: "Same as chat model" },
+                    ...modelOptions,
+                  ]}
+                  value={compactModelRef}
+                  onChange={(e) => setCompactModelRef(e.target.value)}
+                />
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-muted-fg uppercase tracking-wide">
+                    Compaction Prompt
+                  </label>
+                  <textarea
+                    value={compactPrompt}
+                    onChange={(e) => setCompactPrompt(e.target.value)}
+                    rows={3}
+                    placeholder="Custom system instructions for the compaction LLM call (optional)"
+                    className="px-3 py-1.5 text-sm border rounded-sm bg-card text-fg placeholder:text-muted-fg/60 focus:outline-none focus:ring-1 focus:ring-fg transition-colors duration-150 border-border resize-y font-mono"
+                  />
+                  <span className="text-[11px] text-muted-fg/70">Optional. Passed as customInstructions to pi generateSummary.</span>
+                </div>
+              </>
+            )}
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-fg uppercase tracking-wide">
+                Context Window Fallback
+              </label>
+              <input
+                type="number" min={1024} step={1024}
+                value={contextWindowFallback}
+                onChange={(e) => setContextWindowFallback(Number(e.target.value) || 128000)}
+                className="px-3 py-1.5 text-sm border rounded-sm bg-card text-fg placeholder:text-muted-fg/60 focus:outline-none focus:ring-1 focus:ring-fg transition-colors duration-150 border-border"
+              />
+              <span className="text-[11px] text-muted-fg/70">Fallback when model not in builtin catalog. Default 128000.</span>
+            </div>
+          </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-fg uppercase tracking-wide">
+                Commands
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-fg tabular-nums">
+                  {selectedCommands.length} selected
+                </span>
+                <Button variant="secondary" size="sm" onClick={() => setCommandModalOpen(true)}>
+                  <Pencil size={12} />
+                  Edit
+                </Button>
+              </div>
+            </div>
+
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm text-fg">Require @mention in groups</span>
+              <Toggle checked={mentionRequired} onChange={setMentionRequired} />
+            </label>
         </Card>
       </div>
 

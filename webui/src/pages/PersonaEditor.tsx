@@ -29,6 +29,7 @@ export default function PersonaEditor() {
   });
 
 
+
   const [systemPrompt, setSystemPrompt] = useState("");
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
   const [skills, setSkills] = useState<string[]>([]);
@@ -38,8 +39,8 @@ export default function PersonaEditor() {
   useEffect(() => {
     if (persona) {
       setSystemPrompt(persona.system_prompt || "");
-      setSelectedTools(persona.tools_allowlist_json || []);
-      setSkills(persona.skills_allowlist_json || []);
+      setSelectedTools(Array.isArray(persona.tools_allowlist_json) ? persona.tools_allowlist_json : []);
+      setSkills(Array.isArray(persona.skills_allowlist_json) ? persona.skills_allowlist_json : []);
     }
   }, [persona]);
 
@@ -127,8 +128,8 @@ export default function PersonaEditor() {
 
       {/* Hero header */}
       <div>
-        <h1 className="t-display">Persona: {persona.id}</h1>
-        <p className="t-mono text-muted-fg mt-2">{persona.id}</p>
+        <h1 className="t-display">Persona: {id}</h1>
+        <p className="t-mono text-muted-fg mt-2">{id}</p>
       </div>
       <div className="rule-heavy" />
 

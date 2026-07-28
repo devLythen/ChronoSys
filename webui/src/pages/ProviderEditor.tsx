@@ -81,7 +81,7 @@ export default function ProviderEditor() {
   useEffect(() => {
     if (provider) {
       setEditKind(provider.kind);
-      setEditBaseUrl(provider.base_url ?? "");
+      setEditBaseUrl(provider.base_url || DEFAULT_BASE_URLS[provider.kind] || "");
       setApiKey(provider.secret_ref ?? "");
     }
   }, [provider]);
@@ -178,6 +178,20 @@ export default function ProviderEditor() {
     if (!provider) return;
     setFetchingModels(true);
     try {
+      // Auto-save provider config + credential before fetching models
+      if (editKind !== provider.kind || editBaseUrl !== (provider.base_url ?? "") || apiKey) {
+        await api.updateProvider(provider.id, {
+          id: provider.id,
+          kind: editKind,
+          base_url: editBaseUrl || null,
+        });
+        if (apiKey) {
+          await api.upsertCredential(provider.id, {
+            auth_kind: "api_key",
+            secret_ref: apiKey,
+          });
+        }
+      }
       const models = await api.refreshModels(provider.id);
       setAvailableModels(models);
     } catch (err) {

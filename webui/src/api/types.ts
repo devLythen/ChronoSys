@@ -88,9 +88,14 @@ export interface BotProfile {
 }
 
 export interface BotPolicy {
-  commands?: { new_session?: boolean };
+  max_turns?: number;
+  drop_turns?: number;
+  compact_strategy?: "compact" | "drop";
+  compact_model_ref?: string;
+  compact_prompt?: string;
+  context_window_fallback?: number;
+  commands?: string[];
   context_scope?: "session" | "bot" | "account";
-  max_context_messages?: number;
   mention_required?: boolean;
   [key: string]: unknown;
 }

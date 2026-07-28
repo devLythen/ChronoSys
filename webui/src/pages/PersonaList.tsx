@@ -30,6 +30,17 @@ export default function PersonaList() {
     queryFn: () => api.listPersonas(),
   });
 
+  const createMut = useMutation({
+    mutationFn: (id: string) => api.createPersona({ id }),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["personas"] });
+      setModalOpen(false);
+      setNewId("");
+      navigate(`/persona/${id}`);
+    },
+    onError: (e: Error) => toast.add("error", e.message),
+  });
+
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.deletePersona(id),
     onSuccess: () => {
@@ -51,9 +62,7 @@ export default function PersonaList() {
       return;
     }
     setIdError("");
-    setModalOpen(false);
-    setNewId("");
-    navigate(`/persona/${trimmed}`);
+    createMut.mutate(trimmed);
   };
 
 

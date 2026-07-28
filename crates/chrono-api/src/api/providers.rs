@@ -337,7 +337,8 @@ async fn refresh_models(
         let base_url = provider
             .base_url
             .ok_or_else(|| ApiError::bad_request("provider has no base_url"))?;
-        let credential = store.providers().get_credential(&id)?;
+        let credential = store.providers().get_credential(&id)
+            .map_err(|_| ApiError::bad_request("no API key set — save a credential first"))?;
         (base_url, credential.secret_ref)
     };
 
