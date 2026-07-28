@@ -113,35 +113,35 @@ export default function PersonaList() {
           {personas.map((persona) => (
             <Card
               key={persona.id}
-              className="anim-item cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
+              className="anim-item hover:border-fg/30 transition-colors group flex flex-col"
               padding="none"
             >
               <div
                 onClick={() => navigate(`/persona/${persona.id}`)}
-                className="p-4 flex-1"
+                className="p-4 flex-1 cursor-pointer"
               >
-                <div className="flex items-start justify-between mb-3">
+                <div className="flex items-start justify-between mb-2">
                   <h3 className="t-headline !text-xl truncate">{persona.id}</h3>
                 </div>
-                <div className="mb-3 min-h-[2.5em] inline-flex items-start gap-1.5">
-                  <FileText size={12} className="mt-0.5 text-muted-fg shrink-0" />
-                  {persona.system_prompt ? (
-                    <p className="t-body text-muted-fg line-clamp-2">
-                      {truncate(persona.system_prompt, 120)}
-                    </p>
-                  ) : (
-                    <p className="t-body text-muted-fg/50 italic">No system prompt</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="info">
-                    <Wrench size={11} className="mr-1" />
-                    {persona.tools_allowlist_json?.length ?? 0} tools
-                  </Badge>
-                  <Badge variant="info">
-                    <Puzzle size={11} className="mr-1" />
-                    {persona.skills_allowlist_json?.length ?? 0} skills
-                  </Badge>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-fg">
+                    <FileText size={11} className="shrink-0" />
+                    {persona.system_prompt ? (
+                      <span className="truncate">{truncate(persona.system_prompt, 100)}</span>
+                    ) : (
+                      <span className="text-muted-fg/50 italic">No system prompt</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="info">
+                      <Wrench size={11} className="mr-1" />
+                      {persona.tools_allowlist_json?.length ?? 0} tools
+                    </Badge>
+                    <Badge variant="info">
+                      <Puzzle size={11} className="mr-1" />
+                      {persona.skills_allowlist_json?.length ?? 0} skills
+                    </Badge>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-1 pl-2 pr-4 py-2 border-t border-border bg-muted/30">

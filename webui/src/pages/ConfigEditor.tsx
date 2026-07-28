@@ -162,7 +162,6 @@ export default function ConfigEditor() {
 
       <div>
         <h1 className="t-display">{id}</h1>
-        <p className="t-mono text-muted-fg mt-2">{id}</p>
       </div>
       <div className="rule-heavy" />
 

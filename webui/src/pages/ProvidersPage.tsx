@@ -112,17 +112,17 @@ export default function ProvidersPage() {
           {list.map((pv) => (
             <Card
               key={pv.id}
-              className="anim-item cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
+              className="anim-item hover:border-fg/30 transition-colors group flex flex-col"
               padding="none"
             >
-              <div onClick={() => navigate(`/providers/${pv.id}`)} className="p-4 flex-1">
-                <div className="flex items-start justify-between mb-3">
+              <div onClick={() => navigate(`/providers/${pv.id}`)} className="p-4 flex-1 cursor-pointer">
+                <div className="flex items-start justify-between mb-2">
                   <h3 className="t-headline !text-xl truncate">{pv.id}</h3>
-                  <span className="t-label text-muted-fg shrink-0">{pv.kind}</span>
+                  <span className="t-label text-muted-fg shrink-0 ml-2">{pv.kind}</span>
                 </div>
-                <div className="text-xs text-muted-fg space-y-1">
-                  {pv.base_url && <div className="flex items-center gap-1"><Link size={11} /> <span className="t-mono truncate">{pv.base_url}</span></div>}
-                  <div className="flex items-center gap-1"><Cpu size={11} /> {pv.models.length} model{pv.models.length !== 1 ? "s" : ""}</div>
+                <div className="space-y-1.5 text-xs text-muted-fg">
+                  {pv.base_url && <div className="flex items-center gap-1.5"><Link size={11} className="shrink-0" /><span className="t-mono truncate">{pv.base_url}</span></div>}
+                  <div className="flex items-center gap-1.5"><Cpu size={11} className="shrink-0" /><span>{pv.models.length} model{pv.models.length !== 1 ? "s" : ""}</span></div>
                 </div>
               </div>
               <div className="flex items-center gap-1 pl-2 pr-4 py-2 border-t border-border bg-muted/30">

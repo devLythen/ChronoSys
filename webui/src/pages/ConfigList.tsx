@@ -118,33 +118,29 @@ export default function ConfigList() {
           {bots.map((bot) => (
             <Card
               key={bot.id}
-              className="anim-item cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
+              className="anim-item hover:border-fg/30 transition-colors group flex flex-col"
               padding="none"
             >
               <div
                 onClick={() => navigate(`/config/${bot.id}`)}
-                className="p-4 flex-1"
+                className="p-4 flex-1 cursor-pointer"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <h3 className="t-headline !text-xl truncate">
-                    {bot.id}
-                  </h3>
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="t-headline !text-xl truncate">{bot.id}</h3>
                 </div>
-                <p className="t-mono text-muted-fg mb-2 truncate text-sm">
-                  <Cpu size={13} className="inline mr-1.5 -mt-0.5" />
-                  {bot.model_ref || "No model"}
-                </p>
-                <div className="flex items-center gap-3 text-xs text-muted-fg mb-2">
-                  {bot.persona_id ? (
-                    <span className="t-mono inline-flex items-center gap-1">
-                      <User size={11} />
-                      {bot.persona_id}
-                    </span>
-                  ) : (
-                    <span className="text-muted-fg/50 inline-flex items-center gap-1">
-                      <User size={11} /> No persona
-                    </span>
-                  )}
+                <div className="space-y-1.5 text-xs text-muted-fg">
+                  <div className="flex items-center gap-1.5">
+                    <Cpu size={11} className="shrink-0" />
+                    <span className="t-mono truncate">{bot.model_ref || "No model"}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <User size={11} className="shrink-0" />
+                    {bot.persona_id ? (
+                      <span className="t-mono truncate">{bot.persona_id}</span>
+                    ) : (
+                      <span className="text-muted-fg/50 italic">No persona</span>
+                    )}
+                  </div>
                 </div>
               </div>
 

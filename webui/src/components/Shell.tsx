@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { useState, useRef, useLayoutEffect } from "react";
+import { useState, useRef, useLayoutEffect, useEffect } from "react";
 import {
   PanelLeftClose, PanelLeft, ChevronRight,
   LayoutDashboard, Globe, Sliders, Server, User,
@@ -140,10 +140,24 @@ function SidebarSection({
     </div>
   );
 }
-
 export default function Shell() {
   const [collapsed, setCollapsed] = useState(false);
+  const [manualOverride, setManualOverride] = useState(false);
 
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023px)");
+    const sync = () => {
+      if (!manualOverride) setCollapsed(mq.matches);
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, [manualOverride]);
+
+  const toggleCollapsed = () => {
+    setManualOverride(true);
+    setCollapsed(!collapsed);
+  };
   return (
     <div className="min-h-screen bg-bg text-fg flex">
       <aside
@@ -168,7 +182,7 @@ export default function Shell() {
             <span className="text-[10px] text-muted-fg mt-0.5">v0.1</span>
           )}
           <button
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={toggleCollapsed}
             className={cn(
               "p-1 text-muted-fg hover:text-fg transition-colors shrink-0",
               collapsed ? "" : "ml-auto",

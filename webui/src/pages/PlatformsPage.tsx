@@ -117,14 +117,14 @@ export default function PlatformsPage() {
           {accounts.map((a) => (
             <Card
               key={a.id}
-              className="anim-item cursor-pointer hover:border-fg/30 transition-colors group flex flex-col"
+              className="anim-item hover:border-fg/30 transition-colors group flex flex-col"
               padding="none"
             >
               <div
                 onClick={() => navigate(`/platforms/${a.id}`)}
-                className="p-4 flex-1"
+                className="p-4 flex-1 cursor-pointer"
               >
-                <div className="flex items-start justify-between mb-3">
+                <div className="flex items-start justify-between mb-2">
                   <h3 className="t-headline !text-xl truncate">{a.id}</h3>
                   <button
                     type="button"
@@ -142,10 +142,12 @@ export default function PlatformsPage() {
                     />
                   </button>
                 </div>
-                <p className="t-mono text-muted-fg text-xs truncate inline-flex items-center gap-1.5">
-                  <Globe size={11} />
-                  {a.platform.charAt(0).toUpperCase() + a.platform.slice(1)}
-                </p>
+                <div className="space-y-1.5 text-xs text-muted-fg">
+                  <div className="flex items-center gap-1.5">
+                    <Globe size={11} className="shrink-0" />
+                    <span className="t-mono truncate">{a.platform.charAt(0).toUpperCase() + a.platform.slice(1)}</span>
+                  </div>
+                </div>
               </div>
 
               <div className="flex items-center gap-1 pl-2 pr-4 py-2 border-t border-border bg-muted/30">

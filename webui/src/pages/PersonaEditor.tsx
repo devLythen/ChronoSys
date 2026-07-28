@@ -128,8 +128,7 @@ export default function PersonaEditor() {
 
       {/* Hero header */}
       <div>
-        <h1 className="t-display">Persona: {id}</h1>
-        <p className="t-mono text-muted-fg mt-2">{id}</p>
+        <h1 className="t-display">{id}</h1>
       </div>
       <div className="rule-heavy" />
 

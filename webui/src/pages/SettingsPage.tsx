@@ -117,7 +117,7 @@ export default function SettingsPage() {
       </section>
 
       {/* Decorative halftone block */}
-      <div className="halftone h-24 rounded-none opacity-30" />
+      <div className="halftone h-8" />
 
       {/* Instance Info */}
       <section className="space-y-6">
