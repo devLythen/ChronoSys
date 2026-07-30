@@ -260,6 +260,10 @@ interface ContextPolicy {
   compactPrompt: string;
   /** Fallback context window when model unknown. Default 128000. */
   contextWindowFallback: number;
+  /** Prepend [HH:MM:SS] to every message (user + assistant). Default false. */
+  showTimestamp: boolean;
+  /** Prepend [platform name (id)] to user messages. Default false. */
+  showUserPrefix: boolean;
 }
 
 function readContextPolicy(bot: ResolvedBot): ContextPolicy {
@@ -274,8 +278,41 @@ function readContextPolicy(bot: ResolvedBot): ContextPolicy {
       typeof p.context_window_fallback === "number" && p.context_window_fallback > 0
         ? p.context_window_fallback
         : 128000,
+    showTimestamp: Boolean(p.show_timestamp),
+    showUserPrefix: Boolean(p.show_user_prefix),
   };
 }
+
+// ── Message prefix builders ────────────────────────────────────
+
+function formatTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return "??:??:??";
+  }
+}
+
+function getDate(iso: string): string {
+  try {
+    return new Date(iso).toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
+}
+
+function buildUserPrefix(event: ChronoEvent, policy: ContextPolicy): string {
+  const parts: string[] = [];
+  if (policy.showTimestamp) {
+    parts.push(`[${formatTime(event.received_at)}]`);
+  }
+  if (policy.showUserPrefix) {
+    parts.push(`[${event.platform} ${event.sender.name} (${event.sender.id})]`);
+  }
+  return parts.length > 0 ? parts.join(" ") + " " : "";
+}
+
 
 function resolveContextWindow(model: Model<Api>, policy: ContextPolicy): number {
   return model.contextWindow > 0 ? model.contextWindow : policy.contextWindowFallback;
@@ -501,7 +538,7 @@ async function main() {
    * sessionId = random UUID                 (conversation instance)
    */
   const store = new SessionStore(sessionsDbPath(chronoHome));
-  type Bucket = { sessionId: string; messages: AgentMessage[] };
+  type Bucket = { sessionId: string; messages: AgentMessage[]; lastDate: string };
   const sessions = new Map<string, Bucket>();
 
   function getOrCreateBucket(
@@ -512,7 +549,7 @@ async function main() {
     let bucket = sessions.get(route);
     if (!bucket) {
       const rec = store.getOrCreateActive(route, sessionKey, botId);
-      bucket = { sessionId: rec.sessionId, messages: rec.messages };
+      bucket = { sessionId: rec.sessionId, messages: rec.messages, lastDate: rec.lastDate };
       sessions.set(route, bucket);
       logEvent({
         type: "host_info",
@@ -523,7 +560,7 @@ async function main() {
   }
 
   function persistBucket(bucket: Bucket): void {
-    store.save(bucket.sessionId, bucket.messages);
+    store.save(bucket.sessionId, bucket.messages, bucket.lastDate);
   }
 
   function rotateSession(
@@ -532,7 +569,7 @@ async function main() {
     botId: string,
   ): Bucket {
     const rec = store.rotate(route, sessionKey, botId);
-    const bucket = { sessionId: rec.sessionId, messages: [] as AgentMessage[] };
+    const bucket = { sessionId: rec.sessionId, messages: [] as AgentMessage[], lastDate: "" };
     sessions.set(route, bucket);
     return bucket;
   }
@@ -937,6 +974,14 @@ async function main() {
       bot.resolvedModel.model,
       bot.resolvedModel.overrides,
     ) as ThinkingLevel;
+
+    // Inject date separator if the current message's date differs from the last stored date
+    const today = getDate(event.received_at);
+    if (today && today !== bucket.lastDate) {
+      bucket.messages.push({ role: "user", content: `[${today}]` } as AgentMessage);
+      bucket.lastDate = today;
+      persistBucket(bucket);
+    }
     agent.state.messages = bucket.messages;
     agent.state.tools = createToolsForAllowlist(
       bot.toolsAllowlist.length > 0 ? bot.toolsAllowlist : defaultToolsAllowlist,
@@ -983,7 +1028,9 @@ async function main() {
 
     try {
       const historyBefore = bucket.messages.length;
-      await agent.prompt(event.message.text);
+      const userPrefix = buildUserPrefix(event, ctxPolicy);
+      await agent.prompt(userPrefix + event.message.text);
+
       bucket.messages = agent.state.messages.slice();
       persistBucket(bucket);
 

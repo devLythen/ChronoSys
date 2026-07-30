@@ -95,8 +95,9 @@ export interface BotPolicy {
   compact_prompt?: string;
   context_window_fallback?: number;
   commands?: string[];
-  context_scope?: "session" | "bot" | "account";
   mention_required?: boolean;
+  show_timestamp?: boolean;
+  show_user_prefix?: boolean;
   [key: string]: unknown;
 }
 

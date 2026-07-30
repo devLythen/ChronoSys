@@ -113,11 +113,14 @@ export function createMessageSendTool(
         throw new Error("unexpected IPC response");
       }
       if (!response.ok) {
-        throw new Error(response.error?.message ?? "tool failed");
+        const errMsg = response.error?.message ?? "tool failed";
+        throw new Error(errMsg);
       }
+      const completedAt = new Date().toISOString();
+      const result = { completed_at: completedAt };
       return {
-        content: [{ type: "text", text: JSON.stringify(response.result) }],
-        details: response.result,
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
       };
     },
   };

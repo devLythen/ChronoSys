@@ -49,7 +49,7 @@ interface AgentMessage {
 
 // ── Render helpers ──────────────────────────────────────────────
 
-function RenderContent({ content }: { content: AgentMessage["content"] }) {
+function RenderContent({ content, toolResults }: { content: AgentMessage["content"]; toolResults: Map<string, string> }) {
   if (typeof content === "string") {
     return <p className="whitespace-pre-wrap break-words">{content}</p>;
   }
@@ -69,7 +69,8 @@ function RenderContent({ content }: { content: AgentMessage["content"] }) {
           return <ThinkingBubble key={i} block={block} />;
         }
         if (block.type === "toolCall") {
-          return <ToolCallBubble key={i} block={block} />;
+          const result = toolResults.get(block.id);
+          return <ToolCallBubble key={i} block={block} result={result} />;
         }
         return null;
       })}
@@ -106,16 +107,30 @@ function ThinkingBubble({ block }: { block: ThinkingBlock }) {
   );
 }
 
-function ToolCallBubble({ block }: { block: ToolCallBlock }) {
+function ToolCallBubble({ block, result }: { block: ToolCallBlock; result?: string }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="flex items-start gap-2 px-2.5 py-1.5 bg-muted/50 border border-border rounded-sm text-xs">
-      <Wrench size={12} className="mt-0.5 shrink-0 text-muted-fg" />
-      <div className="min-w-0">
+    <div className="border border-border rounded-sm overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 w-full px-2.5 py-1.5 text-xs text-muted-fg hover:bg-muted/50 transition-colors"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <Wrench size={12} />
         <span className="t-mono font-medium">{block.name}</span>
-        <span className="text-muted-fg ml-1">
-          {JSON.stringify(block.arguments)}
-        </span>
-      </div>
+      </button>
+      {open && (
+        <div className="px-3 py-2 text-xs border-t border-border bg-muted/30 space-y-2">
+          <div>
+            <span className="block t-label text-[10px] opacity-60 mb-0.5">Arguments</span>
+            <span className="text-muted-fg font-mono break-all">{JSON.stringify(block.arguments)}</span>
+          </div>
+          <div>
+            <span className="block t-label text-[10px] opacity-60 mb-0.5">Result</span>
+            <span className="text-muted-fg font-mono break-all">{result ?? "(None)"}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -136,6 +151,17 @@ export default function SessionDetail() {
     const raw = session?.messages;
     return Array.isArray(raw) ? raw as AgentMessage[] : [];
   }, [session?.messages]);
+
+  const toolResults = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of messages) {
+      if (m.role === "toolResult" && m.toolCallId) {
+        const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        map.set(m.toolCallId, text);
+      }
+    }
+    return map;
+  }, [messages]);
 
 
   const pageRef = usePageEnter<HTMLDivElement>();
@@ -198,9 +224,8 @@ export default function SessionDetail() {
               <p className="t-body text-muted-fg">No messages yet</p>
             </div>
           ) : (
-            messages.map((msg, i) => {
+            messages.filter(m => m.role !== "toolResult").map((msg, i) => {
               const isUser = msg.role === "user";
-              const isTool = msg.role === "toolResult";
 
               return (
                 <div
@@ -212,14 +237,12 @@ export default function SessionDetail() {
                       "max-w-[85%] px-4 py-3 border text-sm",
                       isUser
                         ? "bg-fg text-bg border-fg"
-                        : isTool
-                          ? "bg-muted/30 border-border ml-8"
-                          : "bg-card border-border mr-8",
+                        : "bg-card border-border mr-8",
                     )}
                   >
                     <div className="flex items-center gap-2 mb-1.5">
                       <span className="t-label text-[10px] opacity-60">
-                        {isUser ? "User" : isTool ? `Tool: ${msg.toolName || "?"}` : "Assistant"}
+                        {isUser ? "User" : "Assistant"}
                       </span>
                       {msg.usage && (
                         <span className="t-mono text-[10px] opacity-40">
@@ -232,7 +255,7 @@ export default function SessionDetail() {
                         </span>
                       )}
                     </div>
-                    <RenderContent content={msg.content} />
+                    <RenderContent content={msg.content} toolResults={toolResults} />
                   </div>
                 </div>
               );

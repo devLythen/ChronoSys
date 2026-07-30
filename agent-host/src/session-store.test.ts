@@ -32,7 +32,7 @@ describe("SessionStore UUID model", () => {
           content: [{ type: "text" as const, text: "hello" }],
           timestamp: 1,
         },
-      ]);
+      ], "");
       s.close();
     }
 

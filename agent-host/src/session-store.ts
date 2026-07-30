@@ -23,6 +23,7 @@ export type SessionRecord = {
   sessionKey: string;
   botProfileId: string;
   messages: AgentMessage[];
+  lastDate: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -41,7 +42,8 @@ CREATE TABLE IF NOT EXISTS conversation_sessions (
   bot_profile_id  TEXT NOT NULL,
   messages_json   TEXT NOT NULL DEFAULT '[]',
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  last_date       TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_conv_sessions_route
@@ -84,6 +86,11 @@ CREATE TABLE active_sessions (
 );
 `;
 
+/** v3: track last message date per session for date-separator injection. */
+const MIGRATION_003 = `
+ALTER TABLE conversation_sessions ADD COLUMN last_date TEXT NOT NULL DEFAULT '';
+`;
+
 export class SessionStore {
   private db: Database;
 
@@ -122,6 +129,12 @@ export class SessionStore {
         "INSERT INTO schema_migrations (version, name) VALUES (2, '002_uuid_sessions')",
       );
     }
+    if (row.v < 3) {
+      this.db.run(MIGRATION_003);
+      this.db.run(
+        "INSERT INTO schema_migrations (version, name) VALUES (3, '003_last_date')",
+      );
+    }
   }
 
   /**
@@ -149,7 +162,7 @@ export class SessionStore {
     const row = this.db
       .query(
         `SELECT session_id, route_key, session_key, bot_profile_id,
-                messages_json, created_at, updated_at
+                messages_json, last_date, created_at, updated_at
          FROM conversation_sessions WHERE session_id = ?`,
       )
       .get(sessionId) as
@@ -160,6 +173,7 @@ export class SessionStore {
           bot_profile_id: string;
           messages_json: string;
           created_at: string;
+          last_date: string;
           updated_at: string;
         }
       | null;
@@ -170,19 +184,20 @@ export class SessionStore {
       routeKey: row.route_key,
       sessionKey: row.session_key,
       botProfileId: row.bot_profile_id,
+      lastDate: row.last_date,
       messages: parseMessages(row.messages_json),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
   }
 
-  /** Persist messages for an existing session_id. */
-  save(sessionId: string, messages: AgentMessage[]): void {
+  /** Persist messages + last_date for an existing session_id. */
+  save(sessionId: string, messages: AgentMessage[], lastDate: string): void {
     this.db.run(
       `UPDATE conversation_sessions
-       SET messages_json = ?, updated_at = datetime('now')
+       SET messages_json = ?, last_date = ?, updated_at = datetime('now')
        WHERE session_id = ?`,
-      [JSON.stringify(messages), sessionId],
+      [JSON.stringify(messages), lastDate, sessionId],
     );
   }
 
@@ -224,6 +239,7 @@ export class SessionStore {
       sessionKey,
       botProfileId,
       messages: [],
+      lastDate: "",
       createdAt: "",
       updatedAt: "",
     };

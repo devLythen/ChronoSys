@@ -51,6 +51,8 @@ export default function ConfigEditor() {
   const [contextWindowFallback, setContextWindowFallback] = useState<number>(128000);
   const [selectedCommands, setSelectedCommands] = useState<string[]>(["new"]);
   const [mentionRequired, setMentionRequired] = useState(false);
+  const [showTimestamp, setShowTimestamp] = useState(false);
+  const [showUserPrefix, setShowUserPrefix] = useState(false);
   const [commandModalOpen, setCommandModalOpen] = useState(false);
   useEffect(() => {
     if (bot) {
@@ -66,6 +68,8 @@ export default function ConfigEditor() {
       const cmds: unknown = p.commands;
       setSelectedCommands(Array.isArray(cmds) ? cmds as string[] : ["new"]);
       setMentionRequired(Boolean(p.mention_required));
+      setShowTimestamp(Boolean(p.show_timestamp));
+      setShowUserPrefix(Boolean(p.show_user_prefix));
     }
   }, [bot]);
 
@@ -103,6 +107,8 @@ export default function ConfigEditor() {
       policy.context_window_fallback = contextWindowFallback;
       if (selectedCommands.length > 0) policy.commands = selectedCommands;
       if (mentionRequired) policy.mention_required = true;
+      if (showTimestamp) policy.show_timestamp = true;
+      if (showUserPrefix) policy.show_user_prefix = true;
       return api.updateBot(id, {
         model_ref: modelRef,
         persona_id: personaId || null,
@@ -322,6 +328,16 @@ export default function ConfigEditor() {
             <label className="flex items-center justify-between cursor-pointer">
               <span className="text-sm text-fg">Require @mention in groups</span>
               <Toggle checked={mentionRequired} onChange={setMentionRequired} />
+            </label>
+
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm text-fg">Show timestamp on messages</span>
+              <Toggle checked={showTimestamp} onChange={setShowTimestamp} />
+            </label>
+
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm text-fg">Show user identity on messages</span>
+              <Toggle checked={showUserPrefix} onChange={setShowUserPrefix} />
             </label>
         </Card>
       </div>
