@@ -58,11 +58,10 @@ export function createMessageSendTool(
     name: "message_send",
     label: "Send / forward message",
     description:
-      "Preferred tool to send or forward a text message. " +
-      "Omit chat_id to send to the current conversation; " +
-      "set chat_id to deliver to another chat (cross-user / cross-group). " +
-      "Use this for all intentional outbound messages. " +
-      "Plain assistant body text (without this tool) can only reach the current chat as a fallback.",
+      "Send a message to the chat at any point during your response. " +
+      "You can call this multiple times for natural sentence-by-sentence delivery. " +
+      "If you use this tool to communicate, you may output no text — just end the thinking chain. " +
+      "Omit chat_id to send to the current conversation; set it to reach another chat.",
     parameters: Type.Object({
       text: Type.String({ description: "Message body to send" }),
       chat_id: Type.Optional(

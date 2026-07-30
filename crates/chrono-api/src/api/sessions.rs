@@ -115,47 +115,14 @@ async fn list_sessions(State(state): State<Arc<AppState>>) -> ApiResult<Json<Vec
 fn list_sessions_v2(conn: &Connection) -> ApiResult<Json<Vec<SessionSummary>>> {
     let mut out = Vec::new();
 
-    // Prefer active sessions when the table exists.
-    let has_active = conn
-        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='active_sessions'")
-        .and_then(|mut s| s.exists([]))
-        .unwrap_or(false);
-
-    if has_active {
-        let mut stmt = conn.prepare(
-            "SELECT a.session_id, c.route_key, c.session_key, c.bot_profile_id,
-                    c.updated_at, c.created_at, c.messages_json
-             FROM active_sessions a
-             JOIN conversation_sessions c ON c.session_id = a.session_id
-             ORDER BY c.updated_at DESC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            let messages_json: String = row.get(6)?;
-            Ok(SessionSummary {
-                session_id: row.get(0)?,
-                route_key: row.get(1)?,
-                session_key: row.get(2)?,
-                bot_profile_id: row.get(3)?,
-                updated_at: row.get(4)?,
-                created_at: row.get(5)?,
-                message_count: message_count(&messages_json),
-                active: true,
-            })
-        })?;
-        for r in rows {
-            out.push(r?);
-        }
-        if !out.is_empty() {
-            return Ok(Json(out));
-        }
-    }
-
-    // Fall back to all conversation sessions.
+    // Query all sessions, marking which ones are currently active.
     let mut stmt = conn.prepare(
-        "SELECT session_id, route_key, session_key, bot_profile_id,
-                updated_at, created_at, messages_json
-         FROM conversation_sessions
-         ORDER BY updated_at DESC
+        "SELECT c.session_id, c.route_key, c.session_key, c.bot_profile_id,
+                c.updated_at, c.created_at, c.messages_json,
+                a.session_id IS NOT NULL as active
+         FROM conversation_sessions c
+         LEFT JOIN active_sessions a ON a.route_key = c.route_key AND a.session_id = c.session_id
+         ORDER BY c.updated_at DESC
          LIMIT 200",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -168,7 +135,7 @@ fn list_sessions_v2(conn: &Connection) -> ApiResult<Json<Vec<SessionSummary>>> {
             updated_at: row.get(4)?,
             created_at: row.get(5)?,
             message_count: message_count(&messages_json),
-            active: false,
+            active: row.get(7)?,
         })
     })?;
     for r in rows {

@@ -564,18 +564,6 @@ fn sync_from_config(
 fn handle_inbound_event(state: &Arc<Mutex<GatewayState>>, routed: RoutedEvent) -> Result<()> {
     let mut state = state.lock().unwrap();
 
-    let max_rpm: u32 = 30;
-    if !state.rate_limiter.check(&routed.account_id, max_rpm) {
-        eprintln!("[gateway] rate-limited account {}", routed.account_id);
-        state.audit.write(&json!({
-            "ts": chrono_now(),
-            "event": "rate_limited",
-            "account_id": routed.account_id,
-            "detail": "rate limit exceeded",
-        }));
-        return Ok(());
-    }
-
     let resolved = match state.resolve_binding(&routed.account_id, &routed.event) {
         Some(r) => r,
         None => {
@@ -592,6 +580,18 @@ fn handle_inbound_event(state: &Arc<Mutex<GatewayState>>, routed: RoutedEvent) -
             return Ok(());
         }
     };
+
+    let max_rpm: u32 = 30;
+    if !state.rate_limiter.check(&routed.account_id, max_rpm) {
+        eprintln!("[gateway] rate-limited account {}", routed.account_id);
+        state.audit.write(&json!({
+            "ts": chrono_now(),
+            "event": "rate_limited",
+            "account_id": routed.account_id,
+            "detail": "rate limit exceeded",
+        }));
+        return Ok(());
+    }
 
     if resolved
         .policy_json

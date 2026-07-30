@@ -28,10 +28,8 @@ import {
 import { SessionStore, sessionsDbPath } from "./session-store.ts";
 
 const DEFAULT_SYSTEM_PROMPT =
-  "You are an assistant on a chat platform. Prefer the message_send tool for all intentional outbound messages (optionally set chat_id to reach another chat). Plain body text without the tool only falls back to the current chat.";
+  "You are a chat bot.";
 
-
-/** Supported context scopes. Only "session" is implemented; others fall back. */
 type ContextScope = "session" | "bot" | "account";
 
 function logEvent(event: unknown) {
@@ -46,14 +44,72 @@ function logEvent(event: unknown) {
   switch (type) {
     case "agent_start": return;
     case "turn_start": return;
-    case "turn_end": return;
+    case "turn_end": {
+      // Extract tool calls from turn_end message (before tool execution)
+      const msg = e.message as Record<string,unknown> | undefined;
+      if (msg?.role === "assistant") {
+        const content = msg.content as Array<Record<string,unknown>> | undefined;
+        if (Array.isArray(content)) {
+          for (const c of content) {
+            if (c?.type === "toolCall") {
+              const name = c.name ?? "?";
+              if (name === "message_send") {
+                try {
+                  const a = typeof c.arguments === "string" ? JSON.parse(c.arguments as string) : (c.arguments ?? {}) as Record<string,unknown>;
+                  const text = typeof a.text === "string" ? a.text : "";
+                  const preview = text.length > 100 ? text.slice(0, 100) + "…" : text;
+                  logTool(`send: "${preview}"`);
+                } catch {
+                }
+              } else {
+                logTool(String(name));
+              }
+            }
+          }
+        }
+      }
+      return;
+    }
     case "agent_end": {
       const msgs = e.messages as Array<Record<string,unknown>> | undefined;
       const last = msgs?.[msgs.length - 1];
+      // Log tool calls embedded in assistant message content
+      if (last && last.role === "assistant") {
+        const content = last.content as Array<Record<string,unknown>> | undefined;
+        if (Array.isArray(content)) {
+          for (const c of content) {
+            if (c?.type === "toolCall") {
+              const name = c.name ?? "?";
+              const args = typeof c.arguments === "string" ? c.arguments : JSON.stringify(c.arguments ?? {});
+              if (name === "message_send") {
+                try {
+                  const a = JSON.parse((typeof c.arguments === "string" ? c.arguments : "{}") as string);
+                  const text = typeof a.text === "string" ? a.text : "";
+                  const preview = text.length > 100 ? text.slice(0, 100) + "…" : text;
+                  logTool(`send: "${preview}"`);
+                } catch {
+                  logTool(`message_send (parse error)`);
+                }
+              } else {
+                logTool(`${name} ${args.slice(0, 80)}`);
+              }
+            }
+          }
+        }
+      }
+      // Token stats
       const stopReason = last?.stopReason ?? "?";
-      const usage = last?.usage as Record<string,number> | undefined;
-      const tokens = usage ? `${usage.totalTokens ?? 0} tokens` : "";
-      logLine(level, `response: stop=${stopReason} ${tokens}`);
+      const u = last?.usage as Record<string,number> | undefined;
+      if (u) {
+        const parts: string[] = [];
+        if (typeof u.input === "number") parts.push(`${u.input} in`);
+        if (typeof u.output === "number") parts.push(`${u.output} out`);
+        if (typeof u.reasoning === "number" && u.reasoning > 0) parts.push(`${u.reasoning} think`);
+        parts.push(`${u.totalTokens ?? 0} total`);
+        logLine(level, `  finish ${stopReason} (${parts.join(", ")})`);
+      } else {
+        logLine(level, `  finish ${stopReason}`);
+      }
       return;
     }
     case "stream_delta": return;
@@ -61,15 +117,29 @@ function logEvent(event: unknown) {
     case "message_update": return;
     case "message_start": return;
     case "message_end": return;
-    case "tool_call": return;
+    case "tool_call": {
+      const name = e.name ?? "?";
+      if (name === "message_send") {
+        try {
+          const a = JSON.parse((typeof e.arguments === "string" ? e.arguments : "{}") as string);
+          const text = typeof a.text === "string" ? a.text : "";
+          const preview = text.length > 100 ? text.slice(0, 100) + "…" : text;
+          logTool(`send: "${preview}"`);
+        } catch {
+          logTool(`message_send (parse error)`);
+        }
+      } else {
+        const args = typeof e.arguments === "string" ? e.arguments : JSON.stringify(e.arguments ?? {});
+        logTool(`${name} ${args.slice(0, 80)}`);
+      }
+      return;
+    }
     case "tool_result": return;
     case "tool_execution_start": return;
     case "tool_execution_end": return;
   }
 
   // Only reachable for events NOT in the switch above
-
-  // Extract message from operational events
   let msg = String(e.message ?? "");
   if (!msg || msg === "[object Object]") {
     msg = type.replace(/^host_/, "").replace(/_/g, " ");
@@ -84,6 +154,9 @@ function logLine(level: string, message: string) {
   process.stderr.write(`${c}[agent] ${message}\x1b[0m\n`);
 }
 
+function logTool(message: string) {
+  process.stderr.write(`\x1b[35m[tool] ${message}\x1b[0m\n`);
+}
 
 function writeControl(msg: Record<string, unknown>) {
   writeFrameStdout(new TextEncoder().encode(JSON.stringify(msg)));
@@ -133,6 +206,12 @@ class BotProfileResolver {
     private models: MutableModels | null,
     private fallback: ResolvedBot | null,
   ) {}
+
+  reload(config: ChronoConfig | null, models: MutableModels | null, fallback: ResolvedBot | null) {
+    this.config = config ?? this.config;
+    this.models = models ?? this.models;
+    if (fallback) this.fallback = fallback;
+  }
 
   get(botId: string | undefined): ResolvedBot | null {
     if (!botId) return this.fallback;
@@ -602,9 +681,11 @@ async function main() {
             if (newModels) {
               models = newModels;
               streamFn = makeStreamFn(models);
-              // Re-resolve default bot
+              profiles.reload(config, models, fallbackBot);
+              // Log all bots for diagnostics
               const bots = config.listBots();
               if (bots.length > 0) {
+                // Update fallback from first bot
                 try {
                   const bot = resolveBot(config, models, bots[0]!.id);
                   if (bot) {
@@ -613,23 +694,25 @@ async function main() {
                     defaultModel = bot.resolvedModel.model;
                     defaultToolsAllowlist = bot.toolsAllowlist;
                     currentOverrides.v = bot.resolvedModel.overrides;
+                  }
+                } catch { /* keep old fallback */ }
+                // Log each bot for diagnostics
+                for (const bp of bots) {
+                  try {
+                    const b = resolveBot(config, models, bp.id);
                     logEvent({
                       type: "host_info",
-                      message: `config.reload: bot=${bot.id} model=${bot.modelRef} providers=${models.getProviders().length}`,
+                      message: `config.reload: bot=${b?.id ?? bp.id} model=${b?.modelRef ?? "?"}`,
                     });
+                  } catch {
+                    logEvent({ type: "host_warn", message: `config.reload: bot "${bp.id}" failed` });
                   }
-                } catch (err) {
-                  logEvent({
-                    type: "host_warn",
-                    message: `config.reload: bot "${bots[0]!.id}" resolution failed: ${err instanceof Error ? err.message : String(err)}`,
-                  });
                 }
+              } else {
+                logEvent({ type: "host_warn", message: "config.reload: no bot profiles" });
               }
             } else {
-              logEvent({
-                type: "host_warn",
-                message: "config.reload: still no enabled providers",
-              });
+              logEvent({ type: "host_warn", message: "config.reload: no providers" });
             }
           }
           continue;
@@ -864,7 +947,7 @@ async function main() {
 
     logEvent({
       type: "host_info",
-      message: `turn bot=${bot.id} model=${bot.modelRef} tools=${JSON.stringify(bot.toolsAllowlist)} route=${route} session_id=${bucket.sessionId} history=${bucket.messages.length}`,
+      message: `${bot.id} #${bucket.sessionId.slice(0, 8)} h=${bucket.messages.length} model=${bot.modelRef}`,
     });
 
     // ── Request-time context window guard ──────────────────────────
@@ -918,9 +1001,8 @@ async function main() {
           logEvent({ type: "host_info", message: `post-turn compact bot=${bot.id} tokens=${postEst.tokens}/${ctxWindow}` });
         }
       }
-
-      // Fallback: plain assistant body → current chat only (no cross-chat).
-      // Prefer message_send (optional chat_id) for intentional / cross-chat delivery.
+      // Fallback: if agent responds with text instead of message_send tool,
+      // deliver the text to the current chat anyway.
       const usedTool = bucket.messages.slice(historyBefore).some((m) => {
         if (m.role === "toolResult") return true;
         if (m.role !== "assistant" || !Array.isArray(m.content)) return false;
@@ -937,7 +1019,7 @@ async function main() {
         if (body) {
           logEvent({
             type: "host_info",
-            message: `body-text fallback to current chat only (${body.length} chars)`,
+            message: `  text reply (no tool): "${body.slice(0, 80)}${body.length > 80 ? "…" : ""}"`,
           });
           await sendBodyTextToCurrentChat(
             event.session_key,

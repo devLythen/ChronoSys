@@ -41,8 +41,6 @@ export default function ConfigEditor() {
     queryFn: () => api.listPersonas(),
   });
 
-
-
   const [modelRef, setModelRef] = useState("");
   const [personaId, setPersonaId] = useState("");
   const [maxTurns, setMaxTurns] = useState<number>(-1);
@@ -73,13 +71,17 @@ export default function ConfigEditor() {
 
   const modelOptions = (() => {
     const opts: { value: string; label: string }[] = [];
-    if (!providers) return opts;
-    for (const pv of providers) {
-      for (const m of pv.models) {
-        if (!m.model_id) continue;
-        const ref = `${pv.id}/${m.model_id}`;
-        opts.push({ value: ref, label: ref });
+    if (providers) {
+      for (const pv of providers) {
+        for (const m of pv.models) {
+          if (!m.model_id) continue;
+          const ref = `${pv.id}/${m.model_id}`;
+          opts.push({ value: ref, label: ref });
+        }
       }
+    }
+    if (modelRef && !opts.some((o) => o.value === modelRef)) {
+      opts.push({ value: modelRef, label: modelRef });
     }
     return opts;
   })();
@@ -110,6 +112,7 @@ export default function ConfigEditor() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bot", id] });
+      queryClient.invalidateQueries({ queryKey: ["bots"] });
       toast.add("success", "Config saved");
       navigate("/config");
     },
@@ -176,6 +179,9 @@ export default function ConfigEditor() {
           <Select
             label="Model"
             options={modelOptions}
+            value={modelRef}
+            onChange={(e) => setModelRef(e.target.value)}
+            placeholder="Select a model…"
           />
 
           <Select
