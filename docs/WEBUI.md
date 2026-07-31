@@ -23,7 +23,7 @@ ChronoSys 的管理与观测面板。操作员通过浏览器管理平台账号�
 | 路由 | HashRouter（`/#/overview`，`/#/platforms`，…） |
 | **Providers** | LLM 后端与可用模型目录 | `llm_providers` / `llm_credentials` / `llm_models` | 模型参数在模型行上 |
 | **Config** | 一份可被平台选用的运行配置 | `bot_profiles` | model_ref + persona_id FK + policy |
-| **Persona** | 提示词与工具/技能权限 | `personas`（独立表） | 与 Config 独立创建和删除 |
+| **Persona** | 提示词与工具/技能配置 | `personas`（独立表） | 与 Config 独立创建和删除 |
 | **Platforms** | 消息平台账号 + 选用哪份配置 | `platform_accounts` + `bindings` | UI 称「Attach config」 |
 
 ### 闭环关系
@@ -72,6 +72,8 @@ Platforms (platform_accounts)
 /#/sessions/:id  会话详情（transcript + 元数据）
 /#/audit         工具与适配器审计日志
 /#/settings      Auth token + 实例信息
+/#/plugins/extensions 原生插件管理 — 安装、启用、配置、删除
+/#/plugins/extensions/:id 插件编辑器（注册条目 + 配置字段）
 ```
 
 **导航顺序反映操作员工作流**：先设平台账号 → 再建配置选模型 → 模型来自 Providers，人格独立创建。

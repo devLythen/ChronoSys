@@ -41,6 +41,7 @@ crates/
 │   ├── settings.rs          /api/v1/settings
 │   ├── health.rs            /api/v1/health
 │   └── ws.rs                /api/v1/ws
+│   └── plugins.rs           /api/v1/plugins
 │
 ├── chrono-config/           SQLite config store (chrono.db schema + CRUD)
 ├── chrono-ipc/              length-prefixed JSON frame protocol

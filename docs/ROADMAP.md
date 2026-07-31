@@ -87,18 +87,21 @@
 - [x] Plugin-native registry: manifest [[tools]]/[[commands]]/[[config]], policy toggle/blacklist, install/delete
 **Exit:** operators configure everything via WebUI; no log diving for normal ops.
 
-### M4 — Docker sandbox (week 7–9)
+### M4 — Plugin system + Docker sandbox (week 7–9) 🚧
 
-**Deliverable:** agent can create ephemeral Docker containers exposed as tools — execute Python, run scripts, access the browser.
+**Deliverable:** installable native plugins with AI tools and user commands; ephemeral Docker containers for arbitrary code execution.
 
+- [x] Manifest-driven registry: `[[tools]]`/`[[commands]]` metadata, `[[config]]` schema
+- [x] JS entry cross-validation: manifest names must exactly match `registerTool`/`registerCommand`
+- [x] Policy: `enabled` toggle, per-tool Persona blacklist in `chrono.policy.toml`
+- [x] `[config]` values edited in WebUI with typed controls (Input / Toggle)
+- [x] Disabled plugins show metadata without loading JS (lazy)
+- [x] WebUI: Extensions list, plugin editor, install ZIP/GitHub, delete
+- [x] Persona editor: plugin tool modal with per-tool blacklist toggles
+- [x] `host_command_sync` → Telegram `setMyCommands` for registered user commands
 - [ ] Gateway-managed Docker runtime (create, exec, timeout, cleanup)
-- [ ] `sandbox.exec` tool: run a command inside a container and return stdout
-- [ ] `sandbox.browser` tool: headless browser inside container with screenshot/DOM access
-- [ ] Workspace mounting: read/write a session-scoped directory for file passing
-- [ ] Resource limits: CPU shares, memory, disk, network on/off per container
-- [ ] Audit: every sandbox invocation logged with command, exit code, duration
-- [ ] Plugin-accessible: `context.sandbox.exec({ cmd, timeout })` and `context.sandbox.browser({ url })`
-
+- [ ] `sandbox.exec`, `sandbox.browser`, `sandbox.read`, `sandbox.write`
+- [ ] Plugin context: `ctx.sandbox.*` facade for sandbox access
 ### M5 — Multi-platform & hardening (week 9–12)
 
 - [ ] compaction + memory scopes
@@ -119,25 +122,8 @@
 - OIDC RBAC
 - marketplace signatures
 - OpenTelemetry
-- multi-agent / subagent orchestration (reuse pi subagent patterns)
 
 ---
-
-## 2. Suggested implementation order (files)
-
-```text
-1. crates/chrono-ipc          # types + framing
-2. agent-host/src/pi-bridge   # Agent + tools
-3. crates/chrono-gateway      # event loop + mock adapter
-4. crates/chrono-sys          # entry crate → chrono binary
-5. crates/chrono-adapters/telegram
-6. crates/chrono-sandbox
-7. webui (sessions first)
-8. crates/chrono-plugin
-9. plugins/examples/*
-```
-
-Do not start WebUI polish before M1 demo works.
 
 ---
 
@@ -145,10 +131,9 @@ Do not start WebUI polish before M1 demo works.
 
 | Crate / package | Lang | Notes |
 |-----------------|------|-------|
-| gateway, adapters, sandbox, plugin host, chrono-sys | Rust | edition 2021, tokio |
+| gateway, adapters, chrono-sys | Rust | edition 2021, tokio |
 | agent-host | TypeScript (Bun) | pi peer; Node 22.19+ fallback |
 | webui | TypeScript (Vite) | static |
-| example data plugins | Python 3.12+ | uv-managed venv under CHRONO_HOME |
 | pi | TypeScript | external, npm-published (`@earendil-works/pi-*`) |
 
 Python is **never** required for core install.
@@ -166,8 +151,7 @@ Python is **never** required for core install.
 | `$CHRONO_HOME/state/chrono.db` | Config DB: providers, models, accounts, bots, bindings |
 | `$CHRONO_HOME/secrets/` | Encrypted credential blobs / keychain refs |
 | `$CHRONO_HOME/sessions/` | pi-compatible session stores |
-| `$CHRONO_HOME/plugins/` | installed plugins + grants |
-| `$CHRONO_HOME/venvs/` | per-plugin Python envs |
+| `$CHRONO_HOME/plugins/` | installed plugins |
 | `$CHRONO_HOME/sandboxes/` | session workspaces |
 | `$CHRONO_HOME/logs/` | audit + process logs |
 | `$CHRONO_CACHE` | optional model/http cache (default XDG cache) |
@@ -330,21 +314,8 @@ No live LLM required for CI (`CHRONO_FAKE_LLM=1`).
 ## 7. Definition of done for v1.0
 
 1. Telegram DM + group (mention-gated) with tool-only side effects.
-2. Sandbox cannot read host `$HOME`.
-3. WebUI: sessions + bots + plugins grants.
-4. Plugin install for TS tools + skills.
-5. Single binary/cli + OCI image; data only in volume/`CHRONO_HOME`.
-6. Docs: deploy, plugin authoring, threat model.
-7. Audit log of all tool invocations.
-
----
-
-## 8. Immediate next actions (when coding starts)
-
-1. Init Cargo workspace + `chrono` CLI.
-2. Scaffold `agent-host` with path dependency on pi agent+ai.
-3. Implement UDS IPC + mock send tool loop.
-4. Add `.gitignore` for `.chrono/`, `target/`, `node_modules/`, `webui/dist/`.
-5. Keep docs updated when contracts change.
-
-Design freeze for M0–M1: **embed pi Agent**, **Rust gateway**, **tools-only effects**, **CHRONO_HOME isolation**.
+2. Sandbox: Docker containers per session with exec + browser.
+3. WebUI: full config management + plugin extensions.
+4. Plugin install via ZIP upload or GitHub clone.
+5. Single binary + OCI image; data only in `CHRONO_HOME`.
+6. Docs: deploy, plugin authoring, architecture.
