@@ -4,7 +4,7 @@
 
 1. Vertical slice first: one platform, one agent tool path, one UI screen.
 2. pi is a library, not a process tree dependency (RPC only as debug escape hatch).
-3. Fail closed on capabilities; empty allowlist = agent can only talk (if `message.send` granted).
+3. Installed and enabled plugins expose all tools; Persona blacklists gate per-tool visibility.
 4. Every side effect audited.
 5. `$CHRONO_HOME` is the only writable root (default XDG).
 6. **No legacy compatibility.** Pre-v1 breaking-change phase: old formats are removed, not deprecated. No dual-path code. Config migrations update existing data.
@@ -46,7 +46,7 @@
 - [x] agent-host: `buildModels()` + `ChronoCredentialStore` from DB; `resolveModelRef()`
 - [x] Fail closed: empty DB → system starts cleanly, waits for WebUI configuration
 - [x] `display_name` removed from all config entities — `id` is the sole identifier
-- [ ] CLI: `chrono init`, `chrono llm …`, `chrono config doctor` *(deferred — WebUI suffices)*
+- [x] CLI: `chrono init`, `chrono llm …`, `chrono config doctor` *(removed — WebUI covers all operator workflows)*
 
 **Exit:** system starts with empty DB, configures via WebUI; `createModels` + `streamSimple` work for configured model.
 
@@ -70,7 +70,7 @@
 
 **Exit:** bot answers in DM; token via account secret_ref; model via config DB.
 
-### M3 — Control plane + WebUI MVP (week 5–7) 🚧
+### M3 — Control plane + WebUI MVP (week 5–7) ✅
 
 **Deliverable:** operators manage bots/sessions/providers/accounts/personas in browser.
 
@@ -83,18 +83,21 @@
 - [x] Persona editor: tools allowlist checkbox grid, skills tag editor
 - [x] Config hot-reload notification to agent-host
 - [x] bearer token auth (loopback bypass)
-- [x] WebSocket real-time push — Telegram inbound/outbound topics, subscriptions, reconnect/resync *(enables stable long-lived connections for external platforms)*
+- [x] WebSocket real-time push — Telegram inbound/outbound topics, subscriptions, reconnect/resync
+- [x] Plugin-native registry: manifest [[tools]]/[[commands]]/[[config]], policy toggle/blacklist, install/delete
 **Exit:** operators configure everything via WebUI; no log diving for normal ops.
 
-### M4 — Plugin system (week 7–9)
+### M4 — Docker sandbox (week 7–9)
 
-- [ ] manifest load + capability grants
-- [ ] TS tool plugins
-- [ ] Python worker runtime (optional flag)
-- [ ] WASM tool PoC
-- [ ] `chrono plugin` CLI
+**Deliverable:** agent can create ephemeral Docker containers exposed as tools — execute Python, run scripts, access the browser.
 
-**Exit:** example weather plugin works offline with mock HTTP.
+- [ ] Gateway-managed Docker runtime (create, exec, timeout, cleanup)
+- [ ] `sandbox.exec` tool: run a command inside a container and return stdout
+- [ ] `sandbox.browser` tool: headless browser inside container with screenshot/DOM access
+- [ ] Workspace mounting: read/write a session-scoped directory for file passing
+- [ ] Resource limits: CPU shares, memory, disk, network on/off per container
+- [ ] Audit: every sandbox invocation logged with command, exit code, duration
+- [ ] Plugin-accessible: `context.sandbox.exec({ cmd, timeout })` and `context.sandbox.browser({ url })`
 
 ### M5 — Multi-platform & hardening (week 9–12)
 

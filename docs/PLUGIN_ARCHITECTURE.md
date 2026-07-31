@@ -199,3 +199,46 @@ The test suite uses fixtures under `__fixtures__/` that are copied to temp direc
 - Gateway logs `[telegram] syncing N bot commands` / `synced N commands` for command sync
 - Gateway logs `[gateway] syncing commands to N adapter(s)` when receiving `host_command_sync`
 - Agent-host stderr shows `host_warn` for unknown tool names in allowlists
+
+## 13. Docker sandbox (planned)
+
+Ephemeral Docker containers exposed as AI tools. The gateway manages container lifecycle — agent-host never talks to Docker directly.
+
+### 13.1 Architecture
+
+```text
+agent-host  --tool.request-->  gateway  --docker exec-->  container
+                               gateway  <--stdout/exit--  container
+agent-host  <--tool.response--
+```
+
+### 13.2 Tools
+
+| Tool | Description |
+|------|-------------|
+| `sandbox.exec` | Run a shell command or script inside the container; returns stdout + exit code |
+| `sandbox.browser` | Headless Chromium with playwright; screenshot, DOM query, page navigation |
+| `sandbox.read` | Read a file from the session workspace mount |
+| `sandbox.write` | Write content to a file in the session workspace mount |
+
+### 13.3 Lifecycle
+
+- **Lazy create**: first sandbox tool call for a session spawns a container from a configured image
+- **Idle timeout**: container destroyed after N seconds of inactivity (default 300)
+- **Session-scoped**: one container per session; workspace directory mounted read-write
+- **Explicit destroy**: `/sandbox-reset` command or session rotation kills the container
+
+### 13.4 Constraints
+
+- CPU shares, memory limit, disk quota per container (configurable in settings)
+- Network: default deny; opt-in `sandbox.network` capability for outbound HTTP
+- No host mount except the session workspace; no Docker socket access from inside
+- Every invocation audited: command, exit code, wall time, truncated stdout
+
+### 13.5 Plugin context
+
+```ts
+ctx.sandbox.exec({ cmd: "python -c 'print(1+1)'", timeoutMs: 5000 })
+ctx.sandbox.browser({ url: "https://example.com", waitFor: "networkidle0" })
+```
+
