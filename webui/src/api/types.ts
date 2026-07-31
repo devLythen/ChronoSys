@@ -272,7 +272,39 @@ export interface SettingBody {
   value_json: unknown;
 }
 
-// ── Tools ─────────────────────────────────────────────────────
+export interface NativeToolView {
+  name: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface PluginPolicyView {
+  enabled: boolean;
+  config: Record<string, string | boolean>;
+  tools: Record<string, { persona_blacklist: string[] }>;
+}
+
+export interface PluginConfigField {
+  key: string;
+  label: string;
+  type: "string" | "boolean";
+  default: string | boolean;
+  description?: string;
+}
+
+export interface PluginView {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  configSchema: PluginConfigField[];
+  tools: NativeToolView[];
+  commands: NativeToolView[];
+  status: string;
+  policy: PluginPolicyView;
+  error?: string;
+}
 
 export interface ToolInfo {
   name: string;

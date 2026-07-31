@@ -141,6 +141,10 @@ export class ChronoConfig {
     return row as Persona | null;
   }
 
+  listPersonas(): Persona[] {
+    return this.db.query(`SELECT id, system_prompt, tools_allowlist_json, skills_allowlist_json, json_ext, created_at, updated_at FROM personas ORDER BY id`).all() as Persona[];
+  }
+
   // ── Bindings ───────────────────────────────────────────────────
 
   getBinding(id: string): Binding | null {

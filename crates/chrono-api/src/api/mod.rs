@@ -5,6 +5,7 @@ pub mod bots;
 pub mod health;
 pub mod personas;
 pub mod providers;
+pub mod plugins;
 pub mod sessions;
 pub mod settings;
 pub mod tools;

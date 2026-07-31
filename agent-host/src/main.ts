@@ -4,10 +4,10 @@ import type { Model, Api, MutableModels, ThinkingLevel } from "@earendil-works/p
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { ChronoEvent, ToolIpcMessage } from "./ipc/types.ts";
 import {
-  createToolsForAllowlist,
   sendBodyTextToCurrentChat,
   type PendingCall,
 } from "./tools.ts";
+import { ToolRegistry } from "./plugins/registry.ts";
 import {
   readFrames,
   stdinAsWebStream,
@@ -444,8 +444,15 @@ async function main() {
   let fallbackBot: ResolvedBot | null = null;
 
   const chronoHome = process.env.CHRONO_HOME ?? ".chrono";
-    const dbPath = `${chronoHome}/state/chrono.db`;
+  const registry = new ToolRegistry(chronoHome, (message) => logEvent({ type: "host_warn", message }));
+  try {
+    await registry.reload();
+  } catch (error) {
+    logEvent({ type: "host_warn", message: `plugin registry initial reload failed: ${error instanceof Error ? error.message : String(error)}` });
+  }
+  const dbPath = `${chronoHome}/state/chrono.db`;
     config = openConfig(dbPath);
+    await registry.reconcilePersonas(new Set(config.listPersonas().map((persona) => persona.id)));
     models = buildModels(config);
     if (!models) {
       logEvent({
@@ -712,17 +719,48 @@ async function main() {
           continue;
         }
 
-        if (controlType === "config.reload") {
+        if (controlType === "plugin.list") {
+          const queryId = msg && typeof msg === "object" && "query_id" in msg ? String(msg.query_id) : "";
+          writeControl({ type: "plugin.list", query_id: queryId, plugins: registry.list() });
+          continue;
+        }
+        if (controlType === "plugin.reload") {
+          const queryId = msg && typeof msg === "object" && "query_id" in msg ? String(msg.query_id) : "";
+          try {
+            await registry.reload();
+            writeControl({ type: "plugin.reload", query_id: queryId, plugins: registry.list() });
+          syncPluginCommands(registry);
+          } catch (error) {
+            logEvent({ type: "host_warn", message: `plugin.reload failed: ${error instanceof Error ? error.message : String(error)}` });
+            writeControl({ type: "plugin.reload", query_id: queryId, plugins: registry.list(), error: error instanceof Error ? error.message : String(error) });
+          }
+          continue;
+        }
+        if (controlType === "plugin.policy") {
+          const queryId = msg && typeof msg === "object" && "query_id" in msg ? String(msg.query_id) : "";
+          const pluginId = msg && typeof msg === "object" && "plugin_id" in msg ? String(msg.plugin_id) : "";
+          const policy = msg && typeof msg === "object" && "policy" in msg ? msg.policy : undefined;
+          try {
+            const plugin = await registry.updatePolicy(pluginId, policy as import("./plugins/policy.ts").PluginPolicy);
+            writeControl({ type: "plugin.policy", query_id: queryId, plugins: registry.list(), plugin });
+          } catch (error) {
+            writeControl({ type: "plugin.policy", query_id: queryId, plugins: registry.list(), error: error instanceof Error ? error.message : String(error) });
+          }
+          continue;
+        }
+ 
+         if (controlType === "config.reload") {
+          try { await registry.reload(); } catch (error) { logEvent({ type: "host_warn", message: `plugin registry reload failed: ${error instanceof Error ? error.message : String(error)}` }); }
+          if (config) await registry.reconcilePersonas(new Set(config.listPersonas().map((p) => p.id)));
+          syncPluginCommands(registry);
           if (config) {
             const newModels = buildModels(config);
             if (newModels) {
               models = newModels;
               streamFn = makeStreamFn(models);
               profiles.reload(config, models, fallbackBot);
-              // Log all bots for diagnostics
               const bots = config.listBots();
               if (bots.length > 0) {
-                // Update fallback from first bot
                 try {
                   const bot = resolveBot(config, models, bots[0]!.id);
                   if (bot) {
@@ -733,24 +771,14 @@ async function main() {
                     currentOverrides.v = bot.resolvedModel.overrides;
                   }
                 } catch { /* keep old fallback */ }
-                // Log each bot for diagnostics
                 for (const bp of bots) {
                   try {
                     const b = resolveBot(config, models, bp.id);
-                    logEvent({
-                      type: "host_info",
-                      message: `config.reload: bot=${b?.id ?? bp.id} model=${b?.modelRef ?? "?"}`,
-                    });
-                  } catch {
-                    logEvent({ type: "host_warn", message: `config.reload: bot "${bp.id}" failed` });
-                  }
+                    logEvent({ type: "host_info", message: `config.reload: bot=${b?.id ?? bp.id} model=${b?.modelRef ?? "?"}` });
+                  } catch { logEvent({ type: "host_warn", message: `config.reload: bot "${bp.id}" failed` }); }
                 }
-              } else {
-                logEvent({ type: "host_warn", message: "config.reload: no bot profiles" });
-              }
-            } else {
-              logEvent({ type: "host_warn", message: "config.reload: no providers" });
-            }
+              } else { logEvent({ type: "host_warn", message: "config.reload: no bot profiles" }); }
+            } else { logEvent({ type: "host_warn", message: "config.reload: no providers" }); }
           }
           continue;
         }
@@ -847,11 +875,12 @@ async function main() {
         bot.resolvedModel.overrides,
       ) as ThinkingLevel;
       agent.state.messages = [];
-      agent.state.tools = createToolsForAllowlist(
+      agent.state.tools = registry.createToolsForAllowlist(
         bot.toolsAllowlist.length > 0 ? bot.toolsAllowlist : defaultToolsAllowlist,
         event.session_key,
         pendingCalls,
         agent.signal,
+        bot.personaId ?? undefined,
       );
       try {
         const tools = agent.state.tools;
@@ -867,6 +896,12 @@ async function main() {
         logEvent({ type: "host_error", message });
         writeControl({ type: "error", message });
       }
+      continue;
+    }
+
+    if (await registry.executeCommand(event.message.text, event.session_key, pendingCalls, agent.signal)) {
+      logEvent({ type: "host_info", message: `plugin command executed for bot=${bot.id}` });
+      writeControl({ type: "done" });
       continue;
     }
 
@@ -983,11 +1018,12 @@ async function main() {
       persistBucket(bucket);
     }
     agent.state.messages = bucket.messages;
-    agent.state.tools = createToolsForAllowlist(
+    agent.state.tools = registry.createToolsForAllowlist(
       bot.toolsAllowlist.length > 0 ? bot.toolsAllowlist : defaultToolsAllowlist,
       event.session_key,
       pendingCalls,
       agent.signal,
+      bot.personaId ?? undefined,
     );
 
     logEvent({
@@ -1091,6 +1127,11 @@ async function main() {
 
   await readerTask.catch(() => undefined);
   process.exit(process.exitCode ?? 0);
+}
+
+function syncPluginCommands(registry: ToolRegistry) {
+  const commands = registry.list().flatMap((p) => p.commands.filter((c) => c.enabled).map((c) => ({ name: c.name, description: c.description })));
+  writeControl({ type: "host_command_sync", commands });
 }
 
 main().catch((err) => {

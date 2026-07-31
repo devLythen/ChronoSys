@@ -33,6 +33,7 @@ const SessionDetail = lazy(() => import("./pages/SessionDetail"));
 const AuditPage = lazy(() => import("./pages/AuditPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const PluginsExtensions = lazy(() => import("./pages/PluginsExtensions"));
+const PluginEditor = lazy(() => import("./pages/PluginEditor"));
 const PluginsMcp = lazy(() => import("./pages/PluginsMcp"));
 const PluginsSkills = lazy(() => import("./pages/PluginsSkills"));
 export const router = createHashRouter([
@@ -54,6 +55,7 @@ export const router = createHashRouter([
       { path: "audit", element: <Page Component={AuditPage} /> },
       { path: "settings", element: <Page Component={SettingsPage} /> },
       { path: "plugins/extensions", element: <Page Component={PluginsExtensions} /> },
+      { path: "plugins/extensions/:id", element: <Page Component={PluginEditor} /> },
       { path: "plugins/mcp", element: <Page Component={PluginsMcp} /> },
       { path: "plugins/skills", element: <Page Component={PluginsSkills} /> },
     ],

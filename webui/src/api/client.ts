@@ -265,6 +265,30 @@ class ApiClient {
   listTools() {
     return this.request<import("./types").ToolInfo[]>("/tools");
   }
+  // ── Native plugins ───────────────────────────────────────────
+  listPlugins() {
+    return this.request<{ plugins: import("./types").PluginView[] }>("/plugins");
+  }
+  reloadPlugins() {
+    return this.request<{ plugins: import("./types").PluginView[] }>("/plugins/reload", { method: "POST" });
+  }
+  installPluginZip(archive: File) {
+    const body = new FormData();
+    body.append("archive", archive);
+    return fetch(`${BASE}/plugins/install/zip`, { method: "POST", body, headers: useAuthStore.getState().token ? { Authorization: `Bearer ${useAuthStore.getState().token}` } : undefined }).then(async (res) => {
+      if (!res.ok) throw new Error(`${res.status}: ${(await res.json().catch(() => ({}))).error ?? res.statusText}`);
+      return res.json() as Promise<{ plugins: import("./types").PluginView[] }>;
+    });
+  }
+  installPluginGitHub(body: { url: string; git_ref?: string }) {
+    return this.request<{ plugins: import("./types").PluginView[] }>("/plugins/install/github", { method: "POST", body: JSON.stringify(body) });
+  }
+  updatePluginPolicy(id: string, body: import("./types").PluginPolicyView) {
+    return this.request<import("./types").PluginView>(`/plugins/${encodeURIComponent(id)}/policy`, { method: "PUT", body: JSON.stringify(body) });
+  }
+  deletePlugin(id: string) {
+    return this.request<{ ok: boolean }>(`/plugins/${encodeURIComponent(id)}/policy`, { method: "DELETE" });
+  }
 }
 
 export const api = new ApiClient();

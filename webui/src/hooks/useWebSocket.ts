@@ -8,6 +8,7 @@ type WsServerMessage =
   | { type: "session.status"; session_id: string; status: "idle" | "running" | "error" }
   | { type: "platform.inbound"; platform: string; account_id: string; session_key: string; event: unknown }
   | { type: "platform.outbound"; platform: string; account_id: string; session_key: string; tool: string; response: unknown }
+  | { type: "plugin.updated"; plugin: unknown }
   | { type: "resync"; reason: "lagged"; dropped: number }
   | { type: "metrics.sample" }
   | { type: "audit.append"; entry: unknown };
@@ -38,8 +39,7 @@ export function useWebSocket(onMessage?: (msg: WsServerMessage) => void) {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        attempts = 0;
-        ws.send(JSON.stringify({ type: "subscribe", topics: ["platform:telegram", "sessions:*", "audit"] } satisfies WsClientMessage));
+        ws.send(JSON.stringify({ type: "subscribe", topics: ["platform:telegram", "sessions:*", "audit", "plugins"] } satisfies WsClientMessage));
       };
       ws.onmessage = (event) => {
         try {

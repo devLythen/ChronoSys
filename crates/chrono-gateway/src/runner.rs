@@ -387,6 +387,17 @@ pub async fn run_gateway(
                         .unwrap_or("unknown");
                     gateway_log!(error, "agent error: {message}");
                 }
+                "host_command_sync" => {
+                    if let Some(commands) = value.get("commands").and_then(|v| v.as_array()) {
+                        let commands = commands.clone();
+                        let mut state = stdout_state.lock().unwrap();
+                        let adapters: Vec<_> = state.adapters.values().map(|live| live.adapter.clone()).collect();
+                        eprintln!("[gateway] syncing commands to {} adapter(s)", adapters.len());
+                        tokio::spawn(async move {
+                            for adapter in &adapters { let _ = adapter.sync_commands(&commands).await; }
+                        });
+                    }
+                }
                 other => {
                     eprintln!("[gateway] unknown message type from agent-host: {other}");
                 }

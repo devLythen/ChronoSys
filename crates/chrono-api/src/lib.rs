@@ -26,6 +26,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .nest("/settings", api::settings::router())
         .nest("/audit", api::audit::router())
         .route("/health", get(api::health::health))
+        .nest("/plugins", api::plugins::router())
         .nest("/tools", api::tools::router())
         .route("/ws", get(api::ws::handler));
 

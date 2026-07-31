@@ -22,6 +22,7 @@ export interface ResolvedModel {
 
 export interface ResolvedBot {
   id: string;
+  personaId: string | null;
   modelRef: string;
   resolvedModel: ResolvedModel;
   systemPrompt: string;
@@ -105,9 +106,10 @@ export function resolveBot(
   const resolved = resolveModelRef(config, models, bot.model_ref);
 
   const persona = bot.persona_id ? config.getPersona(bot.persona_id) : null;
-
   return {
+
     id: bot.id,
+    personaId: bot.persona_id,
     modelRef: bot.model_ref,
     resolvedModel: resolved,
     systemPrompt: persona?.system_prompt || "",

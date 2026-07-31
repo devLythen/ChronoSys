@@ -1,0 +1,19 @@
+id = "example.sender"
+name = "Example Sender"
+version = "1.0.0"
+chrono_api = "1"
+description = "Native platform facade fixture."
+
+[entry]
+tools = ["tools/index.ts"]
+commands = ["tools/index.ts"]
+
+[[tools]]
+name = "example.send"
+label = "Send through Chrono"
+description = "Exercise the restricted platform.send facade."
+
+[[commands]]
+name = "weather"
+label = "Weather"
+description = "Send a deterministic weather response."

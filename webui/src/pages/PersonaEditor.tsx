@@ -7,8 +7,9 @@ import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
+import Modal from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
-import { ArrowLeft, Save, Loader2, Plus, X } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Plus, X, Pencil } from "lucide-react";
 import { cn } from "../lib/utils";
 
 
@@ -27,6 +28,9 @@ export default function PersonaEditor() {
     queryKey: ["tools"],
     queryFn: () => api.listTools(),
   });
+  const { data: pluginsData, isLoading: pluginsLoading } = useQuery({ queryKey: ["plugins"], queryFn: () => api.listPlugins() });
+  const pluginEntries = (pluginsData?.plugins ?? []).flatMap((plugin) => plugin.policy.enabled ? plugin.tools.map((tool) => ({ ...tool, plugin, disabledForPersona: plugin.policy.tools[tool.name]?.persona_blacklist.includes(id ?? "") ?? false })) : []);
+  const toolCatalog = (tools ?? []).map((tool) => ({ ...tool, unavailable: false }));
 
 
 
@@ -35,6 +39,7 @@ export default function PersonaEditor() {
   const [skills, setSkills] = useState<string[]>([]);
   const [skillInput, setSkillInput] = useState("");
   const [skillError, setSkillError] = useState("");
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   useEffect(() => {
     if (persona) {
@@ -49,6 +54,18 @@ export default function PersonaEditor() {
       prev.includes(tool) ? prev.filter((t) => t !== tool) : [...prev, tool]
     );
   };
+
+  const updatePluginTool = useMutation({
+    mutationFn: async ({ pluginId, toolName, disabled }: { pluginId: string; toolName: string; disabled: boolean }) => {
+      const plugin = (pluginsData?.plugins ?? []).find((item) => item.id === pluginId);
+      if (!plugin || !id) throw new Error("Plugin or persona unavailable");
+      const blacklist = plugin.policy.tools[toolName]?.persona_blacklist ?? [];
+      const tools = { ...plugin.policy.tools, [toolName]: { persona_blacklist: disabled ? [...new Set([...blacklist, id])] : blacklist.filter((persona) => persona !== id) } };
+      return api.updatePluginPolicy(pluginId, { enabled: plugin.policy.enabled, config: plugin.policy.config, tools });
+    },
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["plugins"] }); },
+    onError: (err: Error) => toast.add("error", err.message),
+  });
 
   const handleAddSkill = () => {
     const trimmed = skillInput.trim();
@@ -73,12 +90,7 @@ export default function PersonaEditor() {
   const saveMut = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error("Missing persona id");
-      return api.updatePersona(id, {
-        system_prompt: systemPrompt,
-        tools_allowlist_json: selectedTools,
-        skills_allowlist_json: skills,
-        json_ext: persona?.json_ext || {},
-      });
+      return api.updatePersona(id, { system_prompt: systemPrompt, tools_allowlist_json: selectedTools, skills_allowlist_json: skills, json_ext: persona?.json_ext || {} });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["persona", id] });
@@ -86,19 +98,12 @@ export default function PersonaEditor() {
       toast.add("success", "Persona saved");
       navigate("/persona");
     },
-    onError: (err: Error) => {
-      toast.add("error", err.message);
-    },
+    onError: (err: Error) => toast.add("error", err.message),
   });
 
-
   const pageRef = usePageEnter<HTMLDivElement>();
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 size={24} className="animate-spin text-muted-fg" />
-      </div>
-    );
+  if (isLoading || pluginsLoading) {
+    return <div className="animate-fade-in space-y-5 py-12"><div className="h-9 w-44 bg-muted animate-pulse" /><div className="h-52 bg-muted animate-pulse" /><div className="h-28 bg-muted animate-pulse" /></div>;
   }
 
   if (error || !persona) {
@@ -150,39 +155,19 @@ export default function PersonaEditor() {
         </Card>
       </div>
 
-      {/* Tools */}
       <Card className="space-y-4">
-        <div>
-          <h2 className="t-headline !text-lg">Tools</h2>
-          <p className="t-label text-muted-fg mt-1">
-            {selectedTools.length} selected
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div><h2 className="t-headline !text-lg">Tools</h2><p className="t-label text-muted-fg mt-1">{selectedTools.length + pluginEntries.filter((tool) => !tool.disabledForPersona).length} enabled</p></div>
+          <Button variant="secondary" size="sm" onClick={() => setToolsOpen(true)}><Pencil size={14} /> Edit tools</Button>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-          {(tools || []).map((tool) => (
-            <label
-              key={tool.name}
-              className={cn(
-                "flex items-center gap-2.5 px-4 py-3 border cursor-pointer transition-colors select-none",
-                selectedTools.includes(tool.name)
-                  ? "border-fg/30 bg-fg/[0.03]"
-                  : "border-border hover:bg-muted/50"
-              )}
-            >
-              <input
-                type="checkbox"
-                checked={selectedTools.includes(tool.name)}
-                onChange={() => toggleTool(tool.name)}
-                className="w-4 h-4 border-border accent-fg"
-              />
-              <div>
-                <span className="t-mono !text-xs">{tool.name}</span>
-                <p className="text-[11px] text-muted-fg mt-0.5 leading-tight">{tool.label}</p>
-              </div>
-            </label>
-          ))}
-        </div>
+        <div className="flex flex-wrap gap-2">{[...selectedTools, ...pluginEntries.filter((tool) => !tool.disabledForPersona).map((tool) => tool.name)].slice(0, 6).map((name) => <span key={name} className="t-mono max-w-40 truncate border border-border px-2 py-1 text-xs">{name}</span>)}{selectedTools.length + pluginEntries.length > 6 && <span className="t-label px-2 py-1 text-muted-fg">…</span>}</div>
       </Card>
+      <Modal open={toolsOpen} onClose={() => setToolsOpen(false)} title="Edit tools" size="lg">
+        <div className="max-h-[65vh] overflow-y-auto space-y-6 pr-1">
+          <section><p className="t-label text-muted-fg mb-3">Built-in tools</p><div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{toolCatalog.map((tool) => <button type="button" key={tool.name} onClick={() => toggleTool(tool.name)} className={cn("text-left border px-4 py-3 transition-colors", selectedTools.includes(tool.name) ? "bg-fg text-bg border-fg" : "border-border hover:bg-muted") }><span className="t-mono text-xs">{tool.name}</span><span className="block text-xs opacity-70 mt-1">{tool.label}</span></button>)}</div></section>
+          <section><p className="t-label text-muted-fg mb-3">Plugin tools</p><div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{pluginEntries.map((tool) => <button type="button" key={`${tool.plugin.id}:${tool.name}`} onClick={() => updatePluginTool.mutate({ pluginId: tool.plugin.id, toolName: tool.name, disabled: !tool.disabledForPersona })} className={cn("text-left border px-4 py-3 transition-colors", !tool.disabledForPersona ? "bg-fg text-bg border-fg" : "border-border hover:bg-muted") }><span className="t-mono text-xs">{tool.name}</span><span className="block text-xs opacity-70 mt-1">{tool.plugin.name}</span></button>)}</div></section>
+        </div>
+      </Modal>
 
       {/* Skills */}
       <Card className="space-y-5">

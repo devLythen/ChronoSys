@@ -55,14 +55,6 @@ impl PlatformAdapter for TelegramAdapter {
         eprintln!("[telegram] connected as @{username} (id: {})", me.id.0);
         let _ = self.bot_username.set(username.to_string());
 
-        // Register bot commands so /new appears in Telegram's command menu.
-        let _ = bot
-            .set_my_commands(vec![
-                BotCommand { command: "new".into(), description: "Start a new conversation session".into() },
-                BotCommand { command: "compact".into(), description: "Compress conversation context".into() },
-            ])
-            .send()
-            .await;
 
         // ── Long-poll with exponential backoff ──────────────────
         // Timeout shorter than typical proxy/NAT idle timeout (~15s) to avoid
@@ -203,16 +195,32 @@ impl PlatformAdapter for TelegramAdapter {
                 }
             }
             _ => Ok(PlatformResult {
-                ok: false,
-                result: None,
-                error: Some(chrono_ipc::ToolError {
-                    code: "unsupported".to_string(),
-                    message: format!("unsupported tool: {tool_name}"),
-                }),
+                ok: false, result: None,
+                error: Some(chrono_ipc::ToolError { code: "unsupported".to_string(), message: format!("unsupported tool: {tool_name}") }),
             }),
         }
     }
+
+    async fn sync_commands(&self, commands: &[Value]) -> AdapterResult<()> {
+        let mut tg_commands: Vec<BotCommand> = vec![
+            BotCommand { command: "new".into(), description: "Start a new conversation session".into() },
+            BotCommand { command: "compact".into(), description: "Compress conversation context".into() },
+        ];
+        for cmd in commands {
+            if let (Some(name), Some(desc)) = (cmd.get("name").and_then(|v| v.as_str()), cmd.get("description").and_then(|v| v.as_str())) {
+                if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    tg_commands.push(BotCommand { command: name.to_string(), description: desc.to_string() });
+                }
+            }
+        }
+        let count = tg_commands.len();
+        eprintln!("[telegram] syncing {count} bot commands",);
+        let _ = self.bot.set_my_commands(tg_commands).send().await;
+        eprintln!("[telegram] synced {count} commands");
+        Ok(())
+    }
 }
+
 
 fn handle_message(
     account_id: &str,

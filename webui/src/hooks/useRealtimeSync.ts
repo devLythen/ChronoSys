@@ -15,6 +15,9 @@ export function RealtimeSync() {
         void queryClient.invalidateQueries({ queryKey: ["sessions"] });
         void queryClient.invalidateQueries({ queryKey: ["session"] });
         break;
+      case "plugin.updated":
+        void queryClient.invalidateQueries({ queryKey: ["plugins"] });
+        break;
       case "audit.append":
         void queryClient.invalidateQueries({ queryKey: ["audit"] });
         break;

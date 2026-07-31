@@ -42,6 +42,8 @@ pub trait PlatformAdapter: Send + Sync {
         tool_name: &str,
         args: &Value,
     ) -> AdapterResult<PlatformResult>;
+    /// Advertise available bot commands to the platform (e.g. Telegram setMyCommands).
+    async fn sync_commands(&self, _commands: &[Value]) -> AdapterResult<()> { Ok(()) }
 }
 
 /// Compute a session key from account, chat, and mode.

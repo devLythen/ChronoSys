@@ -8,38 +8,6 @@ export type PendingCall = {
   reject: (e: Error) => void;
 };
 
-/** Known platform tools that agent-host can register. */
-const KNOWN_TOOLS = ["message_send"] as const;
-export type KnownToolName = (typeof KNOWN_TOOLS)[number];
-
-/**
- * Build the tool list for a bot profile.
- * - empty allowlist → all known tools
- * - non-empty allowlist → only those tools that exist in the registry
- */
-export function createToolsForAllowlist(
-  allowlist: string[],
-  sessionKey: string,
-  pendingCalls: Map<string, PendingCall>,
-  signal?: AbortSignal,
-): AgentTool[] {
-  const names =
-    allowlist.length === 0
-      ? [...KNOWN_TOOLS]
-      : allowlist.filter((n): n is KnownToolName =>
-          (KNOWN_TOOLS as readonly string[]).includes(n),
-        );
-
-  const tools: AgentTool[] = [];
-  for (const name of names) {
-    switch (name) {
-      case "message_send":
-        tools.push(createMessageSendTool(sessionKey, pendingCalls, signal));
-        break;
-    }
-  }
-  return tools;
-}
 
 /**
  * Preferred outbound path: send or forward text to a chosen chat.
