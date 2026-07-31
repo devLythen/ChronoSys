@@ -65,8 +65,6 @@
 - [x] `message_send` + `message_reply` with optional `chat_id`
 - [x] `policy_json.max_context_messages` hard refuse (compaction later)
 - [x] Bot profile hot-read from config DB each turn
-- [ ] media download to sandbox workspace *(deferred)*
-- [ ] `sandbox.exec` / `sandbox.read` / `sandbox.write` *(deferred)*
 
 **Exit:** bot answers in DM; token via account secret_ref; model via config DB.
 
@@ -102,6 +100,7 @@
 - [ ] Gateway-managed Docker runtime (create, exec, timeout, cleanup)
 - [ ] `sandbox.exec`, `sandbox.browser`, `sandbox.read`, `sandbox.write`
 - [ ] Plugin context: `ctx.sandbox.*` facade for sandbox access
+- [ ] Chat ↔ sandbox file bridge: receive media/message from Telegram, upload generated files back
 ### M5 — Multi-platform & hardening (week 9–12)
 
 - [ ] compaction + memory scopes

@@ -220,6 +220,8 @@ agent-host  <--tool.response--
 | `sandbox.browser` | Headless Chromium with playwright; screenshot, DOM query, page navigation |
 | `sandbox.read` | Read a file from the session workspace mount |
 | `sandbox.write` | Write content to a file in the session workspace mount |
+| `sandbox.pull` | Download a chat attachment (photo, document, video) into the sandbox workspace |
+| `sandbox.push` | Upload a file from the sandbox workspace to the chat |
 
 ### 13.3 Lifecycle
 
