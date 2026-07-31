@@ -121,7 +121,7 @@ Platforms (platform_accounts)
 
 ## 5. REST 契约
 
-Base：`/api/v1`。loopback 无需 token；非 loopback 需 `Authorization: Bearer $CHRONO_AUTH_TOKEN`。
+Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Authorization: Bearer $CHRONO_AUTH_TOKEN`。浏览器 WebSocket 无法设置该 header，因此 `/api/v1/ws` 使用 URL 编码的 `access_token` query 参数；WebUI 从 Settings 中保存的 token 自动附带它。
 
 ### 路由
 

@@ -5,8 +5,9 @@ import {
   LayoutDashboard, Globe, Sliders, Server, User,
   Puzzle, Plug, Wrench, MessageSquare, ScrollText, Cog,
 } from "lucide-react";
-import gsap from "gsap";
+import { loadGsap } from "../lib/motion";
 import { cn } from "../lib/utils";
+import { RealtimeSync } from "../hooks/useRealtimeSync";
 
 interface NavItem {
   to?: string;
@@ -67,22 +68,30 @@ function SidebarSection({
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return;
+    let disposed = false;
+    let revert: (() => void) | undefined;
 
-    const mm = gsap.matchMedia();
-    const targetHeight = content.scrollHeight;
-
-    mm.add("(prefers-reduced-motion: no-preference)", () => {
-      if (expanded) {
-        gsap.fromTo(content, { height: 0, opacity: 0 }, { height: targetHeight, opacity: 1, duration: 0.2, ease: "power2.out", clearProps: "height" });
-      } else {
-        gsap.fromTo(content, { height: targetHeight, opacity: 1 }, { height: 0, opacity: 0, duration: 0.15, ease: "power2.in" });
-      }
+    void loadGsap().then((gsap) => {
+      if (disposed) return;
+      const mm = gsap.matchMedia();
+      const targetHeight = content.scrollHeight;
+      mm.add("(prefers-reduced-motion: no-preference)", () => {
+        if (expanded) {
+          gsap.fromTo(content, { height: 0, opacity: 0 }, { height: targetHeight, opacity: 1, duration: 0.2, ease: "power2.out", clearProps: "height" });
+        } else {
+          gsap.fromTo(content, { height: targetHeight, opacity: 1 }, { height: 0, opacity: 0, duration: 0.15, ease: "power2.in" });
+        }
+      });
+      mm.add("(prefers-reduced-motion: reduce)", () => {
+        gsap.set(content, { height: expanded ? "auto" : 0, opacity: expanded ? 1 : 0, clearProps: expanded ? "height" : undefined as unknown as string });
+      });
+      revert = () => mm.revert();
     });
-    mm.add("(prefers-reduced-motion: reduce)", () => {
-      gsap.set(content, { height: expanded ? "auto" : 0, opacity: expanded ? 1 : 0, clearProps: expanded ? "height" : undefined as unknown as string });
-    });
 
-    return () => mm.revert();
+    return () => {
+      disposed = true;
+      revert?.();
+    };
   }, [expanded]);
 
   const labelEl = collapsed ? (
@@ -209,6 +218,7 @@ export default function Shell() {
       {/* Main */}
       <div className="flex-1 min-w-0">
         <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8">
+          <RealtimeSync />
           <Outlet />
         </main>
       </div>

@@ -250,6 +250,7 @@ pub async fn run_gateway(
         mut agent_ctrl_rx,
         agent_alive,
         adapter_count,
+        ws_events,
     } = http::start_http_server(&chrono_home, config_store, child.clone(), pending_queries.clone())
         .await
         .context("start control plane")?;
@@ -267,6 +268,7 @@ pub async fn run_gateway(
     let stdout_state = state.clone();
     let stdout_pending = pending_queries.clone();
     let stdout_alive = agent_alive.clone();
+    let stdout_ws_events = ws_events.clone();
     tokio::task::spawn_blocking(move || loop {
         let payload = match stdout_child.read_frame() {
             Ok(p) => p,
@@ -279,7 +281,9 @@ pub async fn run_gateway(
 
         if let Ok(tool_msg) = serde_json::from_slice::<ToolIpcMessage>(&payload) {
             if let ToolIpcMessage::Request {
-                ref session_id, ..
+                ref session_id,
+                ref name,
+                ..
             } = &tool_msg
             {
                 let parts: Vec<&str> = session_id.splitn(3, ':').collect();
@@ -300,6 +304,20 @@ pub async fn run_gateway(
                             &mut state.audit,
                         ) {
                             Ok(response) => {
+                                let platform = adapter.id();
+                                let topics = vec![
+                                    format!("sessions:{session_id}"),
+                                    format!("platform:{platform}"),
+                                ];
+                                let payload = json!({
+                                    "type": "platform.outbound",
+                                    "platform": platform,
+                                    "account_id": account_id,
+                                    "session_key": session_id,
+                                    "tool": name,
+                                    "response": response,
+                                });
+                                let _ = stdout_ws_events.send(chrono_api::WsEvent { topics, payload });
                                 let body = serde_json::to_vec(&response).unwrap_or_default();
                                 let _ = stdout_child.write_frame(&body);
                             }
@@ -385,7 +403,7 @@ pub async fn run_gateway(
             routed = event_rx.recv() => {
                 match routed {
                     Some(routed) => {
-                        if let Err(e) = handle_inbound_event(&state, routed) {
+                        if let Err(e) = handle_inbound_event(&state, routed, &ws_events) {
                             eprintln!("[gateway] inbound handler error: {e:#}");
                         }
                     }
@@ -561,7 +579,11 @@ fn sync_from_config(
     Ok(())
 }
 
-fn handle_inbound_event(state: &Arc<Mutex<GatewayState>>, routed: RoutedEvent) -> Result<()> {
+fn handle_inbound_event(
+    state: &Arc<Mutex<GatewayState>>,
+    routed: RoutedEvent,
+    ws_events: &tokio::sync::broadcast::Sender<chrono_api::WsEvent>,
+) -> Result<()> {
     let mut state = state.lock().unwrap();
 
     let resolved = match state.resolve_binding(&routed.account_id, &routed.event) {
@@ -649,6 +671,24 @@ fn handle_inbound_event(state: &Arc<Mutex<GatewayState>>, routed: RoutedEvent) -
             },
         }));
     }
+
+    let platform = match &event {
+        ChronoEvent::InboundMessage { platform, .. } => platform.clone(),
+    };
+    let session_key = match &event {
+        ChronoEvent::InboundMessage { session_key, .. } => session_key.clone(),
+    };
+    let payload = json!({
+        "type": "platform.inbound",
+        "platform": platform.clone(),
+        "account_id": routed.account_id,
+        "session_key": session_key.clone(),
+        "event": event.clone(),
+    });
+    let _ = ws_events.send(chrono_api::WsEvent {
+        topics: vec![format!("sessions:{session_key}"), format!("platform:{platform}")],
+        payload,
+    });
 
     let payload = serde_json::to_vec(&event).unwrap_or_default();
     if let Err(e) = state.child.write_frame(&payload) {

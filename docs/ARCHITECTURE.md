@@ -155,7 +155,7 @@ Agent-host → gateway:
 - `tool.request` — tool invocation to dispatch via adapter
 - `host_error` / `host_info` / `host_warn` — operational messages
 
-Gateway ↔ WebUI: WebSocket at `/api/v1/ws` for streaming session events and audit log.
+Gateway ↔ WebUI: WebSocket at `/api/v1/ws`. Clients subscribe to exact topics or prefix wildcards (for example, `platform:telegram` and `sessions:*`). Telegram inbound and tool-driven outbound messages publish `platform.inbound` / `platform.outbound` events to both their platform and session topics. A lagging client receives `resync` and must refresh via REST.
 
 ## 10. Configuration Store
 

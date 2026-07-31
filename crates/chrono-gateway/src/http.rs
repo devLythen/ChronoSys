@@ -11,6 +11,7 @@ use chrono_config::ConfigStore;
 use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::GatewayChild;
@@ -47,6 +48,7 @@ pub struct HttpServer {
     pub agent_ctrl_rx: tokio_mpsc::UnboundedReceiver<AgentControl>,
     pub agent_alive: Arc<AtomicBool>,
     pub adapter_count: Arc<AtomicUsize>,
+    pub ws_events: broadcast::Sender<chrono_api::WsEvent>,
 }
 
 /// Spawn the axum control-plane server. Returns the agent control receiver
@@ -61,6 +63,7 @@ pub async fn start_http_server(
     let (agent_tx, agent_ctrl_rx) = tokio_mpsc::unbounded_channel::<AgentControl>();
     let agent_alive = Arc::new(AtomicBool::new(true));
     let adapter_count = Arc::new(AtomicUsize::new(0));
+    let (ws_events, _) = broadcast::channel(256);
 
     let webui_dist = std::env::var("CHRONO_WEBUI_DIST")
         .map(PathBuf::from)
@@ -85,6 +88,7 @@ pub async fn start_http_server(
         agent_alive: agent_alive.clone(),
         child,
         pending_queries,
+        ws_events: ws_events.clone(),
     });
 
     let app = build_router(state);
@@ -103,5 +107,6 @@ pub async fn start_http_server(
         agent_ctrl_rx,
         agent_alive,
         adapter_count,
+        ws_events,
     })
 }

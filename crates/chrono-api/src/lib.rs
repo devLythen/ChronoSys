@@ -5,7 +5,7 @@ pub mod auth;
 pub mod error;
 pub mod state;
 
-pub use state::{AgentControl, AgentQuery, AppState};
+pub use state::{AgentControl, AgentQuery, AppState, WsEvent};
 
 use std::sync::Arc;
 

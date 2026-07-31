@@ -17,4 +17,5 @@ rusqlite = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
 uuid = { workspace = true }
+url = { workspace = true }
 

@@ -83,7 +83,7 @@
 - [x] Persona editor: tools allowlist checkbox grid, skills tag editor
 - [x] Config hot-reload notification to agent-host
 - [x] bearer token auth (loopback bypass)
-- [ ] WebSocket real-time push *(reserved — enables stable long-lived connections for external platforms)*
+- [x] WebSocket real-time push — Telegram inbound/outbound topics, subscriptions, reconnect/resync *(enables stable long-lived connections for external platforms)*
 **Exit:** operators configure everything via WebUI; no log diving for normal ops.
 
 ### M4 — Plugin system (week 7–9)

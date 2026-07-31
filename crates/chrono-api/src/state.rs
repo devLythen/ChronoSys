@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use chrono_config::ConfigStore;
 use serde_json::Value;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::oneshot;
 
@@ -19,6 +20,13 @@ pub enum AgentControl {
 /// Abstraction over IPC to the agent-host process for synchronous queries.
 pub trait AgentQuery: Send + Sync {
     fn write_frame(&self, payload: &[u8]) -> anyhow::Result<()>;
+}
+
+/// A control-plane event delivered to WebSocket subscribers.
+#[derive(Debug, Clone)]
+pub struct WsEvent {
+    pub topics: Vec<String>,
+    pub payload: Value,
 }
 
 pub struct AppState {
@@ -35,11 +43,18 @@ pub struct AppState {
     pub agent_alive: Arc<AtomicBool>,
     pub child: Arc<dyn AgentQuery>,
     pub pending_queries: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
+    pub ws_events: broadcast::Sender<WsEvent>,
 }
 
 impl AppState {
     pub fn notify_reload(&self) {
         let _ = self.agent_tx.send(AgentControl::ReloadConfig);
+    }
+
+    /// Publish a best-effort real-time event. Slow or disconnected clients do
+    /// not block the gateway event path.
+    pub fn publish_ws(&self, topics: Vec<String>, payload: Value) {
+        let _ = self.ws_events.send(WsEvent { topics, payload });
     }
 
     /// Send a query to agent-host via IPC and wait for the response.

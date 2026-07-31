@@ -2,7 +2,7 @@ import { cn } from "../../lib/utils";
 import { type ReactNode, useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import gsap from "gsap";
+import { loadGsap } from "../../lib/motion";
 
 interface ModalProps {
   open: boolean;
@@ -23,36 +23,56 @@ export default function Modal({ open, onClose, title, children, className, size 
   useEffect(() => {
     if (open) {
       setVisible(true);
-    } else if (panelRef.current && overlayRef.current) {
+      return;
+    }
+    if (!panelRef.current || !overlayRef.current) return;
+    let disposed = false;
+    let revert: (() => void) | undefined;
+    const panel = panelRef.current;
+    const overlay = overlayRef.current;
+
+    void loadGsap().then((gsap) => {
+      if (disposed) return;
       const mm = gsap.matchMedia();
       mm.add("(prefers-reduced-motion: no-preference)", () => {
-        gsap.to(panelRef.current, { opacity: 0, scale: 0.97, duration: 0.15, ease: "power2.in" });
-        gsap.to(overlayRef.current, { backgroundColor: "rgba(0,0,0,0)", duration: 0.15, ease: "power2.in", onComplete: () => setVisible(false) });
+        gsap.to(panel, { opacity: 0, scale: 0.97, duration: 0.15, ease: "power2.in" });
+        gsap.to(overlay, { backgroundColor: "rgba(0,0,0,0)", duration: 0.15, ease: "power2.in", onComplete: () => setVisible(false) });
       });
-      mm.add("(prefers-reduced-motion: reduce)", () => {
-        setVisible(false);
-      });
-      return () => mm.revert();
-    }
+      mm.add("(prefers-reduced-motion: reduce)", () => setVisible(false));
+      revert = () => mm.revert();
+    });
+
+    return () => {
+      disposed = true;
+      revert?.();
+    };
   }, [open]);
 
   useEffect(() => {
     if (!visible || !panelRef.current || !overlayRef.current) return;
-
     const panel = panelRef.current;
     const overlay = overlayRef.current;
+    let disposed = false;
+    let revert: (() => void) | undefined;
 
-    const mm = gsap.matchMedia();
-    mm.add("(prefers-reduced-motion: no-preference)", () => {
-      gsap.fromTo(panel, { opacity: 0, scale: 0.97 }, { opacity: 1, scale: 1, duration: 0.2, ease: "power2.out" });
-      gsap.fromTo(overlay, { backgroundColor: "rgba(0,0,0,0)" }, { backgroundColor: "rgba(0,0,0,0.4)", duration: 0.2, ease: "power2.out" });
-    });
-    mm.add("(prefers-reduced-motion: reduce)", () => {
-      gsap.set(panel, { opacity: 1, scale: 1 });
-      gsap.set(overlay, { backgroundColor: "rgba(0,0,0,0.4)" });
+    void loadGsap().then((gsap) => {
+      if (disposed) return;
+      const mm = gsap.matchMedia();
+      mm.add("(prefers-reduced-motion: no-preference)", () => {
+        gsap.fromTo(panel, { opacity: 0, scale: 0.97 }, { opacity: 1, scale: 1, duration: 0.2, ease: "power2.out" });
+        gsap.fromTo(overlay, { backgroundColor: "rgba(0,0,0,0)" }, { backgroundColor: "rgba(0,0,0,0.4)", duration: 0.2, ease: "power2.out" });
+      });
+      mm.add("(prefers-reduced-motion: reduce)", () => {
+        gsap.set(panel, { opacity: 1, scale: 1 });
+        gsap.set(overlay, { backgroundColor: "rgba(0,0,0,0.4)" });
+      });
+      revert = () => mm.revert();
     });
 
-    return () => mm.revert();
+    return () => {
+      disposed = true;
+      revert?.();
+    };
   }, [visible]);
 
   const handleKeyDown = useCallback(

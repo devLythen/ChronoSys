@@ -6,6 +6,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
+use url::form_urlencoded;
 
 use crate::state::AppState;
 
@@ -30,12 +31,23 @@ pub async fn auth_middleware(
         return next.run(request).await;
     }
 
-    let authorized = request
+    let header_authorized = request
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .is_some_and(|token| token == expected);
+    let websocket_authorized = path == "/api/v1/ws"
+        && request
+            .uri()
+            .query()
+            .and_then(|query| {
+                form_urlencoded::parse(query.as_bytes())
+                    .find(|(key, _)| key == "access_token")
+                    .map(|(_, value)| value)
+            })
+            .is_some_and(|token| token == expected);
+    let authorized = header_authorized || websocket_authorized;
 
     if !authorized {
         return (
