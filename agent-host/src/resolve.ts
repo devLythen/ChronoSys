@@ -126,14 +126,21 @@ function buildCustomProvider(
     );
     return null;
   }
+  // Protocol from the provider kind: openai-responses uses the Responses
+  // API; every other OpenAI-compatible kind (openai-completions, deepseek,
+  // legacy "openai") uses Chat Completions.
+  const api: Api = prov.kind === "openai-responses" ? "openai-responses" : "openai-completions";
+  const streams = api === "openai-responses" ? openAIResponsesApi() : openAICompletionsApi();
+
   const dbModels = config.listModels(prov.id);
   const inherited: Model<Api>[] = [];
   for (const db of dbModels) {
     const found = findBuiltinModelByName(db.model_id);
     if (!found) continue;
-    // Strip connection fields from the clone: only capabilities are shared.
-    const { baseUrl: _baseUrl, ...capabilityProfile } = found;
-    inherited.push({ ...capabilityProfile, provider: prov.id, baseUrl });
+    // Strip connection + protocol fields from the clone: capabilities are
+    // shared by name, but baseUrl and api belong to this provider's config.
+    const { baseUrl: _baseUrl, api: _api, ...capabilityProfile } = found;
+    inherited.push({ ...capabilityProfile, provider: prov.id, baseUrl, api });
   }
   if (inherited.length === 0) return null;
 
@@ -154,11 +161,7 @@ function buildCustomProvider(
       },
     },
     models: inherited,
-    // OpenAI-compatible proxies may serve models of either protocol.
-    api: {
-      "openai-completions": openAICompletionsApi(),
-      "openai-responses": openAIResponsesApi(),
-    },
+    api: streams,
   });
 }
 

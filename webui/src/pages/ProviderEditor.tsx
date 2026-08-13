@@ -23,13 +23,15 @@ import { ArrowLeft, Save, Loader2 } from "lucide-react";
 // ── Constants ──────────────────────────────────────────────────
 
 const PROVIDER_KINDS = [
-  { value: "openai", label: "OpenAI / OpenAI-Compatible" },
+  { value: "openai-completions", label: "OpenAI · Chat Completions" },
+  { value: "openai-responses", label: "OpenAI · Responses" },
   { value: "deepseek", label: "DeepSeek" },
   { value: "anthropic", label: "Anthropic" },
 ];
 
 const DEFAULT_BASE_URLS: Record<string, string> = {
-  openai: "https://api.openai.com/v1",
+  "openai-completions": "https://api.openai.com/v1",
+  "openai-responses": "https://api.openai.com/v1",
   deepseek: "https://api.deepseek.com/v1",
   anthropic: "https://api.anthropic.com/v1",
 };
