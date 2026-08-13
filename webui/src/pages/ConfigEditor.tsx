@@ -20,6 +20,10 @@ const KNOWN_COMMANDS = [
   { name: "compact", desc: "Compress conversation context" },
 ];
 
+const DEFAULT_COMPACT_PROMPT =
+  "Preserve the assistant's persona, tone, and behavioral guidelines. " +
+  "Keep every user constraint, decision, and unresolved task accurate.";
+
 export default function ConfigEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -70,7 +74,7 @@ export default function ConfigEditor() {
       setDropTurns(typeof p.drop_turns === "number" && p.drop_turns > 0 ? p.drop_turns : 1);
       setCompactStrategy(p.compact_strategy === "compact" ? "compact" : "drop");
       setCompactModelRef(typeof p.compact_model_ref === "string" ? p.compact_model_ref : "");
-      setCompactPrompt(typeof p.compact_prompt === "string" ? p.compact_prompt : "");
+      setCompactPrompt(typeof p.compact_prompt === "string" && p.compact_prompt ? p.compact_prompt : DEFAULT_COMPACT_PROMPT);
       setContextWindowFallback(typeof p.context_window_fallback === "number" && p.context_window_fallback > 0 ? p.context_window_fallback : 128000);
       const cmds: unknown = p.disabled_commands;
       setDisabledCommands(Array.isArray(cmds) ? cmds as string[] : []);
@@ -112,6 +116,7 @@ export default function ConfigEditor() {
       policy.drop_turns = dropTurns;
       policy.compact_strategy = compactStrategy;
       if (compactModelRef) policy.compact_model_ref = compactModelRef;
+      policy.compact_prompt = compactPrompt;
       policy.context_window_fallback = contextWindowFallback;
       if (disabledCommands.length > 0) policy.disabled_commands = disabledCommands;
       if (mentionRequired) policy.mention_required = true;
@@ -309,10 +314,10 @@ export default function ConfigEditor() {
                     value={compactPrompt}
                     onChange={(e) => setCompactPrompt(e.target.value)}
                     rows={3}
-                    placeholder="Custom system instructions for the compaction LLM call (optional)"
+                    placeholder={DEFAULT_COMPACT_PROMPT}
                     className="px-3 py-1.5 text-sm border rounded-sm bg-card text-fg placeholder:text-muted-fg/60 focus:outline-none focus:ring-1 focus:ring-fg transition-colors duration-150 border-border resize-y font-mono"
                   />
-                  <span className="text-[11px] text-muted-fg/70">Optional. Passed as customInstructions to pi generateSummary.</span>
+                  <span className="text-[11px] text-muted-fg/70">Custom instructions for the compaction LLM call. The bot's system prompt is always appended so the summary retains its persona.</span>
                 </div>
               </>
             )}

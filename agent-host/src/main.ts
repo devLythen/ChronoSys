@@ -379,12 +379,32 @@ function isCompactCommand(text: string): boolean {
   return normalizeCommand(text).toLowerCase() === "/compact";
 }
 
+/** Default compaction instructions used when the bot policy leaves
+ *  compact_prompt empty. */
+const DEFAULT_COMPACT_PROMPT =
+  "Preserve the assistant's persona, tone, and behavioral guidelines. " +
+  "Keep every user constraint, decision, and unresolved task accurate.";
+
+/** Compose compaction instructions: the configured compact prompt (or the
+ *  default) plus the bot's system prompt so the summary retains its persona.
+ *  The system prompt guides the summary — it is not part of the summarized
+ *  conversation content. */
+function buildCompactionInstructions(custom: string | undefined, systemPrompt: string | undefined): string | undefined {
+  const parts: string[] = [];
+  parts.push(custom && custom.trim() ? custom.trim() : DEFAULT_COMPACT_PROMPT);
+  if (systemPrompt && systemPrompt.trim()) {
+    parts.push(`The assistant's system prompt (preserve its persona and constraints):\n${systemPrompt.trim()}`);
+  }
+  return parts.join("\n\n");
+}
+
 async function compactSessionMessages(
   messages: AgentMessage[],
   models: MutableModels,
   model: Model<Api>,
   signal?: AbortSignal,
   customInstructions?: string,
+  systemPrompt?: string,
 ): Promise<AgentMessage[]> {
   const countCut = Math.max(1, Math.floor(messages.length * 0.4));
   const keepTokens = Math.floor(model.contextWindow * 0.5);
@@ -403,13 +423,14 @@ async function compactSessionMessages(
   const oldMessages = messages.slice(0, cutIndex);
   const recentMessages = messages.slice(cutIndex);
 
+  const instructions = buildCompactionInstructions(customInstructions, systemPrompt);
   const result = await generateSummary(
     oldMessages,
     models,
     model,
     keepTokens,
     signal,
-    customInstructions || undefined,
+    instructions,
   );
   if (!result.ok) {
     logEvent({ type: "host_warn", message: `compaction failed: ${result.error.message}` });
@@ -941,12 +962,7 @@ async function main() {
       }
       const bucket = getOrCreateBucket(route, event.session_key, bot.id);
       if (bucket.messages.length < 2) {
-        await sendBodyTextToCurrentChat(
-          event.session_key,
-          "对话太短，无需压缩。",
-          pendingCalls,
-          agent.signal,
-        );
+        await sendBodyTextToCurrentChat(event.session_key, "对话太短，无需压缩。", pendingCalls, agent.signal);
         writeControl({ type: "done" });
         continue;
       }
@@ -961,8 +977,8 @@ async function main() {
         cm,
         agent.signal,
         ccp.compactPrompt || undefined,
+        bot.systemPrompt,
       );
-      const origCount = bucket.messages.length;
       const origEst = estimateContextTokens(bucket.messages);
       const origPct = Math.round((origEst.tokens / bot.resolvedModel.model.contextWindow) * 100);
       bucket.messages = compacted;
@@ -970,13 +986,8 @@ async function main() {
       persistBucket(bucket);
       const newEst = estimateContextTokens(compacted);
       const newPct = Math.round((newEst.tokens / bot.resolvedModel.model.contextWindow) * 100);
-      const summary = `上下文已压缩：${origCount} → ${compacted.length} 条消息，占用 ${newPct}%（压缩前 ${origPct}%）。`;
-      await sendBodyTextToCurrentChat(
-        event.session_key,
-        summary,
-        pendingCalls,
-        agent.signal,
-      );
+      const summary = `上下文已压缩：占用 ${newPct}%（压缩前 ${origPct}%）。`;
+      await sendBodyTextToCurrentChat(event.session_key, summary, pendingCalls, agent.signal);
       writeControl({ type: "done" });
       continue;
     }
@@ -1007,6 +1018,7 @@ async function main() {
           compactModel,
           agent.signal,
           ctxPolicy.compactPrompt || undefined,
+          bot.systemPrompt,
         );
         if (compacted !== bucket.messages) {
           bucket.messages = compacted;
@@ -1071,6 +1083,7 @@ async function main() {
         const compacted = await compactSessionMessages(
           bucket.messages, models, compactModel, agent.signal,
           ctxPolicy.compactPrompt || undefined,
+          bot.systemPrompt,
         );
         if (compacted !== bucket.messages) {
           bucket.messages = compacted;
@@ -1110,6 +1123,7 @@ async function main() {
         const compacted = await compactSessionMessages(
           bucket.messages, models, compactModel, agent.signal,
           ctxPolicy.compactPrompt || undefined,
+          bot.systemPrompt,
         );
         if (compacted !== bucket.messages) {
           bucket.messages = compacted;
