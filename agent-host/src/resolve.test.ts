@@ -92,14 +92,18 @@ test("custom provider is registered with capabilities inherited by name", () => 
   }
 });
 
-test("custom provider with no known model names is not registered", () => {
+test("unknown model names still register with fallback capabilities", () => {
   const { config, cleanup } = makeConfig();
   try {
-    configDbInsert(config, "mystery", null, "sk-test", ["no-such-model-xyz"]);
+    configDbInsert(config, "mystery", "https://proxy.example/v1", "sk-test", ["no-such-model-xyz"]);
     const models = buildModels(config);
     expect(models).not.toBeNull();
-    expect(models!.getProvider("mystery")).toBeUndefined();
-    expect(models!.getModel("mystery", "no-such-model-xyz")).toBeUndefined();
+    const m = models!.getModel("mystery", "no-such-model-xyz");
+    expect(m).toBeDefined();
+    expect(m!.provider).toBe("mystery");
+    expect(m!.reasoning).toBe(false);
+    expect(m!.contextWindow).toBe(128000);
+    expect(m!.baseUrl).toBe("https://proxy.example/v1");
   } finally {
     cleanup();
   }

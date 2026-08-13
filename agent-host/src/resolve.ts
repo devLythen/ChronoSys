@@ -102,18 +102,20 @@ function findBuiltinModelByName(modelId: string): Model<Api> | undefined {
 
 /**
  * Register an OpenAI-compatible custom provider: DB connection params
- * (base URL, api-key auth through the shared credential store) plus the
- * capability profile of each allowlisted model, inherited by model name
- * from the builtin catalog.
+ * (base URL, api-key auth through the shared credential store) plus one
+ * runtime model per allowlisted DB row.
  *
- * Only capability data is inherited — connection settings (baseUrl, key,
- * headers) always come from this provider's own DB rows. The builtin
- * model's baseUrl is stripped from the clone and re-supplied as auth
- * baseUrl, which pi applies over the model at request time.
+ * A model whose name matches a builtin catalog entry inherits that entry's
+ * capabilities (context window, reasoning, cost, thinking levels). An
+ * unknown name still registers with conservative defaults so the operator
+ * can use it by configuring parameters manually (temperature, max_tokens,
+ * etc.) — "not in the catalog" does not mean unusable.
  *
- * Returns null when no allowlisted model has a known builtin twin — the
- * provider then stays out of the runtime and its models are reported as
- * unrecognized.
+ * Only capability data is inherited; connection settings (baseUrl, key,
+ * headers) always come from this provider's own DB rows.
+ *
+ * Returns null when the provider has no base_url, an unsupported kind, or
+ * no allowlisted models.
  */
 function buildCustomProvider(
   prov: LlmProvider,
@@ -142,16 +144,19 @@ function buildCustomProvider(
   const streams = api === "openai-responses" ? openAIResponsesApi() : openAICompletionsApi();
 
   const dbModels = config.listModels(prov.id);
-  const inherited: Model<Api>[] = [];
+  const runtimeModels: Model<Api>[] = [];
   for (const db of dbModels) {
     const found = findBuiltinModelByName(db.model_id);
-    if (!found) continue;
-    // Strip connection + protocol fields from the clone: capabilities are
-    // shared by name, but baseUrl and api belong to this provider's config.
-    const { baseUrl: _baseUrl, api: _api, ...capabilityProfile } = found;
-    inherited.push({ ...capabilityProfile, provider: prov.id, baseUrl, api });
+    if (found) {
+      // Strip connection + protocol fields from the clone: capabilities are
+      // shared by name, but baseUrl and api belong to this provider's config.
+      const { baseUrl: _baseUrl, api: _api, ...capabilityProfile } = found;
+      runtimeModels.push({ ...capabilityProfile, provider: prov.id, baseUrl, api });
+    } else {
+      runtimeModels.push(buildFallbackModel(db, prov.id, baseUrl, api));
+    }
   }
-  if (inherited.length === 0) return null;
+  if (runtimeModels.length === 0) return null;
 
   return createProvider({
     id: prov.id,
@@ -169,10 +174,38 @@ function buildCustomProvider(
             : undefined,
       },
     },
-    models: inherited,
+    models: runtimeModels,
     api: streams,
   });
 }
+
+/** Conservative defaults for a model absent from the pi catalog. The
+ *  operator can still use it by configuring parameters (max_tokens,
+ *  temperature, …) in the DB; these defaults cover the fields pi needs but
+ *  the DB does not store (context window, cost, reasoning). */
+const UNKNOWN_MODEL_CONTEXT_WINDOW = 128000;
+const UNKNOWN_MODEL_MAX_TOKENS = 8192;
+
+function buildFallbackModel(
+  db: LlmModel,
+  providerId: string,
+  baseUrl: string,
+  api: Api,
+): Model<Api> {
+  return {
+    id: db.model_id,
+    name: db.model_id,
+    api,
+    provider: providerId,
+    baseUrl,
+    reasoning: false,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: UNKNOWN_MODEL_CONTEXT_WINDOW,
+    maxTokens: db.max_tokens ?? UNKNOWN_MODEL_MAX_TOKENS,
+  };
+}
+
 
 /**
  * Resolve a model_ref string ("provider_id/model_id") against the config DB
@@ -205,8 +238,7 @@ export function resolveModelRef(
   const piModel = models.getModel(providerId, modelId);
   if (!piModel) {
     throw new Error(
-      `model "${modelRef}" not found in pi-ai catalog for provider "${providerId}". ` +
-        `Available: ${models.getModels(providerId).map((m) => m.id).join(", ") || "none"}`,
+      `model "${modelRef}" not found in pi-ai catalog for provider "${providerId}".`,
     );
   }
 
