@@ -1,13 +1,13 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentTool, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
-import { createMessageSendTool, type PendingCall } from "../tools.ts";
+import { createMessageSendTool, createTimeTool, type PendingCall } from "../tools.ts";
 import { readPluginPolicy, writePluginPolicy } from "./policy.ts";
 import { loadNativeManifest, pluginInstallRoot, TOOL_RE } from "./manifest.ts";
 import { createPluginApi } from "./sdk.ts";
 import type { ChronoNativeCommandDefinition, ChronoNativeToolDefinition, NativePluginManifest, NativePluginRecord, NativePluginView } from "./types.ts";
 
-const BUILTIN_TOOLS = ["message_send"] as const;
+const BUILTIN_TOOLS = ["message_send", "get_time"] as const;
 
 type Candidate = { root: string; manifest?: NativePluginManifest; error?: string };
 
@@ -59,27 +59,35 @@ export class ToolRegistry {
     return view;
   }
 
-  createToolsForAllowlist(allowlist: string[], sessionKey: string, pendingCalls: Map<string, PendingCall>, signal?: AbortSignal, personaId?: string): AgentTool[] {
-    const eligible = new Map<string, AgentTool>();
-    eligible.set("message_send", createMessageSendTool(sessionKey, pendingCalls, signal));
+  createToolsForAllowlist(allowlist: string[], sessionKey: string, pendingCalls: Map<string, PendingCall>, signal?: AbortSignal, personaId?: string, timezone = "UTC"): AgentTool[] {
+    const result: AgentTool[] = [];
+    // Built-in tools: gated by allowlist
+    if (allowlist.length === 0 || allowlist.includes("message_send")) {
+      result.push(createMessageSendTool(sessionKey, pendingCalls, signal));
+    }
+    if (allowlist.length === 0 || allowlist.includes("get_time")) {
+      result.push(createTimeTool(timezone));
+    }
+    // Plugin tools: controlled by per-tool persona blacklist, not the persona
+    // allowlist (PLUGIN_ARCHITECTURE.md §7).
     for (const record of this.snapshot.values()) {
       for (const def of record.toolDefinitions) {
         const blacklist = record.policy.tools[def.name]?.persona_blacklist ?? [];
         if (record.policy.enabled && !blacklist.includes(personaId ?? "") && record.tools.some((t) => t.name === def.name && t.enabled)) {
-          eligible.set(def.name, this.wrap(def, record, sessionKey, pendingCalls, signal));
+          result.push(this.wrap(def, record, sessionKey, pendingCalls, signal));
         }
       }
     }
-    const names = allowlist.length === 0 ? [...eligible.keys()] : allowlist;
-    const unknown = names.filter((name) => !eligible.has(name));
-    if (unknown.length > 0) this.warn(`unknown tool names: ${unknown.join(", ")}`);
-    return names.flatMap((name) => { const tool = eligible.get(name); return tool ? [tool] : []; });
+    return result;
   }
 
-  async executeCommand(text: string, sessionKey: string, pendingCalls: Map<string, PendingCall>, signal?: AbortSignal): Promise<boolean> {
+  async executeCommand(text: string, sessionKey: string, pendingCalls: Map<string, PendingCall>, signal?: AbortSignal, disabledCommands?: string[]): Promise<boolean> {
     const match = text.trim().match(/^\/([a-z][a-z0-9_.-]{0,63})(?:\s+(.*))?$/i);
     if (!match) return false;
     const name = match[1]!.toLowerCase();
+    // Command blacklist from the bot's policy.disabled_commands:
+    // undefined = all enabled, an array = skip listed commands.
+    if (disabledCommands !== undefined && disabledCommands.includes(name)) return false;
     const cmd = [...this.snapshot.values()]
       .flatMap((r) => r.commandDefinitions.map((d) => ({ record: r, definition: d })))
       .find(({ record, definition }) => definition.name.toLowerCase() === name && record.commands.some((c) => c.name === definition.name && c.enabled));

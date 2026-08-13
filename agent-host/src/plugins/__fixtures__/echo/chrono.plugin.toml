@@ -1,4 +1,4 @@
-id = "example.echo"
+id = "example_echo"
 name = "Example Echo"
 version = "1.0.0"
 chrono_api = "1"
@@ -8,6 +8,6 @@ description = "Deterministic native plugin fixture."
 tools = ["tools/index.ts"]
 
 [[tools]]
-name = "example.echo"
+name = "example_echo"
 label = "Echo"
 description = "Return deterministic fixture text."

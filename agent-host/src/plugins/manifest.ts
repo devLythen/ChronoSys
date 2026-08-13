@@ -4,7 +4,7 @@ import type { NativePluginManifest } from "./types.ts";
 
 const ID_RE = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-const TOOL_RE = /^[a-z][a-z0-9_.-]{0,63}$/;
+const TOOL_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 
 function asString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${field} must be a non-empty string`);

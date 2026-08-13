@@ -10,6 +10,7 @@ import Modal from "../components/ui/Modal";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Select from "../components/ui/Select";
+import Input from "../components/ui/Input";
 import { useToast } from "../components/ui/Toast";
 import { ArrowLeft, Save, Loader2, ExternalLink, Pencil } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -41,6 +42,11 @@ export default function ConfigEditor() {
     queryFn: () => api.listPersonas(),
   });
 
+  const { data: pluginsData } = useQuery({
+    queryKey: ["plugins"],
+    queryFn: () => api.listPlugins(),
+  });
+
   const [modelRef, setModelRef] = useState("");
   const [personaId, setPersonaId] = useState("");
   const [maxTurns, setMaxTurns] = useState<number>(-1);
@@ -49,10 +55,11 @@ export default function ConfigEditor() {
   const [compactModelRef, setCompactModelRef] = useState("");
   const [compactPrompt, setCompactPrompt] = useState("");
   const [contextWindowFallback, setContextWindowFallback] = useState<number>(128000);
-  const [selectedCommands, setSelectedCommands] = useState<string[]>(["new"]);
+  const [disabledCommands, setDisabledCommands] = useState<string[]>([]);
   const [mentionRequired, setMentionRequired] = useState(false);
   const [showTimestamp, setShowTimestamp] = useState(false);
-  const [showUserPrefix, setShowUserPrefix] = useState(false);
+  const [senderIdentity, setSenderIdentity] = useState<"none" | "prefix" | "block">("none");
+  const [timezone, setTimezone] = useState("UTC");
   const [commandModalOpen, setCommandModalOpen] = useState(false);
   useEffect(() => {
     if (bot) {
@@ -65,11 +72,12 @@ export default function ConfigEditor() {
       setCompactModelRef(typeof p.compact_model_ref === "string" ? p.compact_model_ref : "");
       setCompactPrompt(typeof p.compact_prompt === "string" ? p.compact_prompt : "");
       setContextWindowFallback(typeof p.context_window_fallback === "number" && p.context_window_fallback > 0 ? p.context_window_fallback : 128000);
-      const cmds: unknown = p.commands;
-      setSelectedCommands(Array.isArray(cmds) ? cmds as string[] : ["new"]);
+      const cmds: unknown = p.disabled_commands;
+      setDisabledCommands(Array.isArray(cmds) ? cmds as string[] : []);
       setMentionRequired(Boolean(p.mention_required));
       setShowTimestamp(Boolean(p.show_timestamp));
-      setShowUserPrefix(Boolean(p.show_user_prefix));
+      setSenderIdentity(p.sender_identity === "prefix" || p.sender_identity === "block" ? p.sender_identity : "none");
+      setTimezone(typeof p.timezone === "string" && p.timezone ? p.timezone : "UTC");
     }
   }, [bot]);
 
@@ -105,10 +113,11 @@ export default function ConfigEditor() {
       policy.compact_strategy = compactStrategy;
       if (compactModelRef) policy.compact_model_ref = compactModelRef;
       policy.context_window_fallback = contextWindowFallback;
-      if (selectedCommands.length > 0) policy.commands = selectedCommands;
+      if (disabledCommands.length > 0) policy.disabled_commands = disabledCommands;
       if (mentionRequired) policy.mention_required = true;
       if (showTimestamp) policy.show_timestamp = true;
-      if (showUserPrefix) policy.show_user_prefix = true;
+      if (senderIdentity !== "none") policy.sender_identity = senderIdentity;
+      if (timezone && timezone !== "UTC") policy.timezone = timezone;
       return api.updateBot(id, {
         model_ref: modelRef,
         persona_id: personaId || null,
@@ -128,12 +137,24 @@ export default function ConfigEditor() {
   });
 
   const handleSave = () => saveMut.mutate();
-
   const toggleCommand = (cmd: string) => {
-    setSelectedCommands((prev) =>
+    setDisabledCommands((prev) =>
       prev.includes(cmd) ? prev.filter((c) => c !== cmd) : [...prev, cmd]
     );
   };
+
+
+  // Built-in commands + enabled plugin commands, merged for the picker.
+  const pluginCommands = (pluginsData?.plugins ?? []).flatMap((p) =>
+    p.commands
+      .filter((c) => c.enabled)
+      .map((c) => ({ name: c.name, desc: c.description || "Plugin command", plugin: p.name })),
+  );
+  const allCommands = [
+    ...KNOWN_COMMANDS.map((c) => ({ ...c, plugin: undefined as string | undefined })),
+    ...pluginCommands,
+  ];
+
 
 
   const pageRef = usePageEnter<HTMLDivElement>();
@@ -316,7 +337,7 @@ export default function ConfigEditor() {
               </label>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-fg tabular-nums">
-                  {selectedCommands.length} selected
+                  {allCommands.length - disabledCommands.length} enabled
                 </span>
                 <Button variant="secondary" size="sm" onClick={() => setCommandModalOpen(true)}>
                   <Pencil size={12} />
@@ -335,10 +356,24 @@ export default function ConfigEditor() {
               <Toggle checked={showTimestamp} onChange={setShowTimestamp} />
             </label>
 
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-sm text-fg">Show user identity on messages</span>
-              <Toggle checked={showUserPrefix} onChange={setShowUserPrefix} />
-            </label>
+            <Select
+              label="Sender identity"
+              options={[
+                { value: "none", label: "None" },
+                { value: "prefix", label: "Inline prefix [platform name (id)]" },
+                { value: "block", label: "Verified SYSTEM SENDER block" },
+              ]}
+              value={senderIdentity}
+              onChange={(e) => setSenderIdentity(e.target.value as "none" | "prefix" | "block")}
+            />
+
+            <Input
+              label="Timezone (IANA)"
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              placeholder="UTC"
+              hint="e.g. Asia/Shanghai, America/New_York. Used by timestamps and the get_time tool."
+            />
         </Card>
       </div>
 
@@ -360,34 +395,32 @@ export default function ConfigEditor() {
         open={commandModalOpen}
         onClose={() => setCommandModalOpen(false)}
         title="Commands"
-        size="sm"
+        size="lg"
       >
         <div className="space-y-5">
-          <div className="grid grid-cols-1 gap-2 max-h-[280px] overflow-y-auto">
-            {KNOWN_COMMANDS.map((cmd) => (
-              <label
-                key={cmd.name}
-                className={cn(
-                  "flex items-center gap-2.5 px-3 py-2 border cursor-pointer transition-colors select-none",
-                  selectedCommands.includes(cmd.name)
-                    ? "border-fg/30 bg-fg/[0.03]"
-                    : "border-border hover:bg-muted/50"
-                )}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedCommands.includes(cmd.name)}
-                  onChange={() => toggleCommand(cmd.name)}
-                  className="w-4 h-4 border-border accent-fg"
-                />
-                <div>
-                  <span className="t-mono !text-xs">/{cmd.name}</span>
-                  <p className="text-[11px] text-muted-fg mt-0.5 leading-tight">{cmd.desc}</p>
-                </div>
-              </label>
-            ))}
+          <p className="t-body text-muted-fg text-sm">Toggle commands on or off. New commands are enabled by default.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto">
+            {allCommands.map((cmd) => {
+              const enabled = !disabledCommands.includes(cmd.name);
+              return (
+                <button
+                  type="button"
+                  key={cmd.name}
+                  onClick={() => toggleCommand(cmd.name)}
+                  className={cn(
+                    "text-left border px-4 py-3 transition-colors",
+                    enabled ? "bg-fg text-bg border-fg" : "border-border hover:bg-muted"
+                  )}
+                >
+                  <span className="t-mono text-xs">/{cmd.name}</span>
+                  {cmd.plugin && (
+                    <span className={cn("ml-1.5 text-[10px] uppercase tracking-wide border px-1 rounded-sm", enabled ? "border-bg/40" : "text-muted-fg border-border")}>{cmd.plugin}</span>
+                  )}
+                  <span className={cn("block text-xs mt-1", enabled ? "opacity-70" : "opacity-60")}>{cmd.desc}</span>
+                </button>
+              );
+            })}
           </div>
-
         </div>
       </Modal>
     </div>

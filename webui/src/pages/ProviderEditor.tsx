@@ -412,6 +412,12 @@ export default function ProviderEditor() {
           {modelInfoLoading && (
             <p className="t-body text-muted-fg text-sm">Loading capabilities...</p>
           )}
+          {!modelInfoLoading && !modelInfo && (
+            <p className="t-body text-muted-fg text-sm">
+              Model not recognized by Pi — no capability data available. Parameters
+              use the OpenAI standard format; thinking level is not offered.
+            </p>
+          )}
           {!modelInfoLoading && modelInfo && (
             <div className="space-y-2 rounded-sm border border-border p-3">
               <h4 className="t-label">Capabilities</h4>
@@ -421,15 +427,15 @@ export default function ProviderEditor() {
                 <span className="text-muted-fg">Reasoning</span>
                 <span>{modelInfo.reasoning ? "Yes" : "No"}</span>
                 <span className="text-muted-fg">Context Window</span>
-                <span className="t-mono">{modelInfo.contextWindow.toLocaleString()}</span>
+                <span className="t-mono">{modelInfo.contextWindow?.toLocaleString() ?? "—"}</span>
                 <span className="text-muted-fg">Input Types</span>
-                <span className="t-mono">{modelInfo.input.join(", ") || "none"}</span>
+                <span className="t-mono">{(modelInfo.input ?? []).join(", ") || "none"}</span>
               </div>
             </div>
           )}
 
           {/* ── Thinking Level ────────────────────────────────── */}
-          {modelInfo && modelInfo.thinkingLevels.length > 0 && (
+          {modelInfo && (modelInfo.thinkingLevels?.length ?? 0) > 0 && (
             <Select
               label="Thinking Level"
               options={[
@@ -443,60 +449,56 @@ export default function ProviderEditor() {
             />
           )}
 
-          {/* ── Temperature ───────────────────────────────────── */}
-          {modelInfo && (
-            <Input
-              label="Temperature"
-              type="number"
-              min="0"
-              step="0.1"
-              value={settingsForm.temperature != null ? String(settingsForm.temperature) : ""}
-              onChange={(e) =>
-                setSettingsForm({
-                  ...settingsForm,
-                  temperature: e.target.value ? Number(e.target.value) : null,
-                })
-              }
-              placeholder="e.g. 0.7"
-            />
-          )}
+          {/* ── Temperature (OpenAI standard; shown for unknown models too) ── */}
+          <Input
+            label="Temperature"
+            type="number"
+            min="0"
+            step="0.1"
+            value={settingsForm.temperature != null ? String(settingsForm.temperature) : ""}
+            onChange={(e) =>
+              setSettingsForm({
+                ...settingsForm,
+                temperature: e.target.value ? Number(e.target.value) : null,
+              })
+            }
+            placeholder="e.g. 0.7"
+          />
 
           {/* ── Max Tokens ────────────────────────────────────── */}
-          {modelInfo && (
-            <Input
-              label="Max Tokens"
-              type="number"
-              min="1"
-              step="1"
-              value={settingsForm.max_tokens != null ? String(settingsForm.max_tokens) : ""}
-              onChange={(e) =>
-                setSettingsForm({
-                  ...settingsForm,
-                  max_tokens: e.target.value ? Number(e.target.value) : null,
-                })
-              }
-              placeholder={`Up to ${modelInfo.maxTokens.toLocaleString()}`}
-            />
-          )}
+          <Input
+            label="Max Tokens"
+            type="number"
+            min="1"
+            step="1"
+            value={settingsForm.max_tokens != null ? String(settingsForm.max_tokens) : ""}
+            onChange={(e) =>
+              setSettingsForm({
+                ...settingsForm,
+                max_tokens: e.target.value ? Number(e.target.value) : null,
+              })
+            }
+            placeholder={
+              modelInfo ? `Up to ${modelInfo.maxTokens?.toLocaleString() ?? "—"}` : "e.g. 4096"
+            }
+          />
 
           {/* ── Top P ─────────────────────────────────────────── */}
-          {modelInfo && (
-            <Input
-              label="Top P"
-              type="number"
-              min="0"
-              max="1"
-              step="0.01"
-              value={settingsForm.top_p != null ? String(settingsForm.top_p) : ""}
-              onChange={(e) =>
-                setSettingsForm({
-                  ...settingsForm,
-                  top_p: e.target.value ? Number(e.target.value) : null,
-                })
-              }
-              placeholder="e.g. 0.9"
-            />
-          )}
+          <Input
+            label="Top P"
+            type="number"
+            min="0"
+            max="1"
+            step="0.01"
+            value={settingsForm.top_p != null ? String(settingsForm.top_p) : ""}
+            onChange={(e) =>
+              setSettingsForm({
+                ...settingsForm,
+                top_p: e.target.value ? Number(e.target.value) : null,
+              })
+            }
+            placeholder="e.g. 0.9"
+          />
 
           {/* ── Extra Body JSON ───────────────────────────────── */}
           <div>

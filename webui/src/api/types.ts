@@ -94,10 +94,11 @@ export interface BotPolicy {
   compact_model_ref?: string;
   compact_prompt?: string;
   context_window_fallback?: number;
-  commands?: string[];
+  disabled_commands?: string[];
   mention_required?: boolean;
   show_timestamp?: boolean;
-  show_user_prefix?: boolean;
+  sender_identity?: "none" | "prefix" | "block";
+  timezone?: string;
   [key: string]: unknown;
 }
 

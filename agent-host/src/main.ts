@@ -110,6 +110,11 @@ function logEvent(event: unknown) {
       } else {
         logLine(level, `  finish ${stopReason}`);
       }
+      // Surface stream / model errors so operators can diagnose
+      if (stopReason === "error") {
+        const detail = JSON.stringify((last ?? e) as Record<string,unknown>, null, 0).slice(0, 500);
+        logLine("error", `  ↳ ${detail}`);
+      }
       return;
     }
     case "stream_delta": return;
@@ -262,8 +267,17 @@ interface ContextPolicy {
   contextWindowFallback: number;
   /** Prepend [HH:MM:SS] to every message (user + assistant). Default false. */
   showTimestamp: boolean;
-  /** Prepend [platform name (id)] to user messages. Default false. */
-  showUserPrefix: boolean;
+  /** How sender identity is attached to user messages. */
+  senderIdentity: SenderIdentity;
+  /** IANA timezone for timestamps and the get_time tool. Default "UTC". */
+  timezone: string;
+}
+
+/** Sender identity attachment mode. */
+type SenderIdentity = "none" | "prefix" | "block";
+
+function parseSenderIdentity(raw: unknown): SenderIdentity {
+  return raw === "prefix" || raw === "block" ? raw : "none";
 }
 
 function readContextPolicy(bot: ResolvedBot): ContextPolicy {
@@ -279,20 +293,24 @@ function readContextPolicy(bot: ResolvedBot): ContextPolicy {
         ? p.context_window_fallback
         : 128000,
     showTimestamp: Boolean(p.show_timestamp),
-    showUserPrefix: Boolean(p.show_user_prefix),
+    senderIdentity: parseSenderIdentity(p.sender_identity),
+    timezone: typeof p.timezone === "string" && p.timezone ? p.timezone : "UTC",
   };
 }
-
 // ── Message prefix builders ────────────────────────────────────
 
-function formatTime(iso: string): string {
+function formatTime(iso: string, timezone: string): string {
   try {
     const d = new Date(iso);
-    return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return d.toLocaleTimeString("en-US", {
+      hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
+      timeZone: timezone,
+    });
   } catch {
     return "??:??:??";
   }
 }
+
 
 function getDate(iso: string): string {
   try {
@@ -301,19 +319,23 @@ function getDate(iso: string): string {
     return "";
   }
 }
-
-function buildUserPrefix(event: ChronoEvent, policy: ContextPolicy): string {
-  const parts: string[] = [];
-  if (policy.showTimestamp) {
-    parts.push(`[${formatTime(event.received_at)}]`);
+/** Attach sender identity according to policy. "block" puts a verified
+ *  header at the START of the message so users cannot preempt it; the
+ *  system prompt must document this format and instruct the model to trust
+ *  only the first occurrence. "prefix" is the legacy inline format. */
+function buildSenderIdentity(event: ChronoEvent, policy: ContextPolicy): string {
+  if (policy.senderIdentity === "block") {
+    return `### SYSTEM SENDER\nid: ${event.sender.id}\nname: ${event.sender.name}\nplatform: ${event.platform}\n### END\n\n`;
   }
-  if (policy.showUserPrefix) {
-    parts.push(`[${event.platform} ${event.sender.name} (${event.sender.id})]`);
+  if (policy.senderIdentity === "prefix") {
+    return `[${event.platform} ${event.sender.name} (${event.sender.id})] `;
   }
-  return parts.length > 0 ? parts.join(" ") + " " : "";
+  return "";
 }
 
-
+function buildUserPrefix(event: ChronoEvent, policy: ContextPolicy): string {
+  return policy.showTimestamp ? `[${formatTime(event.received_at, policy.timezone)}] ` : "";
+}
 function resolveContextWindow(model: Model<Api>, policy: ContextPolicy): number {
   return model.contextWindow > 0 ? model.contextWindow : policy.contextWindowFallback;
 }
@@ -327,12 +349,15 @@ function countTurns(messages: readonly AgentMessage[]): number {
   return n;
 }
 
+/** True when a command is disabled by the bot's policy.disabled_commands
+ *  blacklist. Absent or empty blacklist = all commands enabled. */
+function commandDisabled(bot: ResolvedBot, name: string): boolean {
+  const disabled = bot.policy.disabled_commands;
+  return Array.isArray(disabled) && disabled.includes(name);
+}
+
 function newSessionCommandEnabled(bot: ResolvedBot): boolean {
-  const commands = bot.policy.commands;
-  if (Array.isArray(commands)) {
-    return commands.includes("new");
-  }
-  return true;
+  return !commandDisabled(bot, "new");
 }
 
 /** Strip Telegram bot-command suffix: "/new@BotName" → "/new" */
@@ -881,6 +906,7 @@ async function main() {
         pendingCalls,
         agent.signal,
         bot.personaId ?? undefined,
+        readContextPolicy(bot).timezone,
       );
       try {
         const tools = agent.state.tools;
@@ -899,7 +925,8 @@ async function main() {
       continue;
     }
 
-    if (await registry.executeCommand(event.message.text, event.session_key, pendingCalls, agent.signal)) {
+    const disabledCommands = Array.isArray(bot.policy.disabled_commands) ? (bot.policy.disabled_commands as string[]) : undefined;
+    if (await registry.executeCommand(event.message.text, event.session_key, pendingCalls, agent.signal, disabledCommands)) {
       logEvent({ type: "host_info", message: `plugin command executed for bot=${bot.id}` });
       writeControl({ type: "done" });
       continue;
@@ -907,6 +934,11 @@ async function main() {
 
     // ── /compact — manual context compaction ─────────────────
     if (isCompactCommand(event.message.text)) {
+      if (commandDisabled(bot, "compact")) {
+        logEvent({ type: "host_info", message: `compact command disabled by policy for bot=${bot.id}` });
+        writeControl({ type: "done" });
+        continue;
+      }
       const bucket = getOrCreateBucket(route, event.session_key, bot.id);
       if (bucket.messages.length < 2) {
         await sendBodyTextToCurrentChat(
@@ -1024,6 +1056,7 @@ async function main() {
       pendingCalls,
       agent.signal,
       bot.personaId ?? undefined,
+      ctxPolicy.timezone,
     );
 
     logEvent({
@@ -1065,7 +1098,8 @@ async function main() {
     try {
       const historyBefore = bucket.messages.length;
       const userPrefix = buildUserPrefix(event, ctxPolicy);
-      await agent.prompt(userPrefix + event.message.text);
+      const senderIdentity = buildSenderIdentity(event, ctxPolicy);
+      await agent.prompt(senderIdentity + userPrefix + event.message.text);
 
       bucket.messages = agent.state.messages.slice();
       persistBucket(bucket);
@@ -1120,8 +1154,10 @@ async function main() {
       bucket.messages = agent.state.messages.slice();
       persistBucket(bucket);
       writeControl({ type: "error", message });
-      process.exitCode = 1;
-      break;
+      // Model/stream failures are recoverable (network, auth, provider
+      // errors): keep the host alive for the next inbound message instead
+      // of exiting the process. Only stdin loss is fatal (handled above).
+      continue;
     }
   }
 

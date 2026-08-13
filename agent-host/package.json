@@ -9,7 +9,7 @@
   "scripts": {
     "start": "bun run src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "bun test src/ipc/fixtures.test.ts src/session-store.test.ts"
+    "test": "bun test src/ipc/fixtures.test.ts src/session-store.test.ts src/plugins.test.ts src/resolve.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.81.1",

@@ -1,19 +1,26 @@
 import {
   getSupportedThinkingLevels,
   clampThinkingLevel,
+  createModels,
+  createProvider,
+  type Provider,
 } from "@earendil-works/pi-ai";
 import type { ThinkingLevel, ModelThinkingLevel } from "@earendil-works/pi-ai";
 
 import {
   builtinModels,
+  builtinProviders,
+  getBuiltinProviders,
 } from "@earendil-works/pi-ai/providers/all";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import {
   type Api,
   type Model,
   type MutableModels,
 } from "@earendil-works/pi-ai";
 import { type ChronoConfig } from "./config.ts";
-import type { LlmModel } from "./config-types.ts";
+import type { LlmModel, LlmProvider } from "./config-types.ts";
 import { ChronoCredentialStore } from "./credential-store.ts";
 export interface ResolvedModel {
   model: Model<Api>;
@@ -35,9 +42,11 @@ export interface ResolvedBot {
 /**
  * Build a pi-ai `Models` instance from the config DB.
  *
- * Uses `builtinModels()` which registers all pi-ai builtin providers
- * (anthropic, openai, google, …). Custom providers with base_url need
- * `createProvider` with proper `api` mappings — deferred.
+ * Starts from `createModels` and registers every builtin pi-ai provider
+ * (anthropic, openai, google, …), then registers custom providers (ids
+ * absent from the builtin catalog, e.g. OpenAI-compatible proxies) with
+ * connection params from the DB and model capabilities inherited by model
+ * name.
  *
  * Returns null if no providers exist in the config DB.
  */
@@ -45,10 +54,112 @@ export function buildModels(config: ChronoConfig): MutableModels | null {
   const providers = config.listProviders();
   if (providers.length === 0) return null;
 
-  // builtinModels() registers all builtin providers and returns a
-  // MutableModels collection with them pre-loaded, using credentials
-  // from the config DB for auth resolution.
-  return builtinModels({ credentials: new ChronoCredentialStore(config) });
+  const models = createModels({ credentials: new ChronoCredentialStore(config) });
+  for (const p of builtinProviders()) {
+    models.setProvider(p);
+  }
+
+  for (const prov of providers) {
+    if (models.getProvider(prov.id)) continue;
+    const custom = buildCustomProvider(prov, config);
+    if (custom) {
+      models.setProvider(custom);
+      process.stderr.write(
+        `\x1b[36m[agent] custom provider ${prov.id}: registered ${config.listModels(prov.id).length} model(s) by name from pi catalog\x1b[0m\n`,
+      );
+    } else {
+      logUnregistered(prov.id);
+    }
+  }
+  return models;
+}
+
+function logUnregistered(providerId: string): void {
+  // Avoid import cycle with main.ts; stderr must stay frame-free.
+  process.stderr.write(
+    `\x1b[33m[agent] custom provider ${providerId}: no models inherited from pi catalog; not registered\x1b[0m\n`,
+  );
+}
+
+/** Module-level builtin catalog for capability lookup (no auth needed). */
+let builtinCache: MutableModels | null = null;
+function builtin(): MutableModels {
+  return (builtinCache ??= builtinModels());
+}
+
+/**
+ * Find a model by name across every builtin provider catalog.
+ * Capabilities belong to the model, not to the provider slot: a custom
+ * provider id must not block recognition when the model name is known.
+ */
+function findBuiltinModelByName(modelId: string): Model<Api> | undefined {
+  for (const pid of getBuiltinProviders()) {
+    const m = builtin().getModel(pid, modelId);
+    if (m) return m;
+  }
+  return undefined;
+}
+
+/**
+ * Register an OpenAI-compatible custom provider: DB connection params
+ * (base URL, api-key auth through the shared credential store) plus the
+ * capability profile of each allowlisted model, inherited by model name
+ * from the builtin catalog.
+ *
+ * Only capability data is inherited — connection settings (baseUrl, key,
+ * headers) always come from this provider's own DB rows. The builtin
+ * model's baseUrl is stripped from the clone and re-supplied as auth
+ * baseUrl, which pi applies over the model at request time.
+ *
+ * Returns null when no allowlisted model has a known builtin twin — the
+ * provider then stays out of the runtime and its models are reported as
+ * unrecognized.
+ */
+function buildCustomProvider(
+  prov: LlmProvider,
+  config: ChronoConfig,
+): Provider | null {
+  const baseUrl = prov.base_url;
+  if (!baseUrl) {
+    process.stderr.write(
+      `\x1b[33m[agent] custom provider ${prov.id}: no base_url configured; not registered\x1b[0m\n`,
+    );
+    return null;
+  }
+  const dbModels = config.listModels(prov.id);
+  const inherited: Model<Api>[] = [];
+  for (const db of dbModels) {
+    const found = findBuiltinModelByName(db.model_id);
+    if (!found) continue;
+    // Strip connection fields from the clone: only capabilities are shared.
+    const { baseUrl: _baseUrl, ...capabilityProfile } = found;
+    inherited.push({ ...capabilityProfile, provider: prov.id, baseUrl });
+  }
+  if (inherited.length === 0) return null;
+
+  return createProvider({
+    id: prov.id,
+    name: prov.id,
+    baseUrl,
+    auth: {
+      apiKey: {
+        name: `${prov.id} API key`,
+        resolve: async ({ credential }) =>
+          credential?.key
+            ? {
+                auth: { apiKey: credential.key, baseUrl },
+                source: "chrono.db",
+              }
+            : undefined,
+      },
+    },
+    models: inherited,
+    // OpenAI-compatible proxies may serve models of either protocol.
+    api: {
+      "openai-completions": openAICompletionsApi(),
+      "openai-responses": openAIResponsesApi(),
+    },
+  });
 }
 
 /**
@@ -161,14 +272,29 @@ export interface ModelCaps {
 
 /**
  * Query pi-ai builtin model catalog for a specific model's capabilities.
- * Returns null when the provider or model is not in the builtin catalog.
+ *
+ * Lookup is exact by provider + model first, then falls back to a name-wide
+ * search across every builtin provider: capabilities belong to the model,
+ * not to the provider slot, so a custom provider id must not hide a known
+ * model name.
+ *
+ * Returns null when the model name is unknown to the catalog.
  */
 export function queryModelCaps(
   providerId: string,
   modelId: string,
 ): ModelCaps | null {
-  const models = builtinModels();
-  const model = models.getModel(providerId, modelId);
+  const models = builtin();
+  let model = models.getModel(providerId, modelId);
+  if (!model) {
+    for (const pid of getBuiltinProviders()) {
+      const m = models.getModel(pid, modelId);
+      if (m) {
+        model = m;
+        break;
+      }
+    }
+  }
   if (!model) return null;
   return {
     name: model.name,

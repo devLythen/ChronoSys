@@ -1,4 +1,4 @@
-id = "example.sender"
+id = "example_sender"
 name = "Example Sender"
 version = "1.0.0"
 chrono_api = "1"
@@ -9,7 +9,7 @@ tools = ["tools/index.ts"]
 commands = ["tools/index.ts"]
 
 [[tools]]
-name = "example.send"
+name = "example_send"
 label = "Send through Chrono"
 description = "Exercise the restricted platform.send facade."
 

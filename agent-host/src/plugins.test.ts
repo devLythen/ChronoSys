@@ -20,8 +20,8 @@ describe("native plugin registry", () => {
     try {
       const registry = new ToolRegistry(home);
       await registry.reload();
-      const tools = registry.createToolsForAllowlist(["example.echo"], "session-1", new Map());
-      expect(tools.map((tool) => tool.name)).toEqual(["example.echo"]);
+      const tools = registry.createToolsForAllowlist(["example_echo"], "session-1", new Map());
+      expect(tools.map((tool) => tool.name)).toEqual(["example_echo"]);
       const result = await tools[0]!.execute("call-1", { text: "hello" });
       expect(result.content).toEqual([{ type: "text", text: "echo:hello" }]);
     } finally { await rm(home, { recursive: true, force: true }); }
@@ -34,7 +34,7 @@ describe("native plugin registry", () => {
       await registry.reload();
       const names = registry.createToolsForAllowlist([], "session-1", new Map()).map((tool) => tool.name);
       expect(names).toContain("message_send");
-      expect(names).toContain("example.send");
+      expect(names).toContain("example_send");
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
@@ -44,8 +44,10 @@ describe("native plugin registry", () => {
       const warnings: string[] = [];
       const registry = new ToolRegistry(home, (message) => warnings.push(message));
       await registry.reload();
-      expect(registry.createToolsForAllowlist(["missing.tool"], "session-1", new Map())).toEqual([]);
-      expect(warnings).toEqual(["unknown tool names: missing.tool"]);
+      // Plugin tools bypass the allowlist; unknown names are silently ignored.
+      const tools = registry.createToolsForAllowlist(["missing.tool"], "session-1", new Map());
+      expect(tools.map((t) => t.name)).toContain("example_echo");
+      expect(warnings).toEqual([]);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
@@ -58,18 +60,18 @@ describe("native plugin registry", () => {
       await rm(installRoot, { recursive: true, force: true });
       await writeFile(installRoot, "not a directory");
       await expect(registry.reload()).rejects.toThrow("plugin install root is not a directory");
-      expect(registry.createToolsForAllowlist(["example.echo"], "session-1", new Map()).map((tool) => tool.name)).toEqual(["example.echo"]);
+      expect(registry.createToolsForAllowlist(["example_echo"], "session-1", new Map()).map((tool) => tool.name)).toEqual(["example_echo"]);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
   test("filters a plugin tool for a blacklisted persona", async () => {
     const home = await homeWith("echo");
     try {
-      await writeFile(join(home, "plugins", "installed", "echo", "chrono.policy.toml"), "enabled = true\n\n[tools.\"example.echo\"]\npersona_blacklist = [\"persona-blocked\"]\n");
+      await writeFile(join(home, "plugins", "installed", "echo", "chrono.policy.toml"), "enabled = true\n\n[tools.\"example_echo\"]\npersona_blacklist = [\"persona-blocked\"]\n");
       const registry = new ToolRegistry(home);
       await registry.reload();
-      expect(registry.createToolsForAllowlist(["example.echo"], "session-1", new Map(), undefined, "persona-blocked")).toEqual([]);
-      expect(registry.createToolsForAllowlist(["example.echo"], "session-1", new Map(), undefined, "persona-allowed").map((tool) => tool.name)).toEqual(["example.echo"]);
+      expect(registry.createToolsForAllowlist(["example_echo"], "session-1", new Map(), undefined, "persona-blocked")).toEqual([]);
+      expect(registry.createToolsForAllowlist(["example_echo"], "session-1", new Map(), undefined, "persona-allowed").map((tool) => tool.name)).toEqual(["example_echo"]);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 

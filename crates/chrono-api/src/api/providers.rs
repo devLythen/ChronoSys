@@ -392,6 +392,12 @@ async fn get_model_info(
         map.remove("type");
         map.remove("query_id");
     }
+    // Agent-host replies {"error": "..."} when the model is absent from the
+    // pi catalog. The WebUI contract is ModelInfo | null — surface it as null
+    // so the editor renders a "not recognized" state instead of a crash.
+    if matches!(&response, Value::Object(map) if map.contains_key("error")) {
+        return Ok(Json(Value::Null));
+    }
     Ok(Json(response))
 }
 fn resolve_secret(secret_ref: &str) -> ApiResult<String> {

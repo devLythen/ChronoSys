@@ -94,6 +94,50 @@ export function createMessageSendTool(
   };
 }
 
+/** IANA timezone normalizer — falls back to UTC on invalid input. */
+export function normalizeTimezone(tz: string): string {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return tz;
+  } catch {
+    return "UTC";
+  }
+}
+
+/**
+ * Built-in tool: return the current date and time in the bot's configured
+ * timezone. No parameters — the timezone is fixed by config, not user input.
+ */
+export function createTimeTool(timezone: string): AgentTool {
+  const tz = normalizeTimezone(timezone);
+  return {
+    name: "get_time",
+    label: "Get current time",
+    description:
+      "Return the current date and time in the bot's configured timezone. " +
+      "Use this instead of guessing when you need to know the local time.",
+    parameters: Type.Object({}),
+    async execute(_toolCallId: string) {
+      const now = new Date();
+      const fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        hour12: false, timeZoneName: "short",
+      });
+      const result = {
+        timezone: tz,
+        iso: now.toISOString(),
+        local: fmt.format(now),
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
+      };
+    },
+  };
+}
+
 /**
  * Fallback: send plain assistant body text to the **current** chat only.
  * Cross-chat delivery must use message_send with chat_id.

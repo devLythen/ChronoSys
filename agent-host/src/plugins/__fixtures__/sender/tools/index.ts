@@ -2,7 +2,7 @@ import { Type } from "@earendil-works/pi-ai";
 
 export default function register(api: { Type: typeof Type; registerTool: (definition: any) => void; registerCommand: (definition: any) => void }) {
   api.registerTool({
-    name: "example.send",
+    name: "example_send",
     label: "Send through Chrono",
     description: "Exercise the restricted platform.send facade.",
     parameters: api.Type.Object({ text: api.Type.String() }),
