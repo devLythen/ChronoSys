@@ -22,6 +22,7 @@ import {
   queryModelCaps,
   resolveThinkingLevel,
   buildStreamOverrides,
+  parseExtraBody,
   type ResolvedBot,
   type ModelCaps,
 } from "./resolve.ts";
@@ -474,12 +475,18 @@ async function main() {
   let streamFn: StreamFn = PLACEHOLDER_STREAM;
   /** Mutable cell for current DB model overrides — read by wrapped streamFn. */
   const currentOverrides: { v: LlmModel | null } = { v: null };
-
   function makeStreamFn(models: MutableModels): StreamFn {
     const base = models.streamSimple.bind(models);
     return (model, ctx, options) => {
       const ov = buildStreamOverrides(currentOverrides.v);
-      return base(model, ctx, { ...options, ...ov });
+      const extraBody = parseExtraBody(currentOverrides.v);
+      const onPayload = extraBody
+        ? (payload: unknown) =>
+            payload && typeof payload === "object" && !Array.isArray(payload)
+              ? { ...(payload as Record<string, unknown>), ...extraBody }
+              : undefined
+        : undefined;
+      return base(model, ctx, { ...options, ...ov, ...(onPayload ? { onPayload } : {}) });
     };
   }
   let defaultModel: Model<Api> = PLACEHOLDER_MODEL;

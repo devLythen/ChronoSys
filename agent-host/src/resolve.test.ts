@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openConfig, type ChronoConfig } from "./config.ts";
-import { buildModels, queryModelCaps } from "./resolve.ts";
+import { buildModels, queryModelCaps, parseExtraBody } from "./resolve.ts";
 
 // ── model caps: name-wide fallback ────────────────────────────────
 
@@ -27,6 +27,17 @@ test("exact provider+model lookup still wins", () => {
 test("unknown model names return null", () => {
   expect(queryModelCaps("opkg-lite", "definitely-not-a-real-model-xyz")).toBeNull();
   expect(queryModelCaps("nope", "nope")).toBeNull();
+});
+
+test("parseExtraBody parses valid JSON and rejects invalid input", () => {
+  const withBody = { extra_body_json: '{"reasoning":{"effort":"high"}}' } as never;
+  expect(parseExtraBody(withBody as never)).toEqual({ reasoning: { effort: "high" } });
+  const empty = { extra_body_json: null } as never;
+  expect(parseExtraBody(empty as never)).toBeUndefined();
+  const invalid = { extra_body_json: "not json" } as never;
+  expect(parseExtraBody(invalid as never)).toBeUndefined();
+  const array = { extra_body_json: "[1,2]" } as never;
+  expect(parseExtraBody(array as never)).toBeUndefined();
 });
 
 // ── buildModels: custom provider registration ─────────────────────

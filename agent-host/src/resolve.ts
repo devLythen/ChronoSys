@@ -386,3 +386,20 @@ export function buildStreamOverrides(
   if (overrides.top_p != null) result.topP = overrides.top_p;
   return result;
 }
+
+/** Parse the DB `extra_body_json` field into a plain object, or undefined
+ *  when empty/invalid. Merged into the provider payload via onPayload. */
+export function parseExtraBody(
+  overrides: LlmModel | null,
+): Record<string, unknown> | undefined {
+  const raw = overrides?.extra_body_json;
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
