@@ -75,7 +75,7 @@
 - [x] REST API: CRUD for providers, credentials, models, accounts, bots, personas, bindings, sessions, audit
 - [x] Runtime model capabilities query via agent-host IPC (replaces compile-time `model_caps.json`)
 - [x] WebUI: Providers, Configs, Personas, Platforms, Sessions (read-only), Audit, Settings
-- [x] Config editor: structured policy form (max context, commands whitelist, mention toggle)
+- [x] Config editor: structured policy form (compaction, commands blacklist, mention, sender identity, timezone)
 - [x] Session detail: chat bubbles + thinking collapse + tool call display
 - [x] Model settings: thinking level dropdown populated from runtime capabilities
 - [x] Persona editor: tools allowlist checkbox grid, skills tag editor

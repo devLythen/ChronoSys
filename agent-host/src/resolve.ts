@@ -126,10 +126,19 @@ function buildCustomProvider(
     );
     return null;
   }
-  // Protocol from the provider kind: openai-responses uses the Responses
-  // API; every other OpenAI-compatible kind (openai-completions, deepseek,
-  // legacy "openai") uses Chat Completions.
-  const api: Api = prov.kind === "openai-responses" ? "openai-responses" : "openai-completions";
+  // Protocol from the provider kind. Only the two explicit OpenAI kinds are
+  // supported — unknown/legacy kinds are rejected rather than silently
+  // defaulting (pre-v1 breaking-change phase).
+  const api: Api | null =
+    prov.kind === "openai-responses" ? "openai-responses"
+      : prov.kind === "openai-completions" ? "openai-completions"
+        : null;
+  if (api === null) {
+    process.stderr.write(
+      `\x1b[33m[agent] custom provider ${prov.id}: unsupported kind "${prov.kind}"; not registered\x1b[0m\n`,
+    );
+    return null;
+  }
   const streams = api === "openai-responses" ? openAIResponsesApi() : openAICompletionsApi();
 
   const dbModels = config.listModels(prov.id);

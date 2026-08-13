@@ -137,10 +137,11 @@ Session         durable conversation transcript (sessions.db)
 
 The canonical tool registry is defined in `agent-host/src/tools.ts` and mirrored in `crates/chrono-api/src/api/tools.rs` (for the `/api/v1/tools` endpoint).
 
-Currently implemented:
+Currently implemented built-in tools:
 - `message_send` — send/forward text to a chat; preferred path for all intentional outbound messages
+- `get_time` — return the current date/time in the bot's configured timezone (see policy `timezone`)
 
-Tools are allowlisted per persona via `tools_allowlist_json` in the `personas` table. An empty allowlist means "all known tools".
+Built-in tools are allowlisted per persona via `tools_allowlist_json` in the `personas` table. An empty allowlist means "all known built-in tools". Plugin tools are NOT part of this allowlist — they are gated by the plugin enable toggle and per-tool persona blacklist (see PLUGIN_ARCHITECTURE §7).
 ---
 
 ## 9. Real-time Protocol

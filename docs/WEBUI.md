@@ -198,7 +198,7 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 - 卡片网格：标题(ID) + 模型(Cpu 图标) + 人格(User 图标) + Provider 跳转(Box 图标)
 - 底栏按钮：Provider 跳转 → Persona 跳转 → Delete
 - **model_ref 是 Select 下拉**，数据源：enabled provider + enabled model 的交集
-- Policy 编辑器：JSON textarea，保存前 `JSON.parse` 校验
+- Policy 编辑器：结构化表单 — 溢出策略(compaction/drop)、压缩模型与提示词、命令黑名单(默认全部启用)、群组 @mention 开关、时间戳、发送者身份(none/prefix/block)、时区
 - Persona 字段只读预览，链接到 Persona 页编辑
 - 创建时 model 必选
 

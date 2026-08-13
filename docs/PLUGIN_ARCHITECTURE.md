@@ -67,7 +67,7 @@ Field rules:
 - `id`: `^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`
 - `version`: SemVer `major.minor.patch`
 - `chrono_api`: must be `"1"`
-- Tool/command `name`: `^[a-z][a-z0-9_.-]{0,63}$`; for Telegram menu visibility use only `[a-z0-9_]`
+- Tool/command `name`: `^[a-z][a-z0-9_-]{0,63}$` — dots are rejected so names match the OpenAI function-name pattern all model APIs enforce
 - `[[config]]` keys appear in plugin config page; `type` is `"string"` or `"boolean"`
 - `[[tools]]` and `[[commands]]` are authoritative for name/label/description; JS code only provides `execute()`
 
@@ -146,14 +146,14 @@ Duplicate plugin IDs across directories → `duplicate_id`.
 
 ## 7. Persona integration
 
-- Plugin tools are NOT in Persona `tools_allowlist_json` — they are controled by the plugin's per-tool blacklist
+- Plugin tools are NOT in Persona `tools_allowlist_json` — they are controlled by the plugin's per-tool blacklist
 - Persona editor's Tools modal shows every plugin tool with a toggle
 - Toggling a plugin tool OFF for a Persona writes that Persona ID into the tool's `persona_blacklist`
 - When constructing `AgentTool[]` for a turn, agent-host passes the current `personaId`; blacklisted tools are omitted
 
 ## 8. Command registration with platforms
 
-After `config.reload` or plugin reload, agent-host sends `host_command_sync` to gateway with all enabled command names and descriptions. The Telegram adapter merges built-in commands (`/new`, `/compact`) with plugin commands and calls `setMyCommands`. Command names containing characters outside `[a-z0-9_]` are silently filtered (Telegram restriction).
+After `config.reload` or plugin reload, agent-host sends `host_command_sync` to gateway with all enabled command names and descriptions. The Telegram adapter merges built-in commands (`/new`, `/compact`) with plugin commands and calls `setMyCommands`. Command names are already constrained to `[a-z0-9_-]` by the manifest, so no Telegram-side filtering is needed.
 
 ## 9. WebUI surfaces
 
@@ -198,7 +198,7 @@ The test suite uses fixtures under `__fixtures__/` that are copied to temp direc
 - Plugin status and errors appear in the plugin editor (red border with message)
 - Gateway logs `[telegram] syncing N bot commands` / `synced N commands` for command sync
 - Gateway logs `[gateway] syncing commands to N adapter(s)` when receiving `host_command_sync`
-- Agent-host stderr shows `host_warn` for unknown tool names in allowlists
+- Agent-host stderr shows `host_warn` for plugins that fail to load or have duplicate/mismatched registrations
 
 ## 13. Docker sandbox (planned)
 

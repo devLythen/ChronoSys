@@ -105,6 +105,21 @@ test("custom provider with no known model names is not registered", () => {
   }
 });
 
+test("custom provider with an unsupported kind is not registered", () => {
+  const { config, cleanup } = makeConfig();
+  try {
+    configDbInsert(config, "legacy", "https://proxy.example/v1", "sk-test", ["deepseek-v4-flash"]);
+    // Simulate a pre-split kind value: it must be rejected, not defaulted.
+    const db = (config as unknown as { db: Database }).db;
+    db.run("UPDATE llm_providers SET kind='openai' WHERE id='legacy'");
+    const models = buildModels(config);
+    expect(models).not.toBeNull();
+    expect(models!.getProvider("legacy")).toBeUndefined();
+  } finally {
+    cleanup();
+  }
+});
+
 // Insert rows via the public config API (queries match production schema).
 function configDbInsert(
   config: ChronoConfig,
@@ -116,7 +131,7 @@ function configDbInsert(
   // ConfigStore is read-only by design; write through bun:sqlite directly.
   const db = (config as unknown as { db: Database }).db;
   db.run(
-    "INSERT INTO llm_providers (id, kind, base_url) VALUES (?, 'openai', ?)",
+    "INSERT INTO llm_providers (id, kind, base_url) VALUES (?, 'openai-completions', ?)",
     [providerId, baseUrl],
   );
   db.run(
