@@ -31,6 +31,8 @@ import { SessionStore, sessionsDbPath } from "./session-store.ts";
 const DEFAULT_SYSTEM_PROMPT =
   "You are a chat bot.";
 
+/** Transient-failure retries per model request (network, 5xx, 429, timeout). */
+const STREAM_MAX_RETRIES = 2;
 type ContextScope = "session" | "bot" | "account";
 
 function logEvent(event: unknown) {
@@ -486,7 +488,14 @@ async function main() {
               ? { ...(payload as Record<string, unknown>), ...extraBody }
               : undefined
         : undefined;
-      return base(model, ctx, { ...options, ...ov, ...(onPayload ? { onPayload } : {}) });
+      // Retry transient network / provider failures (5xx, 429, timeouts)
+      // inside pi's provider client. maxRetries=2 → up to 3 total attempts.
+      return base(model, ctx, {
+        ...options,
+        ...ov,
+        maxRetries: STREAM_MAX_RETRIES,
+        ...(onPayload ? { onPayload } : {}),
+      });
     };
   }
   let defaultModel: Model<Api> = PLACEHOLDER_MODEL;
