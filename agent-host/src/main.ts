@@ -821,7 +821,10 @@ async function main() {
                   try {
                     const b = resolveBot(config, models, bp.id);
                     logEvent({ type: "host_info", message: `config.reload: bot=${b?.id ?? bp.id} model=${b?.modelRef ?? "?"}` });
-                  } catch { logEvent({ type: "host_warn", message: `config.reload: bot "${bp.id}" failed` }); }
+                  } catch (err) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    logEvent({ type: "host_warn", message: `config.reload: bot "${bp.id}" model unavailable — ${message}` });
+                  }
                 }
               } else { logEvent({ type: "host_warn", message: "config.reload: no bot profiles" }); }
             } else { logEvent({ type: "host_warn", message: "config.reload: no providers" }); }

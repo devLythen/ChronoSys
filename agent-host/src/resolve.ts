@@ -65,7 +65,7 @@ export function buildModels(config: ChronoConfig): MutableModels | null {
     if (custom) {
       models.setProvider(custom);
       process.stderr.write(
-        `\x1b[36m[agent] custom provider ${prov.id}: registered ${config.listModels(prov.id).length} model(s) by name from pi catalog\x1b[0m\n`,
+        `\x1b[36m[agent] custom provider ${prov.id}: registered ${custom.getModels().length} model(s) by name from pi catalog\x1b[0m\n`,
       );
     } else {
       logUnregistered(prov.id);
