@@ -9,6 +9,7 @@ import Card from "../components/ui/Card";
 import Modal from "../components/ui/Modal";
 import Input from "../components/ui/Input";
 import { cn } from "../lib/utils";
+import { TELEGRAM_API_URL } from "../lib/telegram";
 import { useToast } from "../components/ui/Toast";
 import { usePageEnter, useStaggerList } from "../hooks/useAnimations";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -43,7 +44,12 @@ export default function PlatformsPage() {
   });
 
   const createMut = useMutation({
-    mutationFn: (id: string) => api.createAccount({ id, platform: "telegram", adapter_id: "chrono.adapter.telegram" }),
+    mutationFn: (id: string) => api.createAccount({
+      id,
+      platform: "telegram",
+      adapter_id: "chrono.adapter.telegram",
+      adapter_config_json: { api_url: TELEGRAM_API_URL },
+    }),
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: ["accounts"] });
       setNewModalOpen(false);

@@ -126,10 +126,12 @@ blocked or reset, configure a transport explicitly:
 
 - Per account: `platform_accounts.adapter_config_json.proxy_url`
   (`http://…`, `socks5://…`, or bare `host:port` → normalized to `http://`).
+  Proxy is empty by default.
 - Environment fallback: `CHRONO_TELEGRAM_PROXY`, `TELOXIDE_PROXY`,
   `HTTPS_PROXY`/`https_proxy`, `ALL_PROXY`/`all_proxy`.
 - Self-hosted Bot API: `adapter_config_json.api_url` or
-  `CHRONO_TELEGRAM_API_URL`; localhost API URLs bypass the proxy.
+  `CHRONO_TELEGRAM_API_URL`; localhost API URLs bypass the proxy. New accounts
+  default `api_url` to `https://api.telegram.org`.
 
 `unexpected EOF`, connection timeouts, or TLS resets before `GetMe` mean the
 network path failed — not an invalid bot token.

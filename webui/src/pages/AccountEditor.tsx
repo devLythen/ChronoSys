@@ -12,6 +12,7 @@ import Modal from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import Card from "../components/ui/Card";
+import { TELEGRAM_API_URL } from "../lib/telegram";
 
 const ADAPTERS = [
   { value: "chrono.adapter.telegram", label: "Telegram" },
@@ -55,7 +56,7 @@ export default function AccountEditor() {
   const [enabled, setEnabled] = useState(true);
   const [secretRef, setSecretRef] = useState("");
   const [proxyUrl, setProxyUrl] = useState("");
-  const [apiUrl, setApiUrl] = useState("");
+  const [apiUrl, setApiUrl] = useState(TELEGRAM_API_URL);
 
   useEffect(() => {
     if (account) {
@@ -65,7 +66,11 @@ export default function AccountEditor() {
       setSecretRef(account.secret_ref);
       const config = account.adapter_config_json;
       setProxyUrl(typeof config.proxy_url === "string" ? config.proxy_url : "");
-      setApiUrl(typeof config.api_url === "string" ? config.api_url : "");
+      setApiUrl(
+        typeof config.api_url === "string" && config.api_url.trim()
+          ? config.api_url
+          : TELEGRAM_API_URL,
+      );
     }
   }, [account]);
 
@@ -75,8 +80,7 @@ export default function AccountEditor() {
       const adapterConfig = { ...(account?.adapter_config_json ?? {}) };
       if (proxyUrl.trim()) adapterConfig.proxy_url = proxyUrl.trim();
       else delete adapterConfig.proxy_url;
-      if (apiUrl.trim()) adapterConfig.api_url = apiUrl.trim();
-      else delete adapterConfig.api_url;
+      adapterConfig.api_url = apiUrl.trim() || TELEGRAM_API_URL;
       return api.updateAccount(id, {
         id,
         platform,
@@ -164,8 +168,8 @@ export default function AccountEditor() {
           type="text"
           value={proxyUrl}
           onChange={(e) => setProxyUrl(e.target.value)}
-          placeholder="http://127.0.0.1:7890"
-          hint="HTTP or SOCKS proxy. Leave empty to use CHRONO_TELEGRAM_PROXY / HTTPS_PROXY / TELOXIDE_PROXY."
+          placeholder=""
+          hint="Optional HTTP/SOCKS proxy. Leave empty to use CHRONO_TELEGRAM_PROXY / HTTPS_PROXY / TELOXIDE_PROXY."
         />
         <Input
           label="Bot API URL"

@@ -195,8 +195,8 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 - 卡片网格展示账号，右上角 Enabled 开关直接切换
 - 卡片显示平台名（Globe 图标），底栏 hover 显示删除按钮
 - 详情页配置区：Platform / Adapter 下拉 + Bot Token + Proxy URL + Bot API URL
-- Proxy URL 支持 HTTP/SOCKS；留空时回退 `CHRONO_TELEGRAM_PROXY` / `HTTPS_PROXY` / `TELOXIDE_PROXY`
-- Bot API URL 用于自托管 Bot API；localhost 自动绕过代理
+- Proxy URL 默认空；支持 HTTP/SOCKS，留空时回退 `CHRONO_TELEGRAM_PROXY` / `HTTPS_PROXY` / `TELOXIDE_PROXY`
+- Bot API URL 新建账号时默认 `https://api.telegram.org`；可改为自托管 Bot API，localhost 自动绕过代理
 - Attached Config 为单选绑定：显示当前配置名 + 快捷跳转图标，Change / 解绑按钮
 - Attach 弹窗：Config 下拉选择，替换时先删旧绑定再建新绑定
 - Secret 输入提示：「留空保留现有 secret」
