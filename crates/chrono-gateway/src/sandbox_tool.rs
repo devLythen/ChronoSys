@@ -139,6 +139,7 @@ fn sandbox_error_code(error: &SandboxError) -> &'static str {
         SandboxError::Disabled => "sandbox_disabled",
         SandboxError::NotConfigured => "sandbox_not_configured",
         SandboxError::InvalidConfig(_) => "sandbox_invalid_config",
+        SandboxError::Resetting => "sandbox_resetting",
         SandboxError::InvalidWorkdir(_) | SandboxError::InvalidFile(_) => "sandbox_invalid_path",
         SandboxError::FileNotFound(_) => "sandbox_file_not_found",
         SandboxError::FileOutsideWorkspace(_) => "sandbox_file_outside_workspace",

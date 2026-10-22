@@ -122,16 +122,16 @@ struct GatewayState {
 }
 
 struct AttachmentJob {
+    event: ChronoEvent,
     adapter: Option<Arc<dyn PlatformAdapter>>,
     sandbox: Arc<SandboxManager>,
     child: Arc<dyn chrono_api::AgentQuery>,
+    ws_events: tokio::sync::broadcast::Sender<chrono_api::WsEvent>,
     inbox_root: PathBuf,
     account_id: String,
-    bot_profile_id: String,
-    session_key: String,
+    sandbox_key: String,
     chat_id: String,
     message_id: String,
-    attachments: Vec<chrono_ipc::AttachmentRef>,
 }
 
 impl GatewayState {
@@ -697,33 +697,41 @@ fn handle_inbound_event(
     }
 
     let mut event = routed.event;
-    let ChronoEvent::InboundMessage {
-        chat,
-        session_key,
-        bot_profile_id,
-        message,
-        ..
-    } = &mut event;
-    *session_key = chrono_ipc::adapter::session_key(
-        &routed.account_id,
-        &chat.id,
-        &resolved.session_mode,
-    );
-    *bot_profile_id = Some(resolved.bot_profile_id.clone());
-    let attachment_job = (!message.attachments.is_empty()).then(|| AttachmentJob {
+    let (has_attachments, chat_id, message_id, sandbox_key) = {
+        let ChronoEvent::InboundMessage {
+            chat,
+            session_key,
+            bot_profile_id,
+            message,
+            ..
+        } = &mut event;
+        *session_key = chrono_ipc::adapter::session_key(
+            &routed.account_id,
+            &chat.id,
+            &resolved.session_mode,
+        );
+        *bot_profile_id = Some(resolved.bot_profile_id.clone());
+        (
+            !message.attachments.is_empty(),
+            chat.id.clone(),
+            message.id.clone(),
+            format!("{session_key}#{}", resolved.bot_profile_id),
+        )
+    };
+    let attachment_job = has_attachments.then(|| AttachmentJob {
+        event: event.clone(),
         adapter: state
             .adapters
             .get(&routed.account_id)
             .map(|live| live.adapter.clone()),
         sandbox: state.sandbox.clone(),
         child: state.child.clone(),
+        ws_events: ws_events.clone(),
         inbox_root: chrono_home.join("inbox"),
         account_id: routed.account_id.clone(),
-        bot_profile_id: resolved.bot_profile_id.clone(),
-        session_key: session_key.clone(),
-        chat_id: chat.id.clone(),
-        message_id: message.id.clone(),
-        attachments: message.attachments.clone(),
+        sandbox_key,
+        chat_id,
+        message_id,
     });
 
     {
@@ -747,32 +755,36 @@ fn handle_inbound_event(
     let session_key = match &event {
         ChronoEvent::InboundMessage { session_key, .. } => session_key.clone(),
     };
-    let payload = json!({
-        "type": "platform.inbound",
-        "platform": platform.clone(),
-        "account_id": routed.account_id,
-        "session_key": session_key.clone(),
-        "event": event.clone(),
-    });
-    let _ = ws_events.send(chrono_api::WsEvent {
-        topics: vec![format!("sessions:{session_key}"), format!("platform:{platform}")],
-        payload,
-    });
 
-    let payload = serde_json::to_vec(&event).unwrap_or_default();
-    if let Err(e) = state.child.write_frame(&payload) {
-        eprintln!("[gateway] failed to write event to agent: {e}");
-    }
     if let Some(job) = attachment_job {
         tokio::spawn(ingest_attachments(job));
+    } else {
+        let payload = json!({
+            "type": "platform.inbound",
+            "platform": platform.clone(),
+            "account_id": routed.account_id,
+            "session_key": session_key.clone(),
+            "event": event.clone(),
+        });
+        let _ = ws_events.send(chrono_api::WsEvent {
+            topics: vec![format!("sessions:{session_key}"), format!("platform:{platform}")],
+            payload,
+        });
+        let payload = serde_json::to_vec(&event).unwrap_or_default();
+        if let Err(e) = state.child.write_frame(&payload) {
+            eprintln!("[gateway] failed to write event to agent: {e}");
+        }
     }
     Ok(())
 }
 
-async fn ingest_attachments(job: AttachmentJob) {
-    let generation = job.sandbox.generation(&job.session_key);
-    let mut ready = Vec::with_capacity(job.attachments.len());
-    for attachment in job.attachments {
+async fn ingest_attachments(mut job: AttachmentJob) {
+    let generation = job.sandbox.generation(&job.sandbox_key);
+    let mut updated_attachments = Vec::with_capacity(job.attachments().len());
+    let (chat_id, message_id) = (job.chat_id.clone(), job.message_id.clone());
+    let attachments_copy = job.attachments().to_vec();
+
+    for attachment in attachments_copy {
         let name = attachment
             .name
             .clone()
@@ -780,28 +792,27 @@ async fn ingest_attachments(job: AttachmentJob) {
         let staging = staging_path(
             &job.inbox_root,
             &job.account_id,
-            &job.chat_id,
-            &job.message_id,
+            &chat_id,
+            &message_id,
             &name,
         );
-        if job.sandbox.generation(&job.session_key) != generation {
-            ready.push(json!({
-                "name": attachment.name,
-                "mime": attachment.mime,
-                "local_path": null,
-                "error": "cancelled by session reset",
-            }));
+        if job.sandbox.generation(&job.sandbox_key) != generation {
+            updated_attachments.push(chrono_ipc::AttachmentRef {
+                id: attachment.id.clone(),
+                mime: attachment.mime.clone(),
+                name: attachment.name.clone(),
+                local_path: None,
+            });
             continue;
         }
         let mut error = None;
         let Some(adapter) = &job.adapter else {
-            error = Some("no live adapter".to_string());
-            ready.push(json!({
-                "name": attachment.name,
-                "mime": attachment.mime,
-                "local_path": null,
-                "error": error,
-            }));
+            updated_attachments.push(chrono_ipc::AttachmentRef {
+                id: attachment.id.clone(),
+                mime: attachment.mime.clone(),
+                name: attachment.name.clone(),
+                local_path: None,
+            });
             continue;
         };
 
@@ -809,11 +820,11 @@ async fn ingest_attachments(job: AttachmentJob) {
             error = Some(import_error.to_string());
         }
         let local_path = if error.is_none()
-            && job.sandbox.generation(&job.session_key) == generation
+            && job.sandbox.generation(&job.sandbox_key) == generation
         {
             match job
                 .sandbox
-                .import_file(&job.session_key, &job.message_id, &name, &staging)
+                .import_file(&job.sandbox_key, &message_id, &name, &staging)
             {
                 Ok(path) => Some(path),
                 Err(import_error) => {
@@ -831,33 +842,51 @@ async fn ingest_attachments(job: AttachmentJob) {
             eprintln!("[gateway] attachment ingest failed ({name}): {message}");
             let _ = std::fs::remove_file(&staging);
         }
-        ready.push(json!({
-            "name": attachment.name,
-            "mime": attachment.mime,
-            "local_path": local_path,
-            "error": error,
-        }));
+        updated_attachments.push(chrono_ipc::AttachmentRef {
+            id: attachment.id.clone(),
+            mime: attachment.mime.clone(),
+            name: attachment.name.clone(),
+            local_path,
+        });
     }
 
-    if job.sandbox.generation(&job.session_key) != generation {
-        for attachment in &mut ready {
-            if attachment["local_path"].is_string() {
-                attachment["local_path"] = Value::Null;
-                attachment["error"] = Value::String("cancelled by session reset".into());
-            }
+    if job.sandbox.generation(&job.sandbox_key) != generation {
+        eprintln!("[gateway] attachment delivery cancelled by sandbox reset");
+        return;
+    }
+
+    let (platform, session_key) = match &job.event {
+        ChronoEvent::InboundMessage { platform, session_key, .. } => {
+            (platform.clone(), session_key.clone())
         }
-    }
+    };
 
-    let control = json!({
-        "type": "attachment.ready",
-        "session_key": job.session_key,
-        "bot_profile_id": job.bot_profile_id,
-        "message_id": job.message_id,
-        "attachments": ready,
+    let ChronoEvent::InboundMessage { message, .. } = &mut job.event;
+    message.attachments = updated_attachments;
+
+    let payload = json!({
+        "type": "platform.inbound",
+        "platform": platform.clone(),
+        "account_id": job.account_id,
+        "session_key": session_key.clone(),
+        "event": job.event.clone(),
     });
-    let payload = serde_json::to_vec(&control).unwrap_or_default();
-    if let Err(error) = job.child.write_frame(&payload) {
-        eprintln!("[gateway] failed to deliver attachment.ready: {error}");
+    let _ = job.ws_events.send(chrono_api::WsEvent {
+        topics: vec![format!("sessions:{session_key}"), format!("platform:{platform}")],
+        payload,
+    });
+
+    let payload = serde_json::to_vec(&job.event).unwrap_or_default();
+    if let Err(e) = job.child.write_frame(&payload) {
+        eprintln!("[gateway] failed to write event to agent: {e}");
+    }
+}
+
+impl AttachmentJob {
+    fn attachments(&self) -> &[chrono_ipc::AttachmentRef] {
+        match &self.event {
+            ChronoEvent::InboundMessage { message, .. } => &message.attachments,
+        }
     }
 }
 
@@ -965,7 +994,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use chrono_ipc::adapter::{AdapterResult, PlatformResult};
-    use chrono_ipc::{AttachmentRef, ToolError};
+    use chrono_ipc::{AttachmentRef, ChatKind, ChatRef, InboundMessageBody, SenderRef, ToolError};
     use parking_lot::Mutex;
 
     #[test]
@@ -1056,21 +1085,42 @@ mod tests {
             frames: Mutex::new(Vec::new()),
         });
         let job = AttachmentJob {
+            event: ChronoEvent::InboundMessage {
+                session_key: "acc:chat:dm".into(),
+                event_id: "tg_1".into(),
+                platform: "telegram".into(),
+                bot_profile_id: Some("bot".into()),
+                chat: ChatRef {
+                    id: "chat".into(),
+                    kind: ChatKind::Dm,
+                    title: None,
+                },
+                sender: SenderRef {
+                    id: "user".into(),
+                    name: "User".into(),
+                },
+                message: InboundMessageBody {
+                    id: "m1".into(),
+                    text: String::new(),
+                    reply_to: None,
+                    attachments: vec![AttachmentRef {
+                        id: "file-1".into(),
+                        mime: "text/plain".into(),
+                        name: Some("report.txt".into()),
+                        local_path: None,
+                    }],
+                },
+                received_at: "2026-01-01T00:00:00Z".into(),
+            },
             adapter: Some(Arc::new(FakeAdapter)),
             sandbox: manager.clone(),
             child: child.clone(),
+            ws_events: tokio::sync::broadcast::channel(8).0,
             inbox_root: root.path().join("inbox"),
             account_id: "acc".into(),
-            bot_profile_id: "bot".into(),
-            session_key: "acc:chat:dm".into(),
+            sandbox_key: "acc:chat:dm#bot".into(),
             chat_id: "chat".into(),
             message_id: "m1".into(),
-            attachments: vec![AttachmentRef {
-                id: "file-1".into(),
-                mime: "text/plain".into(),
-                name: Some("report.txt".into()),
-                local_path: None,
-            }],
         };
 
         ingest_attachments(job).await;
@@ -1078,13 +1128,13 @@ mod tests {
         let frames = child.frames.lock();
         assert_eq!(frames.len(), 1);
         let payload: Value = serde_json::from_slice(&frames[0]).unwrap();
-        assert_eq!(payload["type"], "attachment.ready");
-        let path = payload["attachments"][0]["local_path"]
+        assert_eq!(payload["type"], "inbound.message");
+        let path = payload["message"]["attachments"][0]["local_path"]
             .as_str()
             .unwrap();
-        assert_eq!(path, "/workspace/inbox/m1/report.txt");
+        assert_eq!(path, "/workspace/upload/m1/report.txt");
         let host = manager
-            .resolve_file("acc:chat:dm", path)
+            .resolve_file("acc:chat:dm#bot", path)
             .expect("imported file");
         assert_eq!(std::fs::read_to_string(host).unwrap(), "hello");
     }

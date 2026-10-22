@@ -212,9 +212,11 @@ agent-host  --tool.request-->  gateway ToolRouter  --docker create/start/exec-->
 agent-host  <--tool.response--
 
 Telegram attachment
-  → adapter downloads to $CHRONO_HOME/inbox
-  → gateway imports to /workspace/inbox/<message>/…
-  → agent prompt lists workspace paths
+  → adapter forwards metadata immediately
+  → gateway downloads to $CHRONO_HOME/inbox
+  → gateway imports to /workspace/upload/<message>/…
+  → gateway sends the completed inbound event to agent-host
+  → agent prompt lists workspace paths (attachment-only messages also get a turn)
 
 agent-host sandbox_send_file
   → gateway resolves /workspace/... inside the workspace
@@ -230,7 +232,7 @@ function names and the plugin name pattern reject dots.
 |------|--------|-------------|
 | `sandbox_exec` | ✅ | Run a shell command in `/workspace`; returns `exit_code`, `stdout`, `stderr`, `truncated` |
 | `sandbox_send_file` | ✅ | Send a `/workspace/...` file to the current chat (50 MiB limit) |
-| inbound attachments | ✅ | Telegram documents/photos/audio/video/voice imported to `/workspace/inbox/...` (no tool call needed) |
+| inbound attachments | ✅ | Telegram documents/photos/audio/video/voice imported to `/workspace/upload/...`; attachment-only and file+text messages both trigger the AI |
 | `sandbox_browser` | planned | Headless Chromium with Playwright; screenshot, DOM query, navigation |
 
 File read/write intentionally uses `sandbox_exec` (`cat`, `sed`, redirection)
@@ -239,12 +241,12 @@ rather than dedicated `sandbox_read` / `sandbox_write` tools.
 ### 13.3 Lifecycle
 
 - **Lazy create**: first sandbox tool call for a session creates a container from `sandbox.image`
-- **Background attachments**: Telegram metadata is forwarded immediately; the gateway downloads/imports in a task and sends `attachment.ready`. Attachment-only messages do not resume the AI; the transcript gains a user file note.
+- **Background attachments**: Telegram metadata is forwarded immediately; the gateway downloads/imports in a task, then sends the completed event to agent-host. Attachment-only messages trigger an AI turn with the uploaded path; file+text messages include both.
 - **Idle timeout**: container destroyed after `sandbox.idle_secs` of inactivity (default 300; 0 disables)
 - **Max lifetime**: optional absolute TTL via `sandbox.max_lifetime_secs` (0 disables)
-- **Session-scoped**: one container per session; workspace mounted read-write at `/workspace`
-- **Timeout**: kills the container, not just the `docker exec` client
-- **Shutdown/orphans**: gateway shutdown removes managed containers; startup removes containers tagged for the same `$CHRONO_HOME`
+- **Session-scoped**: one container per bot-scoped route (`session_key#bot_id`); workspace mounted read-write at `/workspace`
+- **Timeout/reset cleanup**: destroys the container **and removes the workspace directory**; `/new` uses a bot-scoped sandbox key and is fully cleaned before the next turn.
+- **Shutdown/orphans**: gateway shutdown destroys tracked containers and their workspaces; startup removes orphan containers tagged for the same `$CHRONO_HOME`
 - **`/new` reset**: agent-host sends `sandbox.reset`; container/workspace are destroyed when `sandbox.destroy_on_new` is true
 - **Manual reset**: `POST /api/v1/sessions/{id}/sandbox/reset` and the Session detail **Reset sandbox** button
 

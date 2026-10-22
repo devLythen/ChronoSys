@@ -5,7 +5,7 @@
 //! clock around every `docker exec`. The agent never talks to Docker: the
 //! gateway exposes this as the `sandbox_exec` tool.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -93,6 +93,8 @@ pub enum SandboxError {
     NotConfigured,
     #[error("invalid sandbox config: {0}")]
     InvalidConfig(String),
+    #[error("sandbox is being reset")]
+    Resetting,
     #[error("invalid sandbox workdir: {0}")]
     InvalidWorkdir(String),
     #[error("invalid sandbox file path: {0}")]
@@ -138,6 +140,7 @@ pub struct SandboxManager {
     config: RwLock<SandboxConfig>,
     sessions: Mutex<HashMap<String, SessionState>>,
     generations: Mutex<HashMap<String, u64>>,
+    destroying: Mutex<HashSet<String>>,
     home_tag: String,
 }
 
@@ -150,6 +153,7 @@ impl SandboxManager {
             config: RwLock::new(config),
             sessions: Mutex::new(HashMap::new()),
             generations: Mutex::new(HashMap::new()),
+            destroying: Mutex::new(HashSet::new()),
             home_tag,
         }
     }
@@ -194,6 +198,7 @@ impl SandboxManager {
         }
         let workdir = container_workdir(cwd)?;
         let session = self.session(session_key);
+        self.wait_for_reset(&session.key).await;
         create_workspace(&session.workspace)?;
 
         if self.lifetime_expired(&config, &session.key) {
@@ -235,10 +240,28 @@ impl SandboxManager {
 
     pub async fn destroy(&self, session_key: &str) -> Result<(), SandboxError> {
         let session = self.session(session_key);
-        let result = self.remove_container(&session).await;
-        self.sessions.lock().remove(&session.key);
+        if !self.destroying.lock().insert(session.key.clone()) {
+            return Ok(());
+        }
         self.invalidate(&session.key);
+        let result = self.remove_container(&session).await;
+        if session.workspace.exists() {
+            if let Err(error) = tokio::fs::remove_dir_all(&session.workspace).await {
+                eprintln!(
+                    "[sandbox] failed to remove workspace {}: {error}",
+                    session.workspace.display()
+                );
+            }
+        }
+        self.sessions.lock().remove(&session.key);
+        self.destroying.lock().remove(&session.key);
         result
+    }
+
+    async fn wait_for_reset(&self, session_key: &str) {
+        while self.destroying.lock().contains(session_key) {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
     }
 
     /// Resolve a `/workspace/...` path to the host file inside this session's
@@ -250,6 +273,9 @@ impl SandboxManager {
         sandbox_path: &str,
     ) -> Result<PathBuf, SandboxError> {
         let session = self.session(session_key);
+        if self.destroying.lock().contains(&session.key) {
+            return Err(SandboxError::Resetting);
+        }
         let relative = sandbox_relative_path(sandbox_path)?;
         let workspace = std::fs::canonicalize(&session.workspace)
             .map_err(|_| SandboxError::FileNotFound(sandbox_path.to_string()))?;
@@ -270,7 +296,7 @@ impl SandboxManager {
     }
 
     /// Move an adapter-staged file into the session workspace and return the
-    /// path the agent should use (`/workspace/inbox/<message>/<name>`).
+    /// path the agent should use (`/workspace/upload/<message>/<name>`).
     pub fn import_file(
         &self,
         session_key: &str,
@@ -288,16 +314,19 @@ impl SandboxManager {
             return Err(SandboxError::FileTooLarge(MAX_ATTACHMENT_BYTES));
         }
         let session = self.session(session_key);
+        if self.destroying.lock().contains(&session.key) {
+            return Err(SandboxError::Resetting);
+        }
         let message_dir = safe_component(message_id, "message");
         let file_name = safe_filename(name);
-        let inbox = session.workspace.join("inbox").join(&message_dir);
-        std::fs::create_dir_all(&inbox)?;
-        let destination = inbox.join(&file_name);
+        let upload_dir = session.workspace.join("upload").join(&message_dir);
+        std::fs::create_dir_all(&upload_dir)?;
+        let destination = upload_dir.join(&file_name);
         if std::fs::rename(source, &destination).is_err() {
             std::fs::copy(source, &destination)?;
             let _ = std::fs::remove_file(source);
         }
-        Ok(format!("/workspace/inbox/{message_dir}/{file_name}"))
+        Ok(format!("/workspace/upload/{message_dir}/{file_name}"))
     }
 
     fn lifetime_expired(&self, config: &SandboxConfig, key: &str) -> bool {
@@ -764,7 +793,7 @@ mod tests {
         let sandbox_path = manager
             .import_file("acc:chat:dm", "msg/1", "../evil name.txt", &source)
             .unwrap();
-        assert_eq!(sandbox_path, "/workspace/inbox/msg_1/evil_name.txt");
+        assert_eq!(sandbox_path, "/workspace/upload/msg_1/evil_name.txt");
 
         let host = manager
             .resolve_file("acc:chat:dm", &sandbox_path)
@@ -774,6 +803,35 @@ mod tests {
             .resolve_file("acc:chat:dm", "/workspace/../etc/passwd")
             .is_err());
         assert!(manager.resolve_file("acc:chat:dm", "/etc/passwd").is_err());
+    }
+
+    #[tokio::test]
+    async fn destroy_removes_workspace_and_isolates_sessions() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = SandboxManager::new(root.path().to_path_buf(), config());
+        let first = root.path().join("first.txt");
+        let second = root.path().join("second.txt");
+        std::fs::write(&first, "first").unwrap();
+        std::fs::write(&second, "second").unwrap();
+
+        let first_path = manager
+            .import_file("acc:chat-a:dm", "m1", "shared.txt", &first)
+            .unwrap();
+        let second_path = manager
+            .import_file("acc:chat-b:dm", "m1", "shared.txt", &second)
+            .unwrap();
+        assert_eq!(first_path, "/workspace/upload/m1/shared.txt");
+        assert_eq!(second_path, "/workspace/upload/m1/shared.txt");
+
+        let first_host = manager.resolve_file("acc:chat-a:dm", &first_path).unwrap();
+        let second_host = manager.resolve_file("acc:chat-b:dm", &second_path).unwrap();
+        assert_ne!(first_host, second_host);
+        assert_eq!(std::fs::read_to_string(&first_host).unwrap(), "first");
+        assert_eq!(std::fs::read_to_string(&second_host).unwrap(), "second");
+
+        let _ = manager.destroy("acc:chat-a:dm").await;
+        assert!(!first_host.exists());
+        assert!(second_host.exists());
     }
 
     #[test]
@@ -837,6 +895,51 @@ mod tests {
             .exec("test:session", "sleep 5", None, Some(200))
             .await;
         assert!(matches!(timeout, Err(SandboxError::Timeout(200))));
+
+        manager
+            .exec("cleanup:session", "printf x", None, None)
+            .await
+            .expect("cleanup exec");
+        let workspace = root
+            .path()
+            .join("sandboxes")
+            .join(session_slug("cleanup:session"));
+        assert!(workspace.exists());
+
+        manager.shutdown().await;
+        assert!(!workspace.exists());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a running Docker daemon"]
+    async fn docker_sessions_are_isolated() {
+        let root = tempfile::tempdir().unwrap();
+        let image =
+            std::env::var("CHRONO_SANDBOX_TEST_IMAGE").unwrap_or_else(|_| "alpine:latest".into());
+        let manager = SandboxManager::new(
+            root.path().to_path_buf(),
+            SandboxConfig { image, ..config() },
+        );
+
+        manager
+            .exec("account:chat-a:dm", "printf a > /workspace/value", None, None)
+            .await
+            .expect("write a");
+        manager
+            .exec("account:chat-b:dm", "printf b > /workspace/value", None, None)
+            .await
+            .expect("write b");
+
+        let a = manager
+            .exec("account:chat-a:dm", "cat /workspace/value", None, None)
+            .await
+            .expect("read a");
+        let b = manager
+            .exec("account:chat-b:dm", "cat /workspace/value", None, None)
+            .await
+            .expect("read b");
+        assert_eq!(a.stdout, "a");
+        assert_eq!(b.stdout, "b");
 
         manager.shutdown().await;
     }

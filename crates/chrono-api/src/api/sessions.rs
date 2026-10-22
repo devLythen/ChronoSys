@@ -198,7 +198,7 @@ async fn reset_sandbox(
     let conn = open_sessions_ro(&state.sessions_db_path)?;
     let session_key: String = conn
         .query_row(
-            "SELECT session_key FROM conversation_sessions WHERE session_id=?1",
+            "SELECT route_key FROM conversation_sessions WHERE session_id=?1",
             params![session_id],
             |row| row.get(0),
         )

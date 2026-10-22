@@ -371,13 +371,13 @@ Stored as explicit `settings` rows and reloaded on config change:
 
 ### Lifecycle
 
-- One container per session key; name is `chrono-sandbox-<fnv64(session_key)>`.
+- One container per bot-scoped session key (`session_key#bot_profile_id`); name is `chrono-sandbox-<fnv64(session_key)>`.
 - Workspace: `$CHRONO_HOME/sandboxes/<fnv64>/`, bind-mounted at `/workspace`.
 - Telegram attachments are emitted as metadata immediately; a gateway background
-  job downloads them to `$CHRONO_HOME/inbox/...`, moves them to
-  `/workspace/inbox/<message-id>/`, then sends `attachment.ready` to agent-host.
-  Attachment-only messages do not start an AI turn; the ready note is appended
-  to the transcript for the next turn.
+  job downloads them to `$CHRONO_HOME/inbox/...`, imports them to
+  `/workspace/upload/<message-id>/`, then sends the completed inbound event to
+  agent-host. Attachment-only messages and file+text messages both trigger an AI
+  turn; the prompt lists the uploaded workspace paths.
 - Container root is read-only; `/tmp` is a tmpfs; workspace is read-write.
 - `--cap-drop ALL`, `--security-opt no-new-privileges`, current uid/gid,
   memory/CPU/PID caps.
@@ -389,8 +389,9 @@ Stored as explicit `settings` rows and reloaded on config change:
   session are cancelled by a generation check instead of leaking into the new one.
 - The session detail page exposes a manual **Reset sandbox** action through
   `POST /api/v1/sessions/{id}/sandbox/reset`.
-- A timeout kills the process and **removes the container**, so background
-  commands cannot continue.
+- A timeout kills the process, **removes the container and deletes the workspace**,
+  so background commands and files cannot survive.
+- `destroy` removes both container and workspace; shutdown/reaper use the same path.
 - stdout/stderr are capped at 1 MiB each; excess is drained and discarded.
 - `sandbox_send_file` resolves `/workspace/...` with canonicalization, rejects
   traversal/symlink escapes, and enforces the 50 MiB Telegram document limit.
