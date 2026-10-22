@@ -16,4 +16,5 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
-futures = { workspace = true }
+async-trait = { workspace = true }
+parking_lot = { workspace = true }

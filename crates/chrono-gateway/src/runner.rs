@@ -10,13 +10,15 @@ use anyhow::{Context, Result};
 use chrono_api::AgentControl;
 use chrono_config::{Binding, BotProfile, ConfigStore, PlatformAccount};
 use chrono_ipc::adapter::{PlatformAdapter, RoutedEvent};
-use chrono_ipc::{ChronoEvent, ToolError, ToolIpcMessage};
+use chrono_ipc::{ChronoEvent, ToolIpcMessage};
+use parking_lot::Mutex as ParkingMutex;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::adapters::build_adapter;
 use crate::http;
+use crate::tool_router::{PlatformBackend, ToolBackend, ToolContext, ToolRouter};
 use crate::GatewayChild;
 
 // ── audit ─────────────────────────────────────────────────────────
@@ -161,58 +163,88 @@ impl GatewayState {
 }
 
 // ── tool dispatch ─────────────────────────────────────────────────
+//
+// Tool calls are dispatched by `crate::tool_router::ToolRouter` in a spawned
+// task. Never hold `GatewayState` across an adapter/sandbox await: a slow
+// platform or sandbox tool must not stall inbound routing, config reloads, or
+// WebSocket delivery.
 
-fn dispatch_tool(
-    adapter: &Arc<dyn PlatformAdapter>,
-    account_id: &str,
-    chat_id: &str,
-    request: &ToolIpcMessage,
-    audit: &mut AuditLog,
-) -> anyhow::Result<ToolIpcMessage> {
-    let (tool_call_id, name, args) = match request {
-        ToolIpcMessage::Request {
-            tool_call_id,
-            name,
-            args,
-            ..
-        } => (tool_call_id.clone(), name.clone(), args.clone()),
-        _ => anyhow::bail!("expected tool.request, got response"),
+fn session_context(session_id: &str) -> (&str, &str) {
+    let mut parts = session_id.splitn(3, ':');
+    let account_id = parts.next().unwrap_or("unknown");
+    let chat_id = parts.next().unwrap_or("");
+    (account_id, chat_id)
+}
+
+async fn dispatch_async(
+    router: ToolRouter,
+    request: ToolIpcMessage,
+    account_id: String,
+    chat_id: String,
+    session_id: String,
+    state: Arc<ParkingMutex<GatewayState>>,
+    child: Arc<GatewayChild>,
+    ws_events: tokio::sync::broadcast::Sender<chrono_api::WsEvent>,
+) {
+    let tool_name = match &request {
+        ToolIpcMessage::Request { name, .. } => name.clone(),
+        ToolIpcMessage::Response { .. } => String::new(),
     };
+    let outcome = router
+        .execute(
+            &request,
+            &ToolContext {
+                account_id: &account_id,
+                chat_id: &chat_id,
+            },
+        )
+        .await;
 
-    let args = if args.get("chat_id").is_none() && !chat_id.is_empty() {
-        let mut a = args.clone();
-        if let serde_json::Value::Object(ref mut map) = a {
-            map.insert(
-                "chat_id".to_string(),
-                serde_json::Value::String(chat_id.to_string()),
-            );
-        }
-        a
-    } else {
-        args
-    };
+    {
+        let mut state = state.lock();
+        let detail = match &outcome.response {
+            ToolIpcMessage::Response {
+                ok: false,
+                error: Some(error),
+                ..
+            } => error.message.clone(),
+            _ if outcome.timed_out => "timeout".to_string(),
+            _ => "ok".to_string(),
+        };
+        state.audit.write(&json!({
+            "ts": chrono_now(),
+            "event": "tool.response",
+            "account_id": account_id,
+            "session_key": session_id,
+            "tool_name": tool_name,
+            "backend": outcome.backend,
+            "ok": matches!(&outcome.response, ToolIpcMessage::Response { ok: true, .. }),
+            "timed_out": outcome.timed_out,
+            "elapsed_ms": outcome.elapsed_ms,
+            "detail": detail,
+        }));
+    }
 
-    let started = std::time::Instant::now();
-    let result = futures::executor::block_on(adapter.invoke(&name, &args))?;
-    let elapsed_ms = started.elapsed().as_millis() as u64;
+    if let Some(platform) = &outcome.platform {
+        let topics = vec![
+            format!("sessions:{session_id}"),
+            format!("platform:{platform}"),
+        ];
+        let payload = json!({
+            "type": "platform.outbound",
+            "platform": platform,
+            "account_id": account_id,
+            "session_key": session_id,
+            "tool": tool_name,
+            "response": outcome.response,
+        });
+        let _ = ws_events.send(chrono_api::WsEvent { topics, payload });
+    }
 
-    audit.write(&json!({
-        "ts": chrono_now(),
-        "event": "tool.response",
-        "account_id": account_id,
-        "tool_name": name,
-        "tool_call_id": tool_call_id,
-        "ok": result.ok,
-        "elapsed_ms": elapsed_ms,
-        "detail": result.error.as_ref().map(|e| &e.message).unwrap_or(&"ok".to_string()),
-    }));
-
-    Ok(ToolIpcMessage::Response {
-        tool_call_id,
-        ok: result.ok,
-        result: result.result,
-        error: result.error,
-    })
+    let body = serde_json::to_vec(&outcome.response).unwrap_or_default();
+    if let Err(error) = child.write_frame(&body) {
+        eprintln!("[gateway] failed to write tool response: {error}");
+    }
 }
 
 // ── main gateway loop ─────────────────────────────────────────────
@@ -236,7 +268,7 @@ pub async fn run_gateway(
     // 2. Audit log
     let audit = AuditLog::open(&chrono_home).context("open audit log")?;
 
-    let state = Arc::new(Mutex::new(GatewayState {
+    let state = Arc::new(ParkingMutex::new(GatewayState {
         child: child.clone(),
         adapters: HashMap::new(),
         bindings: HashMap::new(),
@@ -269,6 +301,7 @@ pub async fn run_gateway(
     let stdout_pending = pending_queries.clone();
     let stdout_alive = agent_alive.clone();
     let stdout_ws_events = ws_events.clone();
+    let stdout_handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || loop {
         let payload = match stdout_child.read_frame() {
             Ok(p) => p,
@@ -280,84 +313,30 @@ pub async fn run_gateway(
         };
 
         if let Ok(tool_msg) = serde_json::from_slice::<ToolIpcMessage>(&payload) {
-            if let ToolIpcMessage::Request {
-                ref session_id,
-                ref name,
-                ..
-            } = &tool_msg
-            {
-                let parts: Vec<&str> = session_id.splitn(3, ':').collect();
-                let account_id = parts.first().copied().unwrap_or("unknown");
-                let chat_id = parts.get(1).copied().unwrap_or("");
-                let mut state = stdout_state.lock().unwrap();
-                let adapter = state
-                    .adapters
-                    .get(account_id)
-                    .map(|live| live.adapter.clone());
-                match adapter {
-                    Some(adapter) => {
-                        match dispatch_tool(
-                            &adapter,
-                            account_id,
-                            chat_id,
-                            &tool_msg,
-                            &mut state.audit,
-                        ) {
-                            Ok(response) => {
-                                let platform = adapter.id();
-                                let topics = vec![
-                                    format!("sessions:{session_id}"),
-                                    format!("platform:{platform}"),
-                                ];
-                                let payload = json!({
-                                    "type": "platform.outbound",
-                                    "platform": platform,
-                                    "account_id": account_id,
-                                    "session_key": session_id,
-                                    "tool": name,
-                                    "response": response,
-                                });
-                                let _ = stdout_ws_events.send(chrono_api::WsEvent { topics, payload });
-                                let body = serde_json::to_vec(&response).unwrap_or_default();
-                                let _ = stdout_child.write_frame(&body);
-                            }
-                            Err(e) => {
-                                eprintln!("[gateway] tool dispatch error: {e:#}");
-                                if let ToolIpcMessage::Request { tool_call_id, .. } = &tool_msg {
-                                    let response = ToolIpcMessage::Response {
-                                        tool_call_id: tool_call_id.clone(),
-                                        ok: false,
-                                        result: None,
-                                        error: Some(ToolError {
-                                            code: "dispatch_error".to_string(),
-                                            message: format!("{e:#}"),
-                                        }),
-                                    };
-                                    let body = serde_json::to_vec(&response).unwrap_or_default();
-                                    let _ = stdout_child.write_frame(&body);
-                                }
-                            }
-                        }
-                    }
-                    None => {
-                        eprintln!(
-                            "[gateway] tool dispatch: no live adapter for account {account_id}"
-                        );
-                        if let ToolIpcMessage::Request { tool_call_id, .. } = &tool_msg {
-                            let response = ToolIpcMessage::Response {
-                                tool_call_id: tool_call_id.clone(),
-                                ok: false,
-                                result: None,
-                                error: Some(ToolError {
-                                    code: "no_adapter".to_string(),
-                                    message: format!("no live adapter for account {account_id}"),
-                                }),
-                            };
-                            let body = serde_json::to_vec(&response).unwrap_or_default();
-                            let _ = stdout_child.write_frame(&body);
-                        }
-                    }
-                }
+            if let ToolIpcMessage::Request { session_id, .. } = &tool_msg {
+                let session_id = session_id.clone();
+                let (account_id, chat_id) = session_context(&session_id);
+                let adapter = {
+                    let state = stdout_state.lock();
+                    state
+                        .adapters
+                        .get(account_id)
+                        .map(|live| live.adapter.clone())
+                };
+                let platform = adapter.map(|adapter| {
+                    Arc::new(PlatformBackend::new(adapter)) as Arc<dyn ToolBackend>
+                });
+                let router = ToolRouter::new(platform, None);
+                stdout_handle.spawn(dispatch_async(
+                    router,
+                    tool_msg,
+                    account_id.to_string(),
+                    chat_id.to_string(),
+                    session_id,
+                    stdout_state.clone(),
+                    stdout_child.clone(),
+                    stdout_ws_events.clone(),
+                ));
             }
             continue;
         }
@@ -390,7 +369,7 @@ pub async fn run_gateway(
                 "host_command_sync" => {
                     if let Some(commands) = value.get("commands").and_then(|v| v.as_array()) {
                         let commands = commands.clone();
-                        let mut state = stdout_state.lock().unwrap();
+                        let state = stdout_state.lock();
                         let adapters: Vec<_> = state.adapters.values().map(|live| live.adapter.clone()).collect();
                         eprintln!("[gateway] syncing commands to {} adapter(s)", adapters.len());
                         tokio::spawn(async move {
@@ -447,7 +426,7 @@ pub async fn run_gateway(
 
     // Stop adapters on shutdown
     {
-        let mut state = state.lock().unwrap();
+        let mut state = state.lock();
         for (id, live) in state.adapters.drain() {
             live.task.abort();
             eprintln!("[gateway] stopped adapter for account {id}");
@@ -460,7 +439,7 @@ pub async fn run_gateway(
 
 /// Load bindings/bots and (re)start adapters to match enabled accounts in DB.
 fn sync_from_config(
-    state: &Arc<Mutex<GatewayState>>,
+    state: &Arc<ParkingMutex<GatewayState>>,
     chrono_home: &Path,
     event_tx: &mpsc::UnboundedSender<RoutedEvent>,
     adapter_count: &Arc<AtomicUsize>,
@@ -503,7 +482,7 @@ fn sync_from_config(
         desired.insert(a.id.clone(), (a, fp));
     }
 
-    let mut state = state.lock().unwrap();
+    let mut state = state.lock();
     state.bindings = bindings;
     state.bot_profiles = bot_profiles;
 
@@ -591,11 +570,11 @@ fn sync_from_config(
 }
 
 fn handle_inbound_event(
-    state: &Arc<Mutex<GatewayState>>,
+    state: &Arc<ParkingMutex<GatewayState>>,
     routed: RoutedEvent,
     ws_events: &tokio::sync::broadcast::Sender<chrono_api::WsEvent>,
 ) -> Result<()> {
-    let mut state = state.lock().unwrap();
+    let mut state = state.lock();
 
     let resolved = match state.resolve_binding(&routed.account_id, &routed.event) {
         Some(r) => r,
@@ -710,7 +689,7 @@ fn handle_inbound_event(
 }
 
 fn handle_agent_control(
-    state: &Arc<Mutex<GatewayState>>,
+    state: &Arc<ParkingMutex<GatewayState>>,
     chrono_home: &Path,
     event_tx: &mpsc::UnboundedSender<RoutedEvent>,
     adapter_count: &Arc<AtomicUsize>,

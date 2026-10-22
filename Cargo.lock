@@ -263,12 +263,13 @@ name = "chrono-gateway"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "chrono-adapter-telegram",
  "chrono-api",
  "chrono-config",
  "chrono-ipc",
- "futures",
+ "parking_lot",
  "serde",
  "serde_json",
  "thiserror 2.0.19",

@@ -16,6 +16,7 @@ pub mod adapters;
 pub mod http;
 pub mod runner;
 pub mod secrets;
+pub mod tool_router;
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};

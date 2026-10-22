@@ -19,6 +19,7 @@ pub struct RoutedEvent {
 }
 
 /// Outcome of executing a tool operation on the platform.
+#[derive(Clone)]
 pub struct PlatformResult {
     pub ok: bool,
     pub result: Option<Value>,

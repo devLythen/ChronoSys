@@ -29,6 +29,7 @@ anyhow = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
+parking_lot = "0.12"
 teloxide = { version = "0.13", features = ["ctrlc_handler", "rustls"] }
 futures = "0.3"
 axum = { version = "0.8", features = ["ws"] }
