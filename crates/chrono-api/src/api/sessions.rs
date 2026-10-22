@@ -1,19 +1,20 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use rusqlite::{params, Connection, OpenFlags};
 use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::error::{ApiError, ApiResult};
-use crate::state::AppState;
+use crate::state::{AgentControl, AppState};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_sessions))
         .route("/{session_id}", get(get_session))
+        .route("/{session_id}/sandbox/reset", post(reset_sandbox))
 }
 
 #[derive(Serialize)]
@@ -188,6 +189,30 @@ async fn get_session(
         SessionsSchema::V2 => get_session_v2(&conn, &session_id),
         SessionsSchema::Legacy => get_session_legacy(&conn, &session_id),
     }
+}
+
+async fn reset_sandbox(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let conn = open_sessions_ro(&state.sessions_db_path)?;
+    let session_key: String = conn
+        .query_row(
+            "SELECT session_key FROM conversation_sessions WHERE session_id=?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => {
+                ApiError::not_found(format!("session '{session_id}' not found"))
+            }
+            other => ApiError::from(other),
+        })?;
+    state
+        .agent_tx
+        .send(AgentControl::SandboxReset { session_key })
+        .map_err(|_| ApiError::internal("gateway control channel is closed"))?;
+    Ok(Json(json!({ "ok": true, "session_id": session_id })))
 }
 
 fn get_session_v2(conn: &Connection, session_id: &str) -> ApiResult<Json<SessionDetail>> {

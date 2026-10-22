@@ -16,6 +16,7 @@ use tokio::sync::oneshot;
 #[derive(Debug, Clone)]
 pub enum AgentControl {
     ReloadConfig,
+    SandboxReset { session_key: String },
 }
 
 /// Abstraction over IPC to the agent-host process for synchronous queries.

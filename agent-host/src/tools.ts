@@ -235,6 +235,80 @@ export function createSandboxExecTool(
 }
 
 /**
+ * Built-in tool: send a file from the session sandbox workspace back to the
+ * current chat. The gateway resolves `/workspace/...` to the host workspace.
+ */
+export function createSandboxSendFileTool(
+  sessionKey: string,
+  pendingCalls: Map<string, PendingCall>,
+  signal?: AbortSignal,
+): AgentTool {
+  return {
+    name: "sandbox_send_file",
+    label: "Send sandbox file",
+    description:
+      "Send a file from the session sandbox workspace to the current chat. " +
+      "The path must be inside `/workspace` (for example `/workspace/report.txt`). " +
+      "Use this after generating artifacts with sandbox_exec.",
+    parameters: Type.Object({
+      path: Type.String({
+        description: "File path inside the sandbox workspace, e.g. /workspace/report.txt.",
+      }),
+      caption: Type.Optional(
+        Type.String({
+          description: "Optional message caption shown with the file.",
+        }),
+      ),
+    }),
+    async execute(toolCallId: string, params: unknown) {
+      if (
+        !params ||
+        typeof params !== "object" ||
+        !("path" in params) ||
+        typeof params.path !== "string" ||
+        !params.path.startsWith("/workspace/")
+      ) {
+        throw new Error("sandbox_send_file requires { path: '/workspace/...', caption?: string }");
+      }
+      const args: Record<string, unknown> = { path: params.path };
+      if ("caption" in params && typeof params.caption === "string" && params.caption.trim()) {
+        args.caption = params.caption;
+      }
+      const request: ToolIpcMessage = {
+        type: "tool.request",
+        session_id: sessionKey,
+        tool_call_id: toolCallId,
+        name: "sandbox_send_file",
+        args,
+        timeout_ms: 120_000,
+      };
+      const response = await waitToolResponse(
+        toolCallId,
+        request,
+        pendingCalls,
+        signal,
+      );
+      if (response.type !== "tool.response" || !response.ok) {
+        throw new Error(
+          response.type === "tool.response"
+            ? response.error?.message ?? "sandbox send file failed"
+            : "unexpected IPC response",
+        );
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(response.result ?? {}),
+          },
+        ],
+        details: response.result,
+      };
+    },
+  };
+}
+
+/**
  * Fallback: send plain assistant body text to the **current** chat only.
  * Cross-chat delivery must use message_send with chat_id.
  */

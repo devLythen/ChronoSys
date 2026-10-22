@@ -350,12 +350,14 @@ pub async fn run_gateway(
                         state.sandbox.clone(),
                     )
                 };
+                let adapter_for_sandbox = adapter.clone();
                 let platform = adapter.map(|adapter| {
                     Arc::new(PlatformBackend::new(adapter)) as Arc<dyn ToolBackend>
                 });
-                let sandbox = Some(
-                    Arc::new(SandboxToolBackend::new(sandbox)) as Arc<dyn ToolBackend>
-                );
+                let sandbox = Some(Arc::new(SandboxToolBackend::new(
+                    sandbox,
+                    adapter_for_sandbox,
+                )) as Arc<dyn ToolBackend>);
                 let router = ToolRouter::new(platform, sandbox);
                 stdout_handle.spawn(dispatch_async(
                     router,
@@ -405,6 +407,21 @@ pub async fn run_gateway(
                         tokio::spawn(async move {
                             for adapter in &adapters { let _ = adapter.sync_commands(&commands).await; }
                         });
+                    }
+                }
+                "sandbox.reset" => {
+                    if let Some(session_key) = value.get("session_key").and_then(|v| v.as_str()) {
+                        let session_key = session_key.to_string();
+                        let sandbox = { stdout_state.lock().sandbox.clone() };
+                        if sandbox.config().destroy_on_new {
+                            stdout_handle.spawn(async move {
+                                if let Err(error) = sandbox.destroy(&session_key).await {
+                                    eprintln!(
+                                        "[gateway] sandbox reset failed for {session_key}: {error}"
+                                    );
+                                }
+                            });
+                        }
                     }
                 }
                 other => {
@@ -545,7 +562,7 @@ fn sync_from_config(
         if existing.contains(&id) {
             continue;
         }
-        match build_adapter(&account) {
+        match build_adapter(&account, chrono_home) {
             Ok(adapter) => {
                 let tx = event_tx.clone();
                 let account_id = id.clone();
@@ -667,18 +684,42 @@ fn handle_inbound_event(
 
     let mut event = routed.event;
     let ChronoEvent::InboundMessage {
-        ref chat,
-        ref mut session_key,
-        ref mut bot_profile_id,
+        chat,
+        session_key,
+        bot_profile_id,
+        message,
         ..
     } = &mut event;
-    {
-        *session_key = chrono_ipc::adapter::session_key(
-            &routed.account_id,
-            &chat.id,
-            &resolved.session_mode,
-        );
-        *bot_profile_id = Some(resolved.bot_profile_id.clone());
+    *session_key = chrono_ipc::adapter::session_key(
+        &routed.account_id,
+        &chat.id,
+        &resolved.session_mode,
+    );
+    *bot_profile_id = Some(resolved.bot_profile_id.clone());
+    let route_key = session_key.clone();
+    let message_id = message.id.clone();
+
+    // Adapters stage downloads under $CHRONO_HOME/inbox. Move them into the
+    // session workspace and expose only /workspace paths to the agent.
+    for attachment in &mut message.attachments {
+        let Some(staged) = attachment.local_path.take() else {
+            continue;
+        };
+        let name = attachment
+            .name
+            .clone()
+            .unwrap_or_else(|| "attachment".to_string());
+        match state
+            .sandbox
+            .import_file(&route_key, &message_id, &name, Path::new(&staged))
+        {
+            Ok(path) => attachment.local_path = Some(path),
+            Err(error) => {
+                eprintln!("[gateway] attachment import failed: {error}");
+                let _ = std::fs::remove_file(Path::new(&staged));
+                attachment.local_path = None;
+            }
+        }
     }
 
     {
@@ -732,6 +773,16 @@ fn handle_agent_control(
     match ctrl {
         AgentControl::ReloadConfig => {
             sync_from_config(state, chrono_home, event_tx, adapter_count)?;
+        }
+        AgentControl::SandboxReset { session_key } => {
+            let sandbox = { state.lock().sandbox.clone() };
+            tokio::spawn(async move {
+                if let Err(error) = sandbox.destroy(&session_key).await {
+                    eprintln!(
+                        "[gateway] sandbox reset failed for {session_key}: {error}"
+                    );
+                }
+            });
         }
     }
     Ok(())

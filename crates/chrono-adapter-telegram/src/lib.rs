@@ -1,26 +1,34 @@
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use chrono_ipc::adapter::{
     session_key, AdapterError, AdapterResult, PlatformAdapter, PlatformResult, RoutedEvent,
 };
-use chrono_ipc::{ChatKind, ChatRef, ChronoEvent, InboundMessageBody, SenderRef};
+use chrono_ipc::{
+    AttachmentRef, ChatKind, ChatRef, ChronoEvent, InboundMessageBody, SenderRef,
+};
 use serde_json::Value;
+use teloxide::net::Download;
 use teloxide::prelude::*;
-use teloxide::types::{BotCommand, MessageId, Recipient, ReplyParameters, UpdateKind};
+use teloxide::types::{
+    BotCommand, InputFile, MessageId, Recipient, ReplyParameters, UpdateKind,
+};
 use teloxide::{ApiError, RequestError};
 
 pub struct TelegramAdapter {
     bot: Arc<Bot>,
     account_id: String,
     bot_username: OnceLock<String>,
+    download_root: PathBuf,
 }
 
 impl TelegramAdapter {
-    pub fn new(token: String, account_id: String) -> Self {
+    pub fn new(token: String, account_id: String, download_root: PathBuf) -> Self {
         Self {
             bot: Arc::new(Bot::new(token)),
             account_id,
             bot_username: OnceLock::new(),
+            download_root,
         }
     }
 }
@@ -45,6 +53,7 @@ impl PlatformAdapter for TelegramAdapter {
     ) -> AdapterResult<()> {
         let bot = self.bot.clone();
         let account_id = self.account_id.clone();
+        let download_root = self.download_root.clone();
         let on_event = Arc::new(on_event);
 
         // Verify token first — fatal if invalid.
@@ -104,7 +113,7 @@ impl PlatformAdapter for TelegramAdapter {
                     for update in updates {
                         offset = update.id.0 as i32 + 1;
                         if let UpdateKind::Message(msg) = update.kind {
-                            handle_message(&account_id, &on_event, &msg);
+                            handle_message(&bot, &download_root, &account_id, &on_event, &msg).await;
                         }
                     }
                 }
@@ -194,6 +203,41 @@ impl PlatformAdapter for TelegramAdapter {
                     }),
                 }
             }
+            "file_send" => {
+                let chat_id = extract_chat_id(args)?;
+                let path = args["path"].as_str().unwrap_or("");
+                if path.is_empty() {
+                    return Ok(PlatformResult {
+                        ok: false,
+                        result: None,
+                        error: Some(chrono_ipc::ToolError {
+                            code: "invalid_args".to_string(),
+                            message: "file_send requires { path: string }".to_string(),
+                        }),
+                    });
+                }
+                let mut request =
+                    self.bot
+                        .send_document(Recipient::Id(ChatId(chat_id)), InputFile::file(path));
+                if let Some(caption) = args["caption"].as_str().filter(|value| !value.is_empty()) {
+                    request = request.caption(caption.to_string());
+                }
+                match request.await {
+                    Ok(msg) => Ok(PlatformResult {
+                        ok: true,
+                        result: Some(serde_json::json!({"message_id": msg.id.0.to_string()})),
+                        error: None,
+                    }),
+                    Err(e) => Ok(PlatformResult {
+                        ok: false,
+                        result: None,
+                        error: Some(chrono_ipc::ToolError {
+                            code: "send_file_failed".to_string(),
+                            message: e.to_string(),
+                        }),
+                    }),
+                }
+            }
             _ => Ok(PlatformResult {
                 ok: false, result: None,
                 error: Some(chrono_ipc::ToolError { code: "unsupported".to_string(), message: format!("unsupported tool: {tool_name}") }),
@@ -222,7 +266,9 @@ impl PlatformAdapter for TelegramAdapter {
 }
 
 
-fn handle_message(
+async fn handle_message(
+    bot: &Bot,
+    download_root: &Path,
     account_id: &str,
     on_event: &Arc<Box<dyn Fn(RoutedEvent) + Send + Sync>>,
     msg: &Message,
@@ -242,10 +288,106 @@ fn handle_message(
     let msg_id = msg.id.0;
     let text = msg.text().unwrap_or("").to_string();
     let reply_to = msg.reply_to_message().map(|m| m.id.0.to_string());
+    let event_id = format!("tg_{msg_id}");
+    let mut attachments = Vec::new();
+
+    if let Some(document) = msg.document() {
+        let name = document
+            .file_name
+            .clone()
+            .unwrap_or_else(|| format!("document_{msg_id}"));
+        attachments.push(
+            attachment(
+                bot,
+                download_root,
+                account_id,
+                &chat_id_s,
+                &event_id,
+                &document.file.id,
+                document.mime_type.as_ref().map(ToString::to_string),
+                name,
+            )
+            .await,
+        );
+    } else if let Some(photo) = msg.photo().and_then(|sizes| sizes.last()) {
+        let name = format!("photo_{msg_id}.jpg");
+        attachments.push(
+            attachment(
+                bot,
+                download_root,
+                account_id,
+                &chat_id_s,
+                &event_id,
+                &photo.file.id,
+                Some("image/jpeg".to_string()),
+                name,
+            )
+            .await,
+        );
+    }
+
+    if let Some(voice) = msg.voice() {
+        let name = format!("voice_{msg_id}.ogg");
+        attachments.push(
+            attachment(
+                bot,
+                download_root,
+                account_id,
+                &chat_id_s,
+                &event_id,
+                &voice.file.id,
+                voice
+                    .mime_type
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .or_else(|| Some("audio/ogg".to_string())),
+                name,
+            )
+            .await,
+        );
+    }
+    if let Some(audio) = msg.audio() {
+        let name = audio
+            .file_name
+            .clone()
+            .unwrap_or_else(|| format!("audio_{msg_id}"));
+        attachments.push(
+            attachment(
+                bot,
+                download_root,
+                account_id,
+                &chat_id_s,
+                &event_id,
+                &audio.file.id,
+                audio.mime_type.as_ref().map(ToString::to_string),
+                name,
+            )
+            .await,
+        );
+    }
+    if let Some(video) = msg.video() {
+        let name = video
+            .file_name
+            .clone()
+            .unwrap_or_else(|| format!("video_{msg_id}.mp4"));
+        attachments.push(
+            attachment(
+                bot,
+                download_root,
+                account_id,
+                &chat_id_s,
+                &event_id,
+                &video.file.id,
+                video.mime_type.as_ref().map(ToString::to_string),
+                name,
+            )
+            .await,
+        );
+    }
 
     let event = ChronoEvent::InboundMessage {
         session_key: session_key(account_id, &chat_id_s, "shared"),
-        event_id: format!("tg_{}", msg_id),
+        event_id,
         platform: "telegram".to_string(),
         bot_profile_id: None,
         chat: ChatRef {
@@ -261,7 +403,7 @@ fn handle_message(
             id: msg_id.to_string(),
             text,
             reply_to,
-            attachments: vec![],
+            attachments,
         },
         received_at: chrono_now(),
     };
@@ -277,6 +419,93 @@ fn handle_message(
         bot_profile_id: String::new(),
         session_mode: session_mode.to_string(),
     });
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn attachment(
+    bot: &Bot,
+    root: &Path,
+    account_id: &str,
+    chat_id: &str,
+    event_id: &str,
+    file_id: &str,
+    mime: Option<String>,
+    name: String,
+) -> AttachmentRef {
+    let local_path = match download_attachment(
+        bot, root, account_id, chat_id, event_id, file_id, &name,
+    )
+    .await
+    {
+        Ok(path) => Some(path),
+        Err(error) => {
+            eprintln!("[telegram] attachment download failed ({name}): {error}");
+            None
+        }
+    };
+    AttachmentRef {
+        id: file_id.to_string(),
+        mime: mime.unwrap_or_else(|| "application/octet-stream".to_string()),
+        name: Some(name),
+        local_path,
+    }
+}
+
+async fn download_attachment(
+    bot: &Bot,
+    root: &Path,
+    account_id: &str,
+    chat_id: &str,
+    event_id: &str,
+    file_id: &str,
+    name: &str,
+) -> Result<String, String> {
+    let file = bot.get_file(file_id).await.map_err(|e| e.to_string())?;
+    let dir = root
+        .join(staging_component(account_id))
+        .join(staging_component(chat_id))
+        .join(staging_component(event_id));
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    let destination = dir.join(staging_filename(name));
+    let mut output = tokio::fs::File::create(&destination)
+        .await
+        .map_err(|e| e.to_string())?;
+    bot.download_file(&file.path, &mut output)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(destination.to_string_lossy().to_string())
+}
+
+fn staging_component(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len().min(64));
+    for character in raw.chars().take(64) {
+        if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+            out.push(character);
+        } else {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches('.');
+    if trimmed.is_empty() {
+        "item".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn staging_filename(raw: &str) -> String {
+    let name = Path::new(raw)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("attachment");
+    let sanitized = staging_component(name);
+    if sanitized.len() > 120 {
+        sanitized[..120].to_string()
+    } else {
+        sanitized
+    }
 }
 
 fn extract_chat_id(args: &Value) -> Result<i64, AdapterError> {
@@ -314,4 +543,17 @@ fn unix_to_gregorian(days: u64) -> (u64, u64, u64) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = if month <= 2 { y + 1 } else { y };
     (year as u64, month as u64, day as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staging_names_cannot_escape_download_root() {
+        assert_eq!(staging_filename("../../etc/passwd"), "passwd");
+        assert_eq!(staging_filename("report.csv"), "report.csv");
+        assert_eq!(staging_component("../../x"), "_.._x");
+        assert_eq!(staging_component("..."), "item");
+    }
 }

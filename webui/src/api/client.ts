@@ -217,6 +217,12 @@ class ApiClient {
       method: "POST",
     });
   }
+  resetSessionSandbox(sessionId: string) {
+    return this.request<{ ok: boolean; session_id: string }>(
+      `/sessions/${encodeURIComponent(sessionId)}/sandbox/reset`,
+      { method: "POST" },
+    );
+  }
 
   createSession(botProfileId: string) {
     return this.request<import("./types").SessionDetail>("/sessions", {

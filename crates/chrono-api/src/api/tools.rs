@@ -49,5 +49,12 @@ async fn list_tools() -> ApiResult<Json<Vec<ToolInfo>>> {
                 operator enables it. Returns exit_code, stdout, stderr, and truncated."
                 .into(),
         },
+        ToolInfo {
+            name: "sandbox_send_file".into(),
+            label: "Send sandbox file".into(),
+            description: "Send a file from the session sandbox workspace to the current chat. \
+                Paths must be inside /workspace."
+                .into(),
+        },
     ]))
 }

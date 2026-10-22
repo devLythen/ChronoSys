@@ -162,6 +162,7 @@ Currently implemented built-in tools:
 - `message_send` — send/forward text to a chat; preferred path for all intentional outbound messages
 - `get_time` — return the current date/time in the bot's configured timezone (see policy `timezone`)
 - `sandbox_exec` — run a shell command in the session's Docker workspace (see §13)
+- `sandbox_send_file` — send a `/workspace/...` file back to the current chat (see §13)
 
 Built-in tools are allowlisted per persona via `tools_allowlist_json` in the `personas` table. An empty allowlist means "all known built-in tools". Plugin tools are NOT part of this allowlist — they are gated by the plugin enable toggle and per-tool persona blacklist (see PLUGIN_ARCHITECTURE §7).
 ---
@@ -309,9 +310,9 @@ long-term memory lands (M5).
 
 ## 13. Sandbox Runtime
 
-The Rust gateway owns Docker containers. agent-host only declares the
-`sandbox_exec` tool and sends a `tool.request`; it never talks to Docker or
-touches the host filesystem.
+The Rust gateway owns Docker containers. agent-host only declares
+`sandbox_exec` / `sandbox_send_file` and sends `tool.request` messages; it
+never talks to Docker or touches the host filesystem.
 
 ```
 agent-host sandbox_exec
@@ -321,6 +322,10 @@ agent-host sandbox_exec
   → SandboxManager (chrono-sandbox crate)
   → docker create/start/exec/rm
   → tool.response { exit_code, stdout, stderr, truncated }
+
+agent-host sandbox_send_file
+  → gateway resolves /workspace/... inside the session workspace
+  → adapter file_send (Telegram sendDocument)
 ```
 
 ### Configuration
@@ -337,23 +342,34 @@ Stored as explicit `settings` rows and reloaded on config change:
 | `sandbox.cpus` | `1.0` | CPU limit |
 | `sandbox.pids_limit` | `256` | PID limit |
 | `sandbox.idle_secs` | `300` | Idle container GC; `0` disables |
+| `sandbox.max_lifetime_secs` | `0` | Absolute container TTL; `0` disables |
+| `sandbox.destroy_on_new` | `true` | `/new` destroys the session container and workspace |
 
 ### Lifecycle
 
 - One container per session key; name is `chrono-sandbox-<fnv64(session_key)>`.
 - Workspace: `$CHRONO_HOME/sandboxes/<fnv64>/`, bind-mounted at `/workspace`.
+- Telegram attachments are downloaded to `$CHRONO_HOME/inbox/...`, then moved
+  into `/workspace/inbox/<message-id>/`; the agent sees only workspace paths.
 - Container root is read-only; `/tmp` is a tmpfs; workspace is read-write.
 - `--cap-drop ALL`, `--security-opt no-new-privileges`, current uid/gid,
   memory/CPU/PID caps.
-- Lazy create on first exec; idle reaper every 30s; shutdown removes all
-  containers; startup removes orphans tagged with this `CHRONO_HOME`.
+- Lazy create on first exec; reaper every 30s enforces idle and max lifetime;
+  shutdown removes all containers; startup removes orphans tagged with this
+  `CHRONO_HOME`.
+- `/new` sends `sandbox.reset`; the gateway destroys the container and workspace
+  when `sandbox.destroy_on_new` is enabled.
+- The session detail page exposes a manual **Reset sandbox** action through
+  `POST /api/v1/sessions/{id}/sandbox/reset`.
 - A timeout kills the process and **removes the container**, so background
   commands cannot continue.
 - stdout/stderr are capped at 1 MiB each; excess is drained and discarded.
+- `sandbox_send_file` resolves `/workspace/...` with canonicalization, rejects
+  traversal/symlink escapes, and enforces the 50 MiB Telegram document limit.
 
 ### Current limits
 
-`sandbox_browser`, `sandbox_read`, `sandbox_write`, chat file transfer, and the
-plugin `ctx.sandbox.*` facade are not implemented. Changing the image does not
-recreate an already-running container; it takes effect after idle/shutdown or
-an explicit destroy.
+`sandbox_browser`, `sandbox_read`, `sandbox_write`, and the plugin
+`ctx.sandbox.*` facade are not implemented. Changing the image does not
+recreate an already-running container; it takes effect after idle/max-lifetime
+expiry, shutdown, or an explicit reset.

@@ -339,6 +339,19 @@ function buildSenderIdentity(event: ChronoEvent, policy: ContextPolicy): string 
 function buildUserPrefix(event: ChronoEvent, policy: ContextPolicy): string {
   return policy.showTimestamp ? `[${formatTime(event.received_at, policy.timezone)}] ` : "";
 }
+
+/** Tell the agent where inbound files landed inside the sandbox workspace. */
+function buildAttachmentNote(event: ChronoEvent): string {
+  const attachments = event.message.attachments ?? [];
+  if (attachments.length === 0) return "";
+  const lines = attachments.map((attachment) => {
+    const label = attachment.name ? `${attachment.mime}, ${attachment.name}` : attachment.mime;
+    return attachment.local_path
+      ? `- ${attachment.local_path} (${label})`
+      : `- unavailable (${label})`;
+  });
+  return `[Attachments]\n${lines.join("\n")}\nUse sandbox tools with these /workspace paths.\n\n`;
+}
 function resolveContextWindow(model: Model<Api>, policy: ContextPolicy): number {
   return model.contextWindow > 0 ? model.contextWindow : policy.contextWindowFallback;
 }
@@ -929,6 +942,7 @@ async function main() {
         continue;
       }
       const bucket = rotateSession(route, event.session_key, bot.id);
+      writeControl({ type: "sandbox.reset", session_key: event.session_key });
       logEvent({
         type: "host_info",
         message: `session rotated route=${route} id=${bucket.sessionId}`,
@@ -1131,7 +1145,8 @@ async function main() {
       const historyBefore = bucket.messages.length;
       const userPrefix = buildUserPrefix(event, ctxPolicy);
       const senderIdentity = buildSenderIdentity(event, ctxPolicy);
-      await agent.prompt(senderIdentity + userPrefix + event.message.text);
+      const attachmentNote = buildAttachmentNote(event);
+      await agent.prompt(attachmentNote + senderIdentity + userPrefix + event.message.text);
 
       bucket.messages = agent.state.messages.slice();
       persistBucket(bucket);

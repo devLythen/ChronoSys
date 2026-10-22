@@ -19,6 +19,8 @@ use tokio::process::Command;
 pub const MAX_TIMEOUT_MS: u64 = 295_000;
 /// Per-stream capture cap. Output beyond this is drained and discarded.
 pub const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+/// Telegram Bot API document limit, also used for workspace file transfer.
+pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SandboxConfig {
@@ -30,6 +32,8 @@ pub struct SandboxConfig {
     pub cpus: f64,
     pub pids_limit: u64,
     pub idle_secs: u64,
+    pub max_lifetime_secs: u64,
+    pub destroy_on_new: bool,
 }
 
 impl Default for SandboxConfig {
@@ -43,6 +47,8 @@ impl Default for SandboxConfig {
             cpus: 1.0,
             pids_limit: 256,
             idle_secs: 300,
+            max_lifetime_secs: 0,
+            destroy_on_new: true,
         }
     }
 }
@@ -70,6 +76,11 @@ impl SandboxConfig {
                 "pids_limit must be 16..=65536".into(),
             ));
         }
+        if self.idle_secs > 31_536_000 || self.max_lifetime_secs > 31_536_000 {
+            return Err(SandboxError::InvalidConfig(
+                "sandbox timers must be <= 31536000 seconds".into(),
+            ));
+        }
         Ok(())
     }
 }
@@ -84,6 +95,14 @@ pub enum SandboxError {
     InvalidConfig(String),
     #[error("invalid sandbox workdir: {0}")]
     InvalidWorkdir(String),
+    #[error("invalid sandbox file path: {0}")]
+    InvalidFile(String),
+    #[error("sandbox file not found: {0}")]
+    FileNotFound(String),
+    #[error("file is outside the session workspace: {0}")]
+    FileOutsideWorkspace(String),
+    #[error("file exceeds the {0} byte limit")]
+    FileTooLarge(u64),
     #[error("sandbox command timed out after {0} ms")]
     Timeout(u64),
     #[error("docker: {0}")]
@@ -107,11 +126,17 @@ struct Session {
     workspace: PathBuf,
 }
 
+#[derive(Clone, Copy)]
+struct SessionState {
+    created_at: Instant,
+    last_used: Instant,
+}
+
 pub struct SandboxManager {
     /// `$CHRONO_HOME`; workspaces live under `<root>/sandboxes/<slug>`.
     root: PathBuf,
     config: RwLock<SandboxConfig>,
-    last_used: Mutex<HashMap<String, Instant>>,
+    sessions: Mutex<HashMap<String, SessionState>>,
     home_tag: String,
 }
 
@@ -122,7 +147,7 @@ impl SandboxManager {
         Self {
             root,
             config: RwLock::new(config),
-            last_used: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(HashMap::new()),
             home_tag,
         }
     }
@@ -153,10 +178,24 @@ impl SandboxManager {
         let workdir = container_workdir(cwd)?;
         let session = self.session(session_key);
         create_workspace(&session.workspace)?;
+
+        if self.lifetime_expired(&config, &session.key) {
+            let _ = self.remove_container(&session).await;
+            self.sessions.lock().remove(&session.key);
+        }
+
         self.ensure_container(&config, &session).await?;
-        self.last_used
-            .lock()
-            .insert(session.key.clone(), Instant::now());
+        {
+            let now = Instant::now();
+            let mut sessions = self.sessions.lock();
+            sessions
+                .entry(session.key.clone())
+                .and_modify(|state| state.last_used = now)
+                .or_insert(SessionState {
+                    created_at: now,
+                    last_used: now,
+                });
+        }
 
         let timeout = timeout_ms
             .unwrap_or(config.timeout_ms)
@@ -168,7 +207,7 @@ impl SandboxManager {
                 // Killing `docker exec` is not enough: the command keeps
                 // running inside the container. Destroy the container.
                 let _ = self.remove_container(&session).await;
-                self.last_used.lock().remove(&session.key);
+                self.sessions.lock().remove(&session.key);
                 Err(SandboxError::Timeout(ms))
             }
             Err(error) => Err(error),
@@ -178,11 +217,84 @@ impl SandboxManager {
     pub async fn destroy(&self, session_key: &str) -> Result<(), SandboxError> {
         let session = self.session(session_key);
         let result = self.remove_container(&session).await;
-        self.last_used.lock().remove(&session.key);
+        self.sessions.lock().remove(&session.key);
         result
     }
 
-    /// Remove containers idle for longer than `idle_secs`. `0` disables GC.
+    /// Resolve a `/workspace/...` path to the host file inside this session's
+    /// workspace. Rejects traversal, symlink escapes, missing files, and files
+    /// above the upload limit.
+    pub fn resolve_file(
+        &self,
+        session_key: &str,
+        sandbox_path: &str,
+    ) -> Result<PathBuf, SandboxError> {
+        let session = self.session(session_key);
+        let relative = sandbox_relative_path(sandbox_path)?;
+        let workspace = std::fs::canonicalize(&session.workspace)
+            .map_err(|_| SandboxError::FileNotFound(sandbox_path.to_string()))?;
+        let candidate = workspace.join(relative);
+        let canonical = std::fs::canonicalize(&candidate)
+            .map_err(|_| SandboxError::FileNotFound(sandbox_path.to_string()))?;
+        if !canonical.starts_with(&workspace) {
+            return Err(SandboxError::FileOutsideWorkspace(sandbox_path.into()));
+        }
+        let metadata = std::fs::metadata(&canonical)?;
+        if !metadata.is_file() {
+            return Err(SandboxError::FileNotFound(sandbox_path.into()));
+        }
+        if metadata.len() > MAX_ATTACHMENT_BYTES {
+            return Err(SandboxError::FileTooLarge(MAX_ATTACHMENT_BYTES));
+        }
+        Ok(canonical)
+    }
+
+    /// Move an adapter-staged file into the session workspace and return the
+    /// path the agent should use (`/workspace/inbox/<message>/<name>`).
+    pub fn import_file(
+        &self,
+        session_key: &str,
+        message_id: &str,
+        name: &str,
+        source: &Path,
+    ) -> Result<String, SandboxError> {
+        let metadata = std::fs::metadata(source)?;
+        if !metadata.is_file() {
+            return Err(SandboxError::FileNotFound(
+                source.to_string_lossy().to_string(),
+            ));
+        }
+        if metadata.len() > MAX_ATTACHMENT_BYTES {
+            return Err(SandboxError::FileTooLarge(MAX_ATTACHMENT_BYTES));
+        }
+        let session = self.session(session_key);
+        let message_dir = safe_component(message_id, "message");
+        let file_name = safe_filename(name);
+        let inbox = session.workspace.join("inbox").join(&message_dir);
+        std::fs::create_dir_all(&inbox)?;
+        let destination = inbox.join(&file_name);
+        if std::fs::rename(source, &destination).is_err() {
+            std::fs::copy(source, &destination)?;
+            let _ = std::fs::remove_file(source);
+        }
+        Ok(format!("/workspace/inbox/{message_dir}/{file_name}"))
+    }
+
+    fn lifetime_expired(&self, config: &SandboxConfig, key: &str) -> bool {
+        if config.max_lifetime_secs == 0 {
+            return false;
+        }
+        self.sessions
+            .lock()
+            .get(key)
+            .map(|state| {
+                state.created_at.elapsed() >= Duration::from_secs(config.max_lifetime_secs)
+            })
+            .unwrap_or(false)
+    }
+
+    /// Remove containers idle for longer than `idle_secs` or older than
+    /// `max_lifetime_secs`. `0` disables the respective timer.
     /// Disabling the sandbox reaps every live container on the next pass.
     pub async fn reap_idle(&self) {
         let config = self.config();
@@ -190,16 +302,22 @@ impl SandboxManager {
             self.shutdown().await;
             return;
         }
-        let idle_secs = config.idle_secs;
-        if idle_secs == 0 {
+        let idle_cutoff = (config.idle_secs > 0)
+            .then(|| Instant::now() - Duration::from_secs(config.idle_secs));
+        let lifetime = (config.max_lifetime_secs > 0)
+            .then(|| Duration::from_secs(config.max_lifetime_secs));
+        if idle_cutoff.is_none() && lifetime.is_none() {
             return;
         }
-        let cutoff = Instant::now() - Duration::from_secs(idle_secs);
+        let now = Instant::now();
         let stale: Vec<String> = self
-            .last_used
+            .sessions
             .lock()
             .iter()
-            .filter(|(_, last)| **last < cutoff)
+            .filter(|(_, state)| {
+                idle_cutoff.is_some_and(|cutoff| state.last_used < cutoff)
+                    || lifetime.is_some_and(|max| now.duration_since(state.created_at) >= max)
+            })
             .map(|(key, _)| key.clone())
             .collect();
         for key in stale {
@@ -241,7 +359,7 @@ impl SandboxManager {
     }
 
     pub async fn shutdown(&self) {
-        let keys: Vec<String> = self.last_used.lock().keys().cloned().collect();
+        let keys: Vec<String> = self.sessions.lock().keys().cloned().collect();
         for key in keys {
             if let Err(error) = self.destroy(&key).await {
                 eprintln!("[sandbox] shutdown cleanup failed for {key}: {error}");
@@ -448,6 +566,55 @@ fn create_workspace(path: &Path) -> Result<(), SandboxError> {
     Ok(())
 }
 
+fn sandbox_relative_path(sandbox_path: &str) -> Result<PathBuf, SandboxError> {
+    let rest = sandbox_path
+        .strip_prefix("/workspace/")
+        .ok_or_else(|| SandboxError::InvalidFile(sandbox_path.to_string()))?;
+    let path = Path::new(rest);
+    let mut relative = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => relative.push(part),
+            _ => return Err(SandboxError::InvalidFile(sandbox_path.to_string())),
+        }
+    }
+    if relative.as_os_str().is_empty() {
+        return Err(SandboxError::InvalidFile(sandbox_path.to_string()));
+    }
+    Ok(relative)
+}
+
+fn safe_component(raw: &str, fallback: &str) -> String {
+    let mut out = String::with_capacity(raw.len().min(64));
+    for character in raw.chars().take(64) {
+        if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+            out.push(character);
+        } else {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches('.');
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn safe_filename(raw: &str) -> String {
+    let name = Path::new(raw)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("attachment");
+    let sanitized = safe_component(name, "attachment");
+    if sanitized.len() > 120 {
+        sanitized[..120].to_string()
+    } else {
+        sanitized
+    }
+}
+
 fn container_workdir(cwd: Option<&str>) -> Result<String, SandboxError> {
     let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) else {
         return Ok("/workspace".into());
@@ -564,6 +731,67 @@ mod tests {
         assert!(matches!(
             value.validate(),
             Err(SandboxError::InvalidConfig(_))
+        ));
+    }
+
+    #[test]
+    fn imports_and_resolves_workspace_files() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = SandboxManager::new(root.path().to_path_buf(), config());
+        let source = root.path().join("source.txt");
+        std::fs::write(&source, "hello").unwrap();
+
+        let sandbox_path = manager
+            .import_file("acc:chat:dm", "msg/1", "../evil name.txt", &source)
+            .unwrap();
+        assert_eq!(sandbox_path, "/workspace/inbox/msg_1/evil_name.txt");
+
+        let host = manager
+            .resolve_file("acc:chat:dm", &sandbox_path)
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(host).unwrap(), "hello");
+        assert!(manager
+            .resolve_file("acc:chat:dm", "/workspace/../etc/passwd")
+            .is_err());
+        assert!(manager.resolve_file("acc:chat:dm", "/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn max_lifetime_expires_sessions() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = SandboxManager::new(root.path().to_path_buf(), config());
+        manager.sessions.lock().insert(
+            "acc:chat:dm".into(),
+            SessionState {
+                created_at: Instant::now() - Duration::from_secs(5),
+                last_used: Instant::now(),
+            },
+        );
+        let mut value = config();
+        value.max_lifetime_secs = 1;
+        assert!(manager.lifetime_expired(&value, "acc:chat:dm"));
+        value.max_lifetime_secs = 60;
+        assert!(!manager.lifetime_expired(&value, "acc:chat:dm"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_file_rejects_symlink_escape() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = SandboxManager::new(root.path().to_path_buf(), config());
+        let source = root.path().join("source.txt");
+        std::fs::write(&source, "hello").unwrap();
+        manager
+            .import_file("acc:chat:dm", "msg", "source.txt", &source)
+            .unwrap();
+        let workspace = root
+            .path()
+            .join("sandboxes")
+            .join(session_slug("acc:chat:dm"));
+        std::os::unix::fs::symlink("/etc/passwd", workspace.join("escape")).unwrap();
+        assert!(matches!(
+            manager.resolve_file("acc:chat:dm", "/workspace/escape"),
+            Err(SandboxError::FileOutsideWorkspace(_))
         ));
     }
 

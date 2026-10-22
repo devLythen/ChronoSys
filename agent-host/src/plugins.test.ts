@@ -27,13 +27,13 @@ describe("native plugin registry", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
-  test("registers sandbox_exec only when allowlisted", async () => {
+  test("registers sandbox tools only when allowlisted", async () => {
     const home = await homeWith();
     try {
       const registry = new ToolRegistry(home);
       await registry.reload();
-      const sandbox = registry.createToolsForAllowlist(["sandbox_exec"], "session-1", new Map());
-      expect(sandbox.map((tool) => tool.name)).toEqual(["sandbox_exec"]);
+      const sandbox = registry.createToolsForAllowlist(["sandbox_exec", "sandbox_send_file"], "session-1", new Map());
+      expect(sandbox.map((tool) => tool.name)).toEqual(["sandbox_exec", "sandbox_send_file"]);
       const platformOnly = registry.createToolsForAllowlist(["message_send"], "session-1", new Map());
       expect(platformOnly.map((tool) => tool.name)).toEqual(["message_send"]);
     } finally { await rm(home, { recursive: true, force: true }); }

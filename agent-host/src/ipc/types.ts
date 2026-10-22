@@ -12,7 +12,7 @@ export interface ChronoEventInboundMessage {
     id: string;
     text: string;
     reply_to?: string;
-    attachments: Array<{ id: string; mime: string; name?: string }>;
+    attachments: Array<{ id: string; mime: string; name?: string; local_path?: string }>;
   };
   received_at: string;
 }

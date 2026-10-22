@@ -146,6 +146,7 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 | GET/PUT/DELETE | `/bindings/{id}` | |
 | GET | `/tools` | 可用工具目录 |
 | GET | `/sessions` `/sessions/{id}` | 观测 |
+| POST | `/sessions/{id}/sandbox/reset` | 销毁该会话的沙箱容器与工作区 |
 | GET | `/audit` | 审计日志 |
 | GET/POST | `/settings` | 服务端设置列表 / 写入 |
 | GET/PUT/DELETE | `/settings/{key}` | 单项读取 / 写入 / 删除 |
@@ -222,6 +223,7 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 ### Sessions
 - 列表：5 秒自动刷新
 - 详情：左侧 transcript 气泡，右侧元数据卡片（只读）
+- 详情页提供 **Reset sandbox**：确认后销毁该会话的容器与 `/workspace` 文件
 
 ### Audit
 - 可筛选表格：limit / account_id / session_id / event
@@ -229,7 +231,7 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 
 ### Settings
 - Auth token 管理：设置 / 显示 / 清除
-- Sandbox：enable 开关、image、network、timeout/memory/cpus/pids/idle 数值；保存为 `sandbox.*` settings 行并触发 `config.reload`
+- Sandbox：enable 开关、image、network、timeout/memory/cpus/pids/idle/max-lifetime 数值、`/new` 销毁开关；保存为 `sandbox.*` settings 行并触发 `config.reload`
 - 实例信息（版本、gateway 地址、技术栈）
 
 ---

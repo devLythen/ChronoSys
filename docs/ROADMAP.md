@@ -107,7 +107,7 @@
 
 **Deliverable:** installable native plugins with AI tools and user commands; ephemeral Docker containers for arbitrary code execution.
 
-**Progress:** plugin registry complete; Docker runtime + `sandbox_exec` vertical slice complete (per-session container, workspace, limits, timeout, idle cleanup). File bridge, browser, and plugin sandbox facade remain.
+**Progress:** plugin registry complete; Docker runtime, `sandbox_exec`, chat file bridge, and configurable destruction are complete. Browser tools and the plugin sandbox facade remain.
 
 - [x] Manifest-driven registry: `[[tools]]`/`[[commands]]` metadata, `[[config]]` schema
 - [x] JS entry cross-validation: manifest names must exactly match `registerTool`/`registerCommand`
@@ -118,11 +118,13 @@
 - [x] Persona editor: plugin tool modal with per-tool blacklist toggles
 - [x] `host_command_sync` → Telegram `setMyCommands` for registered user commands
 - [x] Gateway-managed Docker runtime: lazy create, workspace mount, resource caps,
-      read-only root, no network by default, idle cleanup, explicit destroy on timeout
+      read-only root, no network by default, idle/max-lifetime cleanup, timeout destroy
 - [x] `sandbox_exec` built-in tool: async IPC dispatch, hard timeout, capped output, audit
+- [x] Chat ↔ sandbox file bridge: Telegram attachments imported to `/workspace/inbox/…`;
+      `sandbox_send_file` delivers generated files back to the chat
+- [x] Destruction controls: idle timeout, max lifetime, `/new` reset, manual session reset
 - [ ] `sandbox_browser`, `sandbox_read`, `sandbox_write`
 - [ ] Plugin context: `ctx.sandbox.*` facade for sandbox access
-- [ ] Chat ↔ sandbox file bridge: receive media/message from Telegram, upload generated files back
 ### M5 — Multi-platform & hardening (week 9–12)
 
 - [x] rolling compaction (manual + automatic, persona-preserving; see M3.5)
@@ -175,6 +177,7 @@ Python is **never** required for core install.
 | `$CHRONO_HOME/plugins/installed/<id>/` | Installed native plugins | implemented |
 | `$CHRONO_HOME/logs/audit.jsonl` | Audit log | implemented |
 | `$CHRONO_HOME/secrets/` | Encrypted credential blobs / keychain refs | not used — secrets are plaintext in the state DB |
+| `$CHRONO_HOME/inbox/` | Adapter download staging; files move into the session workspace | implemented |
 | `$CHRONO_HOME/sandboxes/` | Per-session sandbox workspaces (bind-mounted at `/workspace`) | implemented |
 | `$CHRONO_CACHE` | Optional model/HTTP cache | planned |
 

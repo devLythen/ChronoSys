@@ -26,6 +26,7 @@ pub trait ToolBackend: Send + Sync {
     async fn invoke(
         &self,
         session_key: &str,
+        chat_id: &str,
         tool_name: &str,
         args: &Value,
     ) -> anyhow::Result<PlatformResult>;
@@ -56,6 +57,7 @@ impl ToolBackend for PlatformBackend {
     async fn invoke(
         &self,
         _session_key: &str,
+        _chat_id: &str,
         tool_name: &str,
         args: &Value,
     ) -> anyhow::Result<PlatformResult> {
@@ -176,7 +178,7 @@ impl ToolRouter {
         let started = Instant::now();
         let result = tokio::time::timeout(
             Duration::from_millis(timeout_ms),
-            backend.invoke(ctx.session_key, &name, &args),
+            backend.invoke(ctx.session_key, ctx.chat_id, &name, &args),
         )
         .await;
         let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -283,6 +285,7 @@ mod tests {
         async fn invoke(
             &self,
             _session_key: &str,
+            _chat_id: &str,
             _tool_name: &str,
             args: &Value,
         ) -> anyhow::Result<PlatformResult> {
@@ -408,6 +411,7 @@ mod tests {
         async fn invoke(
             &self,
             _session_key: &str,
+            _chat_id: &str,
             _tool_name: &str,
             _args: &Value,
         ) -> anyhow::Result<PlatformResult> {

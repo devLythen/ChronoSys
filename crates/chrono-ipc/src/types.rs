@@ -55,6 +55,10 @@ pub struct AttachmentRef {
     pub mime: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Workspace path (`/workspace/...`) once the gateway has imported the
+    /// attachment; absent when download failed or the sandbox is unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

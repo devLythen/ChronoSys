@@ -1,11 +1,13 @@
 import { useState, useMemo } from "react";
 import { usePageEnter } from "../hooks/useAnimations";
 import { useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import Badge from "../components/ui/Badge";
-import { formatDate, cn } from "../lib/utils";
 import Button from "../components/ui/Button";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
+import { useToast } from "../components/ui/Toast";
+import { formatDate, cn } from "../lib/utils";
 import { ArrowLeft, Brain, Wrench, ChevronDown, ChevronRight } from "lucide-react";
 
 const STATUS_VARIANT: Record<string, "success" | "default" | "destructive" | "info"> = {
@@ -139,6 +141,16 @@ function ToolCallBubble({ block, result }: { block: ToolCallBlock; result?: stri
 
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>();
+  const toast = useToast();
+  const [resetOpen, setResetOpen] = useState(false);
+  const resetSandbox = useMutation({
+    mutationFn: () => api.resetSessionSandbox(id!),
+    onSuccess: () => {
+      setResetOpen(false);
+      toast.add("success", "Sandbox reset requested");
+    },
+    onError: (error: Error) => toast.add("error", error.message),
+  });
 
   const { data: session, isLoading, error } = useQuery({
     queryKey: ["session", id],
@@ -212,6 +224,14 @@ export default function SessionDetail() {
           <span className="t-label text-muted-fg">
             {messages.length} messages
           </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="ml-auto"
+            onClick={() => setResetOpen(true)}
+          >
+            Reset sandbox
+          </Button>
         </div>
       </div>
       <div className="rule-heavy" />
@@ -295,6 +315,15 @@ export default function SessionDetail() {
 
       </div>
     </div>
+
+    <ConfirmDialog
+      open={resetOpen}
+      title="Reset sandbox"
+      message="Delete the container and workspace for this session? Files generated in the sandbox will be lost."
+      confirmLabel="Reset"
+      onConfirm={() => resetSandbox.mutate()}
+      onCancel={() => setResetOpen(false)}
+    />
     </div>
   );
 }

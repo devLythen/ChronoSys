@@ -200,7 +200,7 @@ The test suite uses fixtures under `__fixtures__/` that are copied to temp direc
 - Gateway logs `[gateway] syncing commands to N adapter(s)` when receiving `host_command_sync`
 - Agent-host stderr shows `host_warn` for plugins that fail to load or have duplicate/mismatched registrations
 
-## 13. Docker sandbox (exec implemented)
+## 13. Docker sandbox (exec + file bridge)
 
 Ephemeral Docker containers exposed as AI tools. The gateway manages container lifecycle — agent-host never talks to Docker directly.
 
@@ -210,6 +210,15 @@ Ephemeral Docker containers exposed as AI tools. The gateway manages container l
 agent-host  --tool.request-->  gateway ToolRouter  --docker create/start/exec-->  container
                                gateway SandboxManager  <--stdout/exit/stderr--       container
 agent-host  <--tool.response--
+
+Telegram attachment
+  → adapter downloads to $CHRONO_HOME/inbox
+  → gateway imports to /workspace/inbox/<message>/…
+  → agent prompt lists workspace paths
+
+agent-host sandbox_send_file
+  → gateway resolves /workspace/... inside the workspace
+  → adapter sends the file to the chat
 ```
 
 Tool names are snake_case (`sandbox_exec`, not `sandbox.exec`) because model
@@ -220,20 +229,22 @@ function names and the plugin name pattern reject dots.
 | Tool | Status | Description |
 |------|--------|-------------|
 | `sandbox_exec` | ✅ | Run a shell command in `/workspace`; returns `exit_code`, `stdout`, `stderr`, `truncated` |
+| `sandbox_send_file` | ✅ | Send a `/workspace/...` file to the current chat (50 MiB limit) |
+| inbound attachments | ✅ | Telegram documents/photos/audio/video/voice imported to `/workspace/inbox/...` (no tool call needed) |
 | `sandbox_browser` | planned | Headless Chromium with Playwright; screenshot, DOM query, navigation |
 | `sandbox_read` | planned | Read a file from the session workspace |
 | `sandbox_write` | planned | Write a file in the session workspace |
-| `sandbox_receive_file` | planned | Download a chat attachment into the sandbox workspace |
-| `sandbox_send_file` | planned | Upload a sandbox file to the chat |
 
 ### 13.3 Lifecycle
 
 - **Lazy create**: first sandbox tool call for a session creates a container from `sandbox.image`
 - **Idle timeout**: container destroyed after `sandbox.idle_secs` of inactivity (default 300; 0 disables)
+- **Max lifetime**: optional absolute TTL via `sandbox.max_lifetime_secs` (0 disables)
 - **Session-scoped**: one container per session; workspace mounted read-write at `/workspace`
 - **Timeout**: kills the container, not just the `docker exec` client
 - **Shutdown/orphans**: gateway shutdown removes managed containers; startup removes containers tagged for the same `$CHRONO_HOME`
-- **Explicit destroy**: `/sandbox-reset` command and session rotation are not wired yet
+- **`/new` reset**: agent-host sends `sandbox.reset`; container/workspace are destroyed when `sandbox.destroy_on_new` is true
+- **Manual reset**: `POST /api/v1/sessions/{id}/sandbox/reset` and the Session detail **Reset sandbox** button
 
 ### 13.4 Constraints
 
@@ -241,6 +252,7 @@ function names and the plugin name pattern reject dots.
 - Network: default `--network none`; opt-in via `sandbox.network`
 - `--cap-drop ALL`, `no-new-privileges`, current uid/gid
 - No host mount except the session workspace; no Docker socket inside the container
+- File paths are canonicalized and must remain inside the session workspace
 - Every invocation audited: command, exit code, wall time, truncated flag
 
 ### 13.5 Plugin context (planned)

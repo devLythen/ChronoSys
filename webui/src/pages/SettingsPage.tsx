@@ -18,6 +18,8 @@ type SandboxForm = {
   cpus: number;
   pids_limit: number;
   idle_secs: number;
+  max_lifetime_secs: number;
+  destroy_on_new: boolean;
 };
 
 const SANDBOX_DEFAULTS: SandboxForm = {
@@ -29,6 +31,8 @@ const SANDBOX_DEFAULTS: SandboxForm = {
   cpus: 1,
   pids_limit: 256,
   idle_secs: 300,
+  max_lifetime_secs: 0,
+  destroy_on_new: true,
 };
 
 function numberValue(value: unknown, fallback: number): number {
@@ -58,6 +62,14 @@ function ServerSettingsSection() {
       cpus: numberValue(values["sandbox.cpus"], SANDBOX_DEFAULTS.cpus),
       pids_limit: numberValue(values["sandbox.pids_limit"], SANDBOX_DEFAULTS.pids_limit),
       idle_secs: numberValue(values["sandbox.idle_secs"], SANDBOX_DEFAULTS.idle_secs),
+      max_lifetime_secs: numberValue(
+        values["sandbox.max_lifetime_secs"],
+        SANDBOX_DEFAULTS.max_lifetime_secs,
+      ),
+      destroy_on_new:
+        values["sandbox.destroy_on_new"] === undefined
+          ? SANDBOX_DEFAULTS.destroy_on_new
+          : values["sandbox.destroy_on_new"] === true,
     });
   }, [settings]);
 
@@ -72,6 +84,8 @@ function ServerSettingsSection() {
         ["sandbox.cpus", value.cpus],
         ["sandbox.pids_limit", value.pids_limit],
         ["sandbox.idle_secs", value.idle_secs],
+        ["sandbox.max_lifetime_secs", value.max_lifetime_secs],
+        ["sandbox.destroy_on_new", value.destroy_on_new],
       ];
       for (const [key, entry] of entries) {
         await api.putSetting(key, entry);
@@ -129,7 +143,14 @@ function ServerSettingsSection() {
               onChange={(e) => update("pids_limit", numberValue(Number(e.target.value), 16))} />
             <Input label="Idle timeout (s)" type="number" value={form.idle_secs}
               onChange={(e) => update("idle_secs", numberValue(Number(e.target.value), 0))} />
+            <Input label="Max lifetime (s, 0 = off)" type="number" value={form.max_lifetime_secs}
+              onChange={(e) => update("max_lifetime_secs", numberValue(Number(e.target.value), 0))} />
           </div>
+
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm text-fg">Destroy sandbox on /new</span>
+            <Toggle checked={form.destroy_on_new} onChange={(value) => update("destroy_on_new", value)} />
+          </label>
 
           <div className="rule-thin" />
           <div className="flex items-center justify-between">
