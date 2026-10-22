@@ -7,8 +7,9 @@ use async_trait::async_trait;
 use chrono_config::ConfigStore;
 use chrono_ipc::adapter::{PlatformAdapter, PlatformResult};
 use chrono_ipc::ToolError;
-use chrono_sandbox::{SandboxConfig, SandboxError, SandboxManager};
+use chrono_sandbox::{BrowserMode, SandboxConfig, SandboxError, SandboxManager};
 use serde_json::{json, Value};
+use uuid::Uuid;
 
 use crate::tool_router::{BackendKind, ToolBackend};
 
@@ -50,6 +51,7 @@ impl ToolBackend for SandboxToolBackend {
             "sandbox_exec" => self.exec(session_key, args).await,
             "sandbox_send_file" => self.send_file(session_key, chat_id, args).await,
             "sandbox_view_image" => self.view_image(session_key, args).await,
+            "sandbox_browser" => self.browse(session_key, args).await,
             _ => Ok(failure(
                 "unsupported",
                 &format!("unsupported sandbox tool: {tool_name}"),
@@ -145,6 +147,185 @@ impl SandboxToolBackend {
         })
     }
 
+    async fn browse(
+        &self,
+        session_key: &str,
+        args: &Value,
+    ) -> anyhow::Result<PlatformResult> {
+        let config = self.manager.config();
+        if !config.enabled {
+            return Ok(failure("sandbox_unavailable", "sandbox is disabled"));
+        }
+        if config.browser != BrowserMode::Playwright {
+            return Ok(failure(
+                "browser_unavailable",
+                "browser capability is disabled; set sandbox.browser=playwright",
+            ));
+        }
+        if !config.network {
+            return Ok(failure(
+                "browser_network_disabled",
+                "browser requires sandbox.network=true",
+            ));
+        }
+        let actions = match validate_browser_actions(args) {
+            Ok(actions) => actions,
+            Err((code, message)) => return Ok(failure(code, &message)),
+        };
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .map(|value| value.clamp(1_000, chrono_sandbox::MAX_TIMEOUT_MS))
+            .unwrap_or(config.timeout_ms.min(chrono_sandbox::MAX_TIMEOUT_MS));
+        let include_image = args
+            .get("include_image")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let nonce = Uuid::new_v4();
+        let helper_source = std::env::temp_dir().join(format!("chrono-browser-{nonce}.cjs"));
+        let job_source = std::env::temp_dir().join(format!("chrono-browser-{nonce}.json"));
+        if let Err(error) = std::fs::write(&helper_source, include_str!("browser_helper.cjs")) {
+            return Ok(failure("browser_failed", &error.to_string()));
+        }
+        let job = json!({
+            "actions": actions,
+            "timeout_ms": timeout_ms,
+            "playwright_path": config.browser_playwright_path,
+            "browsers_path": config.browser_browsers_path,
+        });
+        if let Err(error) = std::fs::write(&job_source, serde_json::to_vec(&job)?) {
+            let _ = std::fs::remove_file(&helper_source);
+            return Ok(failure("browser_failed", &error.to_string()));
+        }
+
+        let helper_path = match self.manager.import_file(
+            session_key,
+            "browser",
+            "browser-run.cjs",
+            &helper_source,
+        ) {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = std::fs::remove_file(&helper_source);
+                let _ = std::fs::remove_file(&job_source);
+                return Ok(failure(sandbox_error_code(&error), &error.to_string()));
+            }
+        };
+        let job_name = format!("job-{nonce}.json");
+        let job_path = match self.manager.import_file(
+            session_key,
+            "browser",
+            &job_name,
+            &job_source,
+        ) {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = std::fs::remove_file(&job_source);
+                return Ok(failure(sandbox_error_code(&error), &error.to_string()));
+            }
+        };
+
+        let node_bin = if config.browser_node.trim().is_empty() {
+            "node"
+        } else {
+            config.browser_node.trim()
+        };
+        let command = format!(
+            "{} {} {}",
+            shell_quote(node_bin),
+            shell_quote(&helper_path),
+            shell_quote(&job_path)
+        );
+        let output = match self
+            .manager
+            .exec(
+                session_key,
+                &command,
+                None,
+                Some(timeout_ms.saturating_add(5_000)),
+            )
+            .await
+        {
+            Ok(output) => output,
+            Err(error) => return Ok(failure(sandbox_error_code(&error), &error.to_string())),
+        };
+
+        let parsed: Value = match serde_json::from_str(output.stdout.trim()) {
+            Ok(value) => value,
+            Err(error) => {
+                let detail = if output.stderr.trim().is_empty() {
+                    format!("helper returned invalid JSON: {error}")
+                } else {
+                    format!(
+                        "helper returned invalid JSON: {error}; stderr: {}",
+                        output.stderr.trim()
+                    )
+                };
+                return Ok(failure("browser_failed", &detail));
+            }
+        };
+        if parsed.get("ok").and_then(Value::as_bool) != Some(true) {
+            let code = parsed
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("browser_failed");
+            let message = parsed
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("browser action failed");
+            return Ok(failure(code, message));
+        }
+
+        let mut result = parsed;
+        if include_image {
+            if let Some(path) = result
+                .get("screenshots")
+                .and_then(Value::as_array)
+                .and_then(|screenshots| screenshots.first())
+                .and_then(Value::as_str)
+            {
+                match self.image_payload(session_key, path) {
+                    Ok((mime, data)) => {
+                        result["image"] = json!({ "mime": mime, "data": data });
+                    }
+                    Err(message) => {
+                        result["image_error"] = Value::String(message);
+                    }
+                }
+            }
+        }
+        Ok(PlatformResult {
+            ok: true,
+            result: Some(result),
+            error: None,
+        })
+    }
+
+    fn image_payload(
+        &self,
+        session_key: &str,
+        path: &str,
+    ) -> Result<(&'static str, String), String> {
+        let host = self
+            .manager
+            .resolve_file(session_key, path)
+            .map_err(|error| error.to_string())?;
+        let mime = image_mime(&host).ok_or_else(|| "screenshot is not a supported image".to_string())?;
+        let metadata = std::fs::metadata(&host).map_err(|error| error.to_string())?;
+        if metadata.len() > chrono_sandbox::MAX_IMAGE_BYTES {
+            return Err(format!(
+                "screenshot exceeds {} bytes",
+                chrono_sandbox::MAX_IMAGE_BYTES
+            ));
+        }
+        let bytes = std::fs::read(&host).map_err(|error| error.to_string())?;
+        Ok((
+            mime,
+            base64::engine::general_purpose::STANDARD.encode(bytes),
+        ))
+    }
+
     async fn send_file(
         &self,
         session_key: &str,
@@ -223,6 +404,164 @@ fn image_mime(path: &Path) -> Option<&'static str> {
     }
 }
 
+fn validate_browser_actions(args: &Value) -> Result<Vec<Value>, (&'static str, String)> {
+    const MAX_ACTIONS: usize = 50;
+    let actions = args
+        .get("actions")
+        .and_then(Value::as_array)
+        .ok_or(("invalid_args", "sandbox_browser requires { actions: [...] }".to_string()))?;
+    if actions.is_empty() || actions.len() > MAX_ACTIONS {
+        return Err((
+            "invalid_args",
+            format!("actions must contain 1..={MAX_ACTIONS} entries"),
+        ));
+    }
+    if let Some(timeout) = args.get("timeout_ms") {
+        if !timeout.is_u64() {
+            return Err(("invalid_args", "timeout_ms must be a positive integer".into()));
+        }
+    }
+    if let Some(include_image) = args.get("include_image") {
+        if !include_image.is_boolean() {
+            return Err(("invalid_args", "include_image must be a boolean".into()));
+        }
+    }
+
+    for (index, action) in actions.iter().enumerate() {
+        let object = action
+            .as_object()
+            .ok_or_else(|| ("invalid_args", format!("action {index} must be an object")))?;
+        let kind = object
+            .get("action")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ("invalid_args", format!("action {index} requires a string action")))?;
+        match kind {
+            "goto" => {
+                let raw = object
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ("invalid_args", format!("goto {index} requires url")))?;
+                validate_browser_url(raw).map_err(|(code, message)| (code, format!("goto {index}: {message}")))?;
+            }
+            "click" | "wait_for" | "fill" => {
+                object
+                    .get("selector")
+                    .and_then(Value::as_str)
+                    .filter(|selector| !selector.trim().is_empty())
+                    .ok_or_else(|| ("invalid_args", format!("{kind} {index} requires selector")))?;
+                if kind == "fill" && object.get("value").and_then(Value::as_str).is_none() {
+                    return Err(("invalid_args", format!("fill {index} requires value")));
+                }
+            }
+            "extract" => {
+                if let Some(selector) = object.get("selector") {
+                    if !selector.is_string() {
+                        return Err(("invalid_args", format!("extract {index} selector must be a string")));
+                    }
+                }
+            }
+            "screenshot" => {
+                if let Some(path) = object.get("path") {
+                    let path = path
+                        .as_str()
+                        .ok_or_else(|| ("invalid_args", format!("screenshot {index} path must be a string")))?;
+                    validate_workspace_path(path)
+                        .map_err(|message| ("invalid_args", format!("screenshot {index}: {message}")))?;
+                }
+                if let Some(full_page) = object.get("full_page") {
+                    if !full_page.is_boolean() {
+                        return Err(("invalid_args", format!("screenshot {index} full_page must be a boolean")));
+                    }
+                }
+            }
+            "wait" => {
+                if let Some(ms) = object.get("ms") {
+                    let ms = ms
+                        .as_u64()
+                        .ok_or_else(|| ("invalid_args", format!("wait {index} ms must be a positive integer")))?;
+                    if ms == 0 || ms > 30_000 {
+                        return Err(("invalid_args", format!("wait {index} ms must be 1..=30000")));
+                    }
+                }
+            }
+            other => {
+                return Err((
+                    "invalid_args",
+                    format!("action {index} is unsupported: {other}"),
+                ))
+            }
+        }
+    }
+    Ok(actions.clone())
+}
+
+fn validate_browser_url(raw: &str) -> Result<(), (&'static str, String)> {
+    let url = url::Url::parse(raw)
+        .map_err(|error| ("invalid_url", format!("invalid URL: {error}")))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(("invalid_url", "only http(s) URLs are allowed".into()));
+    }
+    match url.host() {
+        Some(url::Host::Domain(host)) => {
+            let host = host.to_ascii_lowercase();
+            if host == "localhost"
+                || host.ends_with(".localhost")
+                || host.ends_with(".local")
+                || host == "metadata.google.internal"
+            {
+                return Err(("blocked_url", format!("blocked host: {host}")));
+            }
+        }
+        Some(url::Host::Ipv4(ip)) if is_private_v4(ip) => {
+            return Err(("blocked_url", format!("blocked address: {ip}")));
+        }
+        Some(url::Host::Ipv6(ip)) if is_private_v6(ip) => {
+            return Err(("blocked_url", format!("blocked address: {ip}")));
+        }
+        Some(_) => {}
+        None => return Err(("invalid_url", "URL has no host".into())),
+    }
+    Ok(())
+}
+
+fn is_private_v4(ip: std::net::Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || ip.is_broadcast()
+        || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+        || (octets[0] == 198 && (octets[1] == 18 || octets[1] == 19))
+}
+
+fn is_private_v6(ip: std::net::Ipv6Addr) -> bool {
+    if let Some(v4) = ip.to_ipv4_mapped() {
+        return is_private_v4(v4);
+    }
+    let segments = ip.segments();
+    ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || (segments[0] & 0xfe00) == 0xfc00
+        || (segments[0] & 0xffc0) == 0xfe80
+}
+
+fn validate_workspace_path(path: &str) -> Result<(), String> {
+    if !path.starts_with("/workspace/")
+        || path.split('/').any(|segment| segment == "..")
+        || path.contains('\0')
+    {
+        return Err("path must stay under /workspace/".into());
+    }
+    Ok(())
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 fn failure(code: &str, message: &str) -> PlatformResult {
     PlatformResult {
         ok: false,
@@ -242,6 +581,25 @@ pub fn load_sandbox_config(store: &ConfigStore) -> SandboxConfig {
         enabled: bool_setting(store, "sandbox.enabled", default.enabled),
         image: string_setting(store, "sandbox.image", &default.image),
         network: bool_setting(store, "sandbox.network", default.network),
+        browser: match string_setting(store, "sandbox.browser", "none").as_str() {
+            "playwright" => BrowserMode::Playwright,
+            _ => BrowserMode::None,
+        },
+        browser_node: non_empty_string_setting(
+            store,
+            "sandbox.browser_node",
+            &default.browser_node,
+        ),
+        browser_playwright_path: non_empty_string_setting(
+            store,
+            "sandbox.browser_playwright_path",
+            &default.browser_playwright_path,
+        ),
+        browser_browsers_path: non_empty_string_setting(
+            store,
+            "sandbox.browser_browsers_path",
+            &default.browser_browsers_path,
+        ),
         timeout_ms: u64_setting(store, "sandbox.timeout_ms", default.timeout_ms),
         memory_mb: u64_setting(store, "sandbox.memory_mb", default.memory_mb),
         cpus: f64_setting(store, "sandbox.cpus", default.cpus),
@@ -279,6 +637,15 @@ fn string_setting(store: &ConfigStore, key: &str, default: &str) -> String {
     setting(store, key)
         .and_then(|value| value.as_str().map(ToOwned::to_owned))
         .unwrap_or_else(|| default.to_string())
+}
+
+fn non_empty_string_setting(store: &ConfigStore, key: &str, default: &str) -> String {
+    let value = string_setting(store, key, default);
+    if value.trim().is_empty() {
+        default.to_string()
+    } else {
+        value
+    }
 }
 
 fn u64_setting(store: &ConfigStore, key: &str, default: u64) -> u64 {
@@ -359,6 +726,140 @@ mod tests {
                 error: None,
             })
         }
+    }
+
+    #[test]
+    fn browser_url_validation_blocks_private_hosts() {
+        assert!(validate_browser_url("https://example.com").is_ok());
+        assert!(validate_browser_url("http://example.com/path").is_ok());
+        for url in [
+            "file:///etc/passwd",
+            "http://localhost:8080",
+            "http://127.0.0.1",
+            "http://10.0.0.1",
+            "http://192.168.1.1",
+            "http://169.254.169.254",
+            "http://[::1]/",
+            "http://metadata.google.internal",
+        ] {
+            assert!(validate_browser_url(url).is_err(), "should block {url}");
+        }
+    }
+
+    #[test]
+    fn browser_action_validation_rejects_bad_shapes() {
+        assert!(validate_browser_actions(&json!({
+            "actions": [
+                { "action": "goto", "url": "https://example.com" },
+                { "action": "screenshot", "path": "/workspace/shot.png", "full_page": true }
+            ]
+        }))
+        .is_ok());
+        assert!(validate_browser_actions(&json!({ "actions": [] })).is_err());
+        assert!(validate_browser_actions(&json!({
+            "actions": [{ "action": "click" }]
+        }))
+        .is_err());
+        assert!(validate_browser_actions(&json!({
+            "actions": [{ "action": "screenshot", "path": "/etc/passwd" }]
+        }))
+        .is_err());
+        assert!(validate_browser_actions(&json!({
+            "actions": [{ "action": "goto", "url": "file:///etc/passwd" }]
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn browser_screenshot_payload_reads_workspace_image() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = Arc::new(SandboxManager::new(
+            root.path().to_path_buf(),
+            SandboxConfig::default(),
+        ));
+        let source = root.path().join("shot.png");
+        std::fs::write(&source, "hello").unwrap();
+        let path = manager
+            .import_file("acc:chat:dm", "browser", "shot.png", &source)
+            .unwrap();
+        let backend = SandboxToolBackend::new(manager, None);
+        let (mime, data) = backend.image_payload("acc:chat:dm", &path).unwrap();
+        assert_eq!(mime, "image/png");
+        assert_eq!(data, "aGVsbG8=");
+    }
+
+    #[tokio::test]
+    async fn browser_rejects_disabled_capability_and_network() {
+        let root = tempfile::tempdir().unwrap();
+        let disabled = Arc::new(SandboxManager::new(
+            root.path().to_path_buf(),
+            SandboxConfig {
+                enabled: true,
+                image: "example.invalid".into(),
+                browser: BrowserMode::None,
+                network: true,
+                ..SandboxConfig::default()
+            },
+        ));
+        let backend = SandboxToolBackend::new(disabled, None);
+        let result = backend
+            .browse(
+                "acc:chat:dm",
+                &json!({ "actions": [{ "action": "goto", "url": "https://example.com" }] }),
+            )
+            .await
+            .unwrap();
+        assert!(!result.ok);
+        assert_eq!(result.error.unwrap().code, "browser_unavailable");
+
+        let offline = Arc::new(SandboxManager::new(
+            root.path().to_path_buf(),
+            SandboxConfig {
+                enabled: true,
+                image: "example.invalid".into(),
+                browser: BrowserMode::Playwright,
+                network: false,
+                ..SandboxConfig::default()
+            },
+        ));
+        let backend = SandboxToolBackend::new(offline, None);
+        let result = backend
+            .browse(
+                "acc:chat:dm",
+                &json!({ "actions": [{ "action": "goto", "url": "https://example.com" }] }),
+            )
+            .await
+            .unwrap();
+        assert!(!result.ok);
+        assert_eq!(result.error.unwrap().code, "browser_network_disabled");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a running Docker daemon"]
+    async fn browser_reports_missing_node_without_panicking() {
+        let root = tempfile::tempdir().unwrap();
+        let image =
+            std::env::var("CHRONO_SANDBOX_TEST_IMAGE").unwrap_or_else(|_| "alpine:latest".into());
+        let manager = Arc::new(SandboxManager::new(
+            root.path().to_path_buf(),
+            SandboxConfig {
+                enabled: true,
+                image,
+                browser: BrowserMode::Playwright,
+                network: true,
+                ..SandboxConfig::default()
+            },
+        ));
+        let backend = SandboxToolBackend::new(manager, None);
+        let result = backend
+            .browse(
+                "acc:chat:dm",
+                &json!({ "actions": [{ "action": "goto", "url": "https://example.com" }] }),
+            )
+            .await
+            .unwrap();
+        assert!(!result.ok);
+        assert_eq!(result.error.unwrap().code, "browser_failed");
     }
 
     #[tokio::test]

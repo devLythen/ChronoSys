@@ -233,7 +233,7 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 
 ### Settings
 - Auth token 管理：设置 / 显示 / 清除
-- Sandbox：enable 开关、image、network、timeout/memory/cpus/pids/idle/max-lifetime 数值、`/new` 销毁开关；保存为 `sandbox.*` settings 行并触发 `config.reload`
+- Sandbox：enable 开关、image、network、browser（None / Playwright）、Playwright 的 Node 路径、模块路径与浏览器二进制路径、timeout/memory/cpus/pids/idle/max-lifetime 数值、`/new` 销毁开关；保存为 `sandbox.*` settings 行并触发 `config.reload`
 - 实例信息（版本、gateway 地址、技术栈）
 
 ---

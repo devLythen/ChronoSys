@@ -2,7 +2,7 @@
 
 Agent-centric framework for connecting chat platforms to tool-calling AI agents. **All side effects go through agent tools** (send message, plugins). Powered by [pi](https://github.com/earendil-works/pi) (`@earendil-works/pi-agent-core` + `@earendil-works/pi-ai`).
 
-> Status: **M4 (active development)**. Telegram bot works end-to-end with native image input; WebUI manages all config entities; native plugin tools/commands are installable; LLM context compaction is operational; Docker `sandbox_exec`, image viewing, and chat file transfer work per session. Sandbox browser/plugin facade and long-term memory remain. See [Roadmap](docs/ROADMAP.md).
+> Status: **M4 (active development)**. Telegram bot works end-to-end with native image input; WebUI manages all config entities; native plugin tools/commands are installable; LLM context compaction is operational; Docker `sandbox_exec`, Playwright browser automation, image viewing, and chat file transfer work per session. The plugin `ctx.sandbox.browser` facade and long-term memory remain. See [Roadmap](docs/ROADMAP.md).
 
 ## Docs
 
@@ -75,8 +75,8 @@ via **Platforms → Bot API URL** or `CHRONO_TELEGRAM_API_URL`.
 ### Testing
 
 ```bash
-cargo test                          # 41 Rust tests
-cd agent-host && bun test           # 33 TypeScript tests
+cargo test                          # 46 Rust tests
+cd agent-host && bun test           # 35 TypeScript tests
 cd webui && npx tsc --noEmit        # TypeScript typecheck
 cargo test -p chrono-sandbox -p chrono-gateway -- --ignored  # Docker sandbox smoke
 ```

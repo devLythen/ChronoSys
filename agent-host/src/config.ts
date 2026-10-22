@@ -145,6 +145,20 @@ export class ChronoConfig {
     return this.db.query(`SELECT id, system_prompt, tools_allowlist_json, skills_allowlist_json, json_ext, created_at, updated_at FROM personas ORDER BY id`).all() as Persona[];
   }
 
+  // ── Settings ────────────────────────────────────────────────────
+
+  getSetting(key: string): unknown {
+    const row = this.db
+      .query("SELECT value_json FROM settings WHERE key = ?")
+      .get(key) as { value_json: string } | null;
+    if (!row) return undefined;
+    try {
+      return JSON.parse(row.value_json);
+    } catch {
+      return undefined;
+    }
+  }
+
   // ── Bindings ───────────────────────────────────────────────────
 
   getBinding(id: string): Binding | null {

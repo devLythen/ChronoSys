@@ -7,10 +7,26 @@ export type ChronoPlatform = {
   send(input: { text: string; chatId?: string }, signal?: AbortSignal): Promise<AgentToolResult<unknown>>;
 };
 
+export type ChronoSandbox = {
+  exec(
+    input: { cmd: string; cwd?: string; timeoutMs?: number },
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult<unknown>>;
+  sendFile(
+    input: { path: string; caption?: string },
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult<unknown>>;
+  viewImage(
+    input: { path: string },
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult<unknown>>;
+};
+
 export type ChronoPluginContext = {
   pluginId: string;
   sessionKey: string;
   platform: ChronoPlatform;
+  sandbox: ChronoSandbox;
   config: Record<string, unknown>;
 };
 

@@ -392,6 +392,122 @@ export function createSandboxViewImageTool(
 }
 
 /**
+ * Built-in tool: run a deterministic Playwright action batch in the session
+ * sandbox. The image must provide node + a resolvable playwright package.
+ */
+export function createSandboxBrowserTool(
+  sessionKey: string,
+  pendingCalls: Map<string, PendingCall>,
+  supportsImage: boolean,
+  signal?: AbortSignal,
+): AgentTool {
+  return {
+    name: "sandbox_browser",
+    label: "Browse in sandbox",
+    description:
+      "Run a deterministic Playwright action batch in the session sandbox and return results. " +
+      "Each call starts a fresh browser; put dependent actions in one batch. " +
+      "Use goto, click, fill, wait_for, extract, screenshot, or wait. " +
+      "Only http(s) URLs are allowed; private/local hosts are blocked. " +
+      "The container image must provide node and Playwright, and sandbox.network must be enabled.",
+    parameters: Type.Object({
+      actions: Type.Array(
+        Type.Object({
+          action: Type.String({
+            description: "goto | click | fill | wait_for | extract | screenshot | wait",
+          }),
+          url: Type.Optional(Type.String({ description: "Target URL for goto." })),
+          selector: Type.Optional(Type.String({ description: "CSS/text selector for click, fill, wait_for, extract." })),
+          value: Type.Optional(Type.String({ description: "Value for fill." })),
+          path: Type.Optional(Type.String({ description: "Screenshot path under /workspace/; optional." })),
+          full_page: Type.Optional(Type.Boolean({ description: "Capture the full page for screenshot." })),
+          ms: Type.Optional(Type.Number({ description: "Wait duration in ms (1..30000)." })),
+        }),
+        { description: "Ordered action batch (1..50 actions)." },
+      ),
+      timeout_ms: Type.Optional(
+        Type.Number({
+          minimum: 1000,
+          maximum: 295000,
+          description: "Per-action timeout in milliseconds. Omit to use the operator's sandbox timeout.",
+        }),
+      ),
+    }),
+    async execute(toolCallId: string, params: unknown) {
+      if (
+        !params ||
+        typeof params !== "object" ||
+        !("actions" in params) ||
+        !Array.isArray(params.actions) ||
+        params.actions.length === 0
+      ) {
+        throw new Error("sandbox_browser requires { actions: [...] }");
+      }
+      const requested =
+        "timeout_ms" in params &&
+        typeof params.timeout_ms === "number" &&
+        Number.isFinite(params.timeout_ms)
+          ? Math.min(Math.max(Math.floor(params.timeout_ms), 1_000), 295_000)
+          : undefined;
+      const args: Record<string, unknown> = {
+        actions: params.actions,
+        include_image: supportsImage,
+      };
+      if (requested !== undefined) args.timeout_ms = requested;
+      const request: ToolIpcMessage = {
+        type: "tool.request",
+        session_id: sessionKey,
+        tool_call_id: toolCallId,
+        name: "sandbox_browser",
+        args,
+        timeout_ms: requested === undefined ? 300_000 : Math.min(requested + 5_000, 300_000),
+      };
+      const response = await waitToolResponse(
+        toolCallId,
+        request,
+        pendingCalls,
+        signal,
+      );
+      if (response.type !== "tool.response" || !response.ok) {
+        throw new Error(
+          response.type === "tool.response"
+            ? response.error?.message ?? "sandbox browser failed"
+            : "unexpected IPC response",
+        );
+      }
+      const result = response.result;
+      if (
+        !result ||
+        typeof result !== "object" ||
+        !("results" in result) ||
+        !Array.isArray(result.results)
+      ) {
+        throw new Error("sandbox_browser returned malformed data");
+      }
+      const publicResult: Record<string, unknown> = { ...result };
+      const image = publicResult.image;
+      delete publicResult.image;
+      const content: Array<
+        { type: "text"; text: string } |
+        { type: "image"; data: string; mimeType: string }
+      > = [{ type: "text", text: JSON.stringify(publicResult) }];
+      if (
+        supportsImage &&
+        image &&
+        typeof image === "object" &&
+        "data" in image &&
+        typeof image.data === "string" &&
+        "mime" in image &&
+        typeof image.mime === "string"
+      ) {
+        content.push({ type: "image", data: image.data, mimeType: image.mime });
+      }
+      return { content, details: publicResult };
+    },
+  };
+}
+
+/**
  * Fallback: send plain assistant body text to the **current** chat only.
  * Cross-chat delivery must use message_send with chat_id.
  */

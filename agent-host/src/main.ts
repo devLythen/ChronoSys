@@ -522,6 +522,11 @@ async function main() {
   let defaultSystemPrompt = DEFAULT_SYSTEM_PROMPT;
   let defaultToolsAllowlist: string[] = [];
   let config: ChronoConfig | null = null;
+  let sandboxBrowserEnabled = false;
+  const readSandboxBrowserEnabled = (source: ChronoConfig | null): boolean =>
+    source?.getSetting("sandbox.enabled") === true &&
+    source?.getSetting("sandbox.network") === true &&
+    source?.getSetting("sandbox.browser") === "playwright";
   let models: MutableModels | null = null;
   let fallbackBot: ResolvedBot | null = null;
 
@@ -534,6 +539,7 @@ async function main() {
   }
   const dbPath = `${chronoHome}/state/chrono.db`;
     config = openConfig(dbPath);
+    sandboxBrowserEnabled = readSandboxBrowserEnabled(config);
     await registry.reconcilePersonas(new Set(config.listPersonas().map((persona) => persona.id)));
     models = buildModels(config);
     if (!models) {
@@ -832,6 +838,7 @@ async function main() {
         }
  
         if (controlType === "config.reload") {
+          sandboxBrowserEnabled = readSandboxBrowserEnabled(config);
           try { await registry.reload(); } catch (error) { logEvent({ type: "host_warn", message: `plugin registry reload failed: ${error instanceof Error ? error.message : String(error)}` }); }
           if (config) await registry.reconcilePersonas(new Set(config.listPersonas().map((p) => p.id)));
           syncPluginCommands(registry);
@@ -968,6 +975,7 @@ async function main() {
         bot.personaId ?? undefined,
         readContextPolicy(bot).timezone,
         bot.resolvedModel.model.input.includes("image"),
+        sandboxBrowserEnabled,
       );
       agent.state.tools = newTools;
       agent.state.messages = withSystemPrompt([], newPrompt, newTools);
@@ -1110,6 +1118,7 @@ async function main() {
       bot.personaId ?? undefined,
       ctxPolicy.timezone,
       bot.resolvedModel.model.input.includes("image"),
+      sandboxBrowserEnabled,
     );
     agent.state.tools = turnTools;
     agent.state.messages = withSystemPrompt(bucket.messages, turnPrompt, turnTools);

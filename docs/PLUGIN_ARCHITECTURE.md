@@ -233,8 +233,8 @@ function names and the plugin name pattern reject dots.
 | `sandbox_exec` | ✅ | Run a shell command in `/workspace`; returns `exit_code`, `stdout`, `stderr`, `truncated` |
 | `sandbox_send_file` | ✅ | Send a `/workspace/...` file to the current chat (50 MiB limit) |
 | `sandbox_view_image` | ✅ | Read a workspace image as native multimodal content for image-capable models (6 MiB limit; png/jpeg/webp/gif) |
+| `sandbox_browser` | ✅ | Playwright action batch when `sandbox.browser=playwright`; fresh browser per call, requires network and image support |
 | inbound attachments | ✅ | Telegram documents/photos/audio/video/voice imported to `/workspace/upload/...`; image-capable models also receive native image input; attachment-only and file+text messages both trigger one AI turn |
-| `sandbox_browser` | planned | Headless Chromium with Playwright; screenshot, DOM query, navigation |
 
 File read/write intentionally uses `sandbox_exec` (`cat`, `sed`, redirection)
 rather than dedicated `sandbox_read` / `sandbox_write` tools.
@@ -248,7 +248,7 @@ input support; it cannot deliver images to text-only models.
 - **Idle timeout**: container destroyed after `sandbox.idle_secs` of inactivity (default 300; 0 disables)
 - **Max lifetime**: optional absolute TTL via `sandbox.max_lifetime_secs` (0 disables)
 - **Session-scoped**: one container per bot-scoped route (`session_key#bot_id`); workspace mounted read-write at `/workspace`
-- **Timeout/reset cleanup**: destroys the container **and removes the workspace directory**; `/new` uses a bot-scoped sandbox key and is fully cleaned before the next turn.
+- **Timeout/reset cleanup**: timeout removes the container; reset/`/new` also removes the workspace directory. `/new` uses a bot-scoped sandbox key and is fully cleaned before the next turn.
 - **Shutdown/orphans**: gateway shutdown destroys tracked containers and their workspaces; startup removes orphan containers tagged for the same `$CHRONO_HOME`
 - **`/new` reset**: agent-host sends `sandbox.reset`; container/workspace are destroyed when `sandbox.destroy_on_new` is true
 - **Manual reset**: `POST /api/v1/sessions/{id}/sandbox/reset` and the Session detail **Reset sandbox** button
@@ -260,17 +260,24 @@ input support; it cannot deliver images to text-only models.
 - `--cap-drop ALL`, `no-new-privileges`, current uid/gid
 - No host mount except the session workspace; no Docker socket inside the container
 - File paths are canonicalized and must remain inside the session workspace
+- Browser actions only allow http(s); `file://` and private/local hosts are
+  blocked, and `sandbox.network` must be enabled
 - Every invocation audited: command, exit code, wall time, truncated flag
 
-### 13.5 Plugin context (planned)
+### 13.5 Plugin context
 
-Plugins cannot call the sandbox yet. The target facade is:
+Plugin tools and commands receive `ctx.sandbox` alongside `ctx.platform`:
 
 ```ts
-ctx.sandbox.exec({ cmd: "python -c 'print(1+1)'", timeoutMs: 5000 })
-ctx.sandbox.browser({ url: "https://example.com", waitFor: "networkidle0" })
+await ctx.sandbox.exec({ cmd: "python -c 'print(1+1)'", timeoutMs: 5000 })
+await ctx.sandbox.sendFile({ path: "/workspace/report.pdf", caption: "report" })
+await ctx.sandbox.viewImage({ path: "/workspace/upload/msg/photo.jpg" })
 ```
 
-This requires a generic plugin-to-gateway tool-call helper; today plugin tools
-only receive `ctx.platform.send`.
+Each call uses a unique nested IPC id and reuses the same gateway backend,
+timeout, path canonicalization, size caps, and audit path as the built-in
+tools. Facade access follows the plugin's `enabled` flag and persona tool
+blacklist, not the persona's built-in tool allowlist; disable the plugin or
+blacklist its tool to revoke sandbox access. `ctx.sandbox.browser` remains
+planned; plugins can run their own browser helper through `ctx.sandbox.exec`.
 

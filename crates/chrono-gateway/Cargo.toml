@@ -13,6 +13,7 @@ chrono-sandbox = { workspace = true }
 chrono-adapter-telegram = { workspace = true }
 base64 = { workspace = true }
 url = { workspace = true }
+uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -1,13 +1,15 @@
+import { randomUUID } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentTool, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
-import { createMessageSendTool, createSandboxExecTool, createSandboxSendFileTool, createSandboxViewImageTool, createTimeTool, type PendingCall } from "../tools.ts";
+import { createMessageSendTool, createSandboxBrowserTool, createSandboxExecTool, createSandboxSendFileTool, createSandboxViewImageTool, createTimeTool, type PendingCall } from "../tools.ts";
+import type { ChronoSandbox } from "./types.ts";
 import { readPluginPolicy, writePluginPolicy } from "./policy.ts";
 import { loadNativeManifest, pluginInstallRoot, TOOL_RE } from "./manifest.ts";
 import { createPluginApi } from "./sdk.ts";
 import type { ChronoNativeCommandDefinition, ChronoNativeToolDefinition, NativePluginManifest, NativePluginRecord, NativePluginView } from "./types.ts";
 
-const BUILTIN_TOOLS = ["message_send", "get_time", "sandbox_exec", "sandbox_send_file", "sandbox_view_image"] as const;
+const BUILTIN_TOOLS = ["message_send", "get_time", "sandbox_exec", "sandbox_send_file", "sandbox_view_image", "sandbox_browser"] as const;
 
 type Candidate = { root: string; manifest?: NativePluginManifest; error?: string };
 
@@ -59,7 +61,35 @@ export class ToolRegistry {
     return view;
   }
 
-  createToolsForAllowlist(allowlist: string[], sessionKey: string, pendingCalls: Map<string, PendingCall>, signal?: AbortSignal, personaId?: string, timezone = "UTC", supportsImage = false): AgentTool[] {
+  private sandboxFacade(
+    sessionKey: string,
+    pendingCalls: Map<string, PendingCall>,
+    signal?: AbortSignal,
+  ): ChronoSandbox {
+    const exec = createSandboxExecTool(sessionKey, pendingCalls, signal);
+    const sendFile = createSandboxSendFileTool(sessionKey, pendingCalls, signal);
+    const viewImage = createSandboxViewImageTool(sessionKey, pendingCalls, signal);
+    // Nested calls must not reuse the outer plugin tool's IPC id: two sandbox
+    // calls from one plugin tool would otherwise race on the same pending entry.
+    const nextId = () => `sandbox_${randomUUID()}`;
+    return {
+      exec: (input, callSignal) => {
+        const args: Record<string, unknown> = { cmd: input.cmd };
+        if (input.cwd !== undefined) args.cwd = input.cwd;
+        if (input.timeoutMs !== undefined) args.timeout_ms = input.timeoutMs;
+        return exec.execute(nextId(), args, callSignal ?? signal);
+      },
+      sendFile: (input, callSignal) => {
+        const args: Record<string, unknown> = { path: input.path };
+        if (input.caption !== undefined) args.caption = input.caption;
+        return sendFile.execute(nextId(), args, callSignal ?? signal);
+      },
+      viewImage: (input, callSignal) =>
+        viewImage.execute(nextId(), { path: input.path }, callSignal ?? signal),
+    };
+  }
+
+  createToolsForAllowlist(allowlist: string[], sessionKey: string, pendingCalls: Map<string, PendingCall>, signal?: AbortSignal, personaId?: string, timezone = "UTC", supportsImage = false, browserEnabled = false): AgentTool[] {
     const result: AgentTool[] = [];
     // Built-in tools: gated by allowlist
     if (allowlist.length === 0 || allowlist.includes("message_send")) {
@@ -76,6 +106,9 @@ export class ToolRegistry {
     }
     if (supportsImage && (allowlist.length === 0 || allowlist.includes("sandbox_view_image"))) {
       result.push(createSandboxViewImageTool(sessionKey, pendingCalls, signal));
+    }
+    if (browserEnabled && (allowlist.length === 0 || allowlist.includes("sandbox_browser"))) {
+      result.push(createSandboxBrowserTool(sessionKey, pendingCalls, supportsImage, signal));
     }
     // Plugin tools: controlled by per-tool persona blacklist, not the persona
     // allowlist (PLUGIN_ARCHITECTURE.md §7).
@@ -105,6 +138,7 @@ export class ToolRegistry {
     await cmd.definition.execute(`command_${Date.now()}`, match[2]?.trim() ?? "", {
       pluginId: cmd.record.id, sessionKey, config: cmd.record.policy.config,
       platform: { send: (input, sendSignal) => pt.execute(`cs_${Date.now()}`, { text: input.text, ...(input.chatId ? { chat_id: input.chatId } : {}) }, sendSignal ?? signal) },
+      sandbox: this.sandboxFacade(sessionKey, pendingCalls, signal),
     });
     return true;
   }
@@ -119,7 +153,13 @@ export class ToolRegistry {
         const ct = current?.tools.find((t) => t.name === def.name);
         if (!current || current.status === "disabled" || !ct?.enabled) throw new Error(`plugin tool ${def.name} is disabled`);
         const pt = createMessageSendTool(sessionKey, pendingCalls, callSignal ?? signal);
-        const ctx = { pluginId: record.id, sessionKey, config: record.policy.config, platform: { send: async (input: { text: string; chatId?: string }, sendSignal?: AbortSignal) => pt.execute(toolCallId, { text: input.text, ...(input.chatId ? { chat_id: input.chatId } : {}) }, sendSignal ?? callSignal ?? signal) } };
+        const ctx = {
+          pluginId: record.id,
+          sessionKey,
+          config: record.policy.config,
+          platform: { send: async (input: { text: string; chatId?: string }, sendSignal?: AbortSignal) => pt.execute(toolCallId, { text: input.text, ...(input.chatId ? { chat_id: input.chatId } : {}) }, sendSignal ?? callSignal ?? signal) },
+          sandbox: registry.sandboxFacade(sessionKey, pendingCalls, callSignal ?? signal),
+        };
         try {
           const result = await def.execute(toolCallId, params, callSignal ?? signal, onUpdate ?? (() => undefined), ctx);
           return { ...result, details: details(record.id, def.name, "success", undefined) };

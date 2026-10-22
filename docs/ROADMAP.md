@@ -109,7 +109,7 @@
 
 **Deliverable:** installable native plugins with AI tools and user commands; ephemeral Docker containers for arbitrary code execution.
 
-**Progress:** plugin registry complete; Docker runtime, `sandbox_exec`, native image input/viewing, chat file bridge, and configurable destruction are complete. Browser tools and the plugin sandbox facade remain.
+**Progress:** plugin registry complete; Docker runtime, `sandbox_exec`, native image input/viewing, chat file bridge, configurable destruction, plugin sandbox facade, and Playwright browser automation are complete. The plugin `ctx.sandbox.browser` facade remains.
 
 - [x] Manifest-driven registry: `[[tools]]`/`[[commands]]` metadata, `[[config]]` schema
 - [x] JS entry cross-validation: manifest names must exactly match `registerTool`/`registerCommand`
@@ -129,8 +129,11 @@
       both trigger an AI turn. `sandbox_send_file` delivers generated files back.
 - [x] Destruction controls: idle timeout, max lifetime, `/new` reset, manual session reset;
       destroy removes both the container and workspace directory
-- [ ] `sandbox_browser`
-- [ ] Plugin context: `ctx.sandbox.*` facade for sandbox access
+- [x] `sandbox_browser` Playwright preset: `none|playwright` capability, action batch
+      (`goto`/`click`/`fill`/`wait_for`/`extract`/`screenshot`/`wait`), fixed helper
+      script, network gating, private-host blocking, screenshot `ImageContent`
+- [x] Plugin context: `ctx.sandbox.exec` / `sendFile` / `viewImage` facade
+- [ ] Plugin context: `ctx.sandbox.browser` for browser automation
 
 File read/write is intentionally handled by `sandbox_exec`; no separate
 `sandbox_read` / `sandbox_write` tools are planned. Image bytes use

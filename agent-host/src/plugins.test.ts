@@ -44,6 +44,14 @@ describe("native plugin registry", () => {
         ["sandbox_view_image"], "session-1", new Map(), undefined, undefined, "UTC", false,
       );
       expect(textOnly).toEqual([]);
+      const browser = registry.createToolsForAllowlist(
+        [], "session-1", new Map(), undefined, undefined, "UTC", false, true,
+      );
+      expect(browser.map((tool) => tool.name)).toContain("sandbox_browser");
+      const browserOff = registry.createToolsForAllowlist(
+        [], "session-1", new Map(), undefined, undefined, "UTC", false, false,
+      );
+      expect(browserOff.map((tool) => tool.name)).not.toContain("sandbox_browser");
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
@@ -92,6 +100,93 @@ describe("native plugin registry", () => {
       await registry.reload();
       expect(registry.createToolsForAllowlist(["example_echo"], "session-1", new Map(), undefined, "persona-blocked")).toEqual([]);
       expect(registry.createToolsForAllowlist(["example_echo"], "session-1", new Map(), undefined, "persona-allowed").map((tool) => tool.name)).toEqual(["example_echo"]);
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+
+  test("routes plugin sandbox.exec through the sandbox IPC facade", async () => {
+    const home = await homeWith("sandbox");
+    try {
+      const registry = new ToolRegistry(home);
+      await registry.reload();
+      const pending = new Map();
+      const tool = registry
+        .createToolsForAllowlist([], "session-1", pending)
+        .find((candidate) => candidate.name === "example_sandbox_exec");
+      expect(tool).toBeDefined();
+
+      const running = tool!.execute("outer-call", { cmd: "printf hello" });
+      await Promise.resolve();
+      const [nestedCallId, entry] = [...pending.entries()][0]!;
+      expect(nestedCallId).not.toBe("outer-call");
+      const result = { exit_code: 0, stdout: "hello", stderr: "", truncated: false };
+      entry.resolve({
+        type: "tool.response",
+        tool_call_id: nestedCallId,
+        ok: true,
+        result,
+      });
+
+      const completed = await running;
+      expect(completed.content).toEqual([
+        { type: "text", text: JSON.stringify(result) },
+      ]);
+      expect(completed.details).toEqual({
+        plugin_id: "example_sandbox",
+        tool_name: "example_sandbox_exec",
+        outcome: "success",
+      });
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+
+  test("routes sandbox_browser actions and returns screenshot image content", async () => {
+    const home = await homeWith();
+    try {
+      const registry = new ToolRegistry(home);
+      await registry.reload();
+      const pending = new Map();
+      const tool = registry
+        .createToolsForAllowlist([], "session-1", pending, undefined, undefined, "UTC", true, true)
+        .find((candidate) => candidate.name === "sandbox_browser");
+      expect(tool).toBeDefined();
+
+      const running = tool!.execute("outer-browser", {
+        actions: [
+          { action: "goto", url: "https://example.com" },
+          { action: "screenshot", path: "/workspace/shot.png" },
+        ],
+      });
+      await Promise.resolve();
+      const [nestedCallId, entry] = [...pending.entries()][0]!;
+      const result = {
+        results: [{ action: "goto", url: "https://example.com/", title: "Example" }],
+        screenshots: ["/workspace/shot.png"],
+        url: "https://example.com/",
+        title: "Example",
+        image: { mime: "image/png", data: "aGVsbG8=" },
+      };
+      entry.resolve({
+        type: "tool.response",
+        tool_call_id: nestedCallId,
+        ok: true,
+        result,
+      });
+
+      const completed = await running;
+      expect(completed.content[0]).toEqual({
+        type: "text",
+        text: JSON.stringify({
+          results: result.results,
+          screenshots: result.screenshots,
+          url: result.url,
+          title: result.title,
+        }),
+      });
+      expect(completed.content[1]).toEqual({
+        type: "image",
+        data: "aGVsbG8=",
+        mimeType: "image/png",
+      });
+      expect(completed.details).not.toHaveProperty("image");
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 

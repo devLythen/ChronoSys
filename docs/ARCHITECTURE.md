@@ -188,6 +188,7 @@ Currently implemented built-in tools:
 - `sandbox_exec` — run a shell command in the session's Docker workspace (see §13)
 - `sandbox_send_file` — send a `/workspace/...` file back to the current chat (see §13)
 - `sandbox_view_image` — read an image from `/workspace` as native multimodal content (see §13)
+- `sandbox_browser` — run a Playwright action batch when `sandbox.browser=playwright` (see §13)
 
 Built-in tools are allowlisted per persona via `tools_allowlist_json` in the `personas` table. An empty allowlist means "all known built-in tools". Plugin tools are NOT part of this allowlist — they are gated by the plugin enable toggle and per-tool persona blacklist (see PLUGIN_ARCHITECTURE §7).
 ---
@@ -336,9 +337,9 @@ long-term memory lands (M5).
 ## 13. Sandbox Runtime
 
 The Rust gateway owns Docker containers. agent-host only declares
-`sandbox_exec` / `sandbox_send_file` / `sandbox_view_image` and sends
-`tool.request` messages; it never talks to Docker or touches the host
-filesystem.
+`sandbox_exec` / `sandbox_send_file` / `sandbox_view_image` /
+`sandbox_browser` and sends `tool.request` messages; it never talks to Docker
+or touches the host filesystem.
 
 ```
 agent-host sandbox_exec
@@ -356,7 +357,26 @@ agent-host sandbox_send_file
 agent-host sandbox_view_image
   → gateway reads /workspace/... and returns base64 + mime
   → agent-host emits Pi ImageContent to the multimodal model
+
+agent-host sandbox_browser
+  → gateway writes a fixed Playwright helper + JSON action job into /workspace
+  → docker exec node helper job (Playwright, network required)
+  → helper returns results/screenshot paths
+  → gateway optionally returns the first screenshot as base64 ImageContent
 ```
+
+Browser capability is off by default. `sandbox.browser=playwright` exposes the
+tool only when the sandbox is enabled; the image must provide Node, a resolvable
+Playwright package, and Chromium browser binaries. Configure the in-container
+Node binary (`sandbox.browser_node`), Playwright module path
+(`sandbox.browser_playwright_path`), and browser binaries path
+(`sandbox.browser_browsers_path`) in WebUI Settings. Defaults match the
+recommended image; adjust them for a different image layout. Playwright typically needs more than the
+default 512 MB memory limit; operators should raise `sandbox.memory_mb` for real
+pages. Private-host
+blocking covers literal IPs and common local names; DNS rebinding is not fully
+preventable inside the container, so network-enabled sandboxes remain a trusted
+operator choice.
 
 Inbound images are both saved under `/workspace/upload/…` and, for
 image-capable models, passed to `agent.prompt(text, images)` as native image
@@ -372,6 +392,10 @@ Stored as explicit `settings` rows and reloaded on config change:
 | `sandbox.enabled` | `false` | Fail closed until enabled |
 | `sandbox.image` | empty | Image with a POSIX shell; required |
 | `sandbox.network` | `false` | `false` → `--network none` |
+| `sandbox.browser` | `none` | `none` \| `playwright`; Playwright also requires network and image support |
+| `sandbox.browser_node` | `node` | Node executable inside the container |
+| `sandbox.browser_playwright_path` | `/opt/chrono/node_modules/playwright` | Playwright module path inside the container |
+| `sandbox.browser_browsers_path` | `/ms-playwright` | `PLAYWRIGHT_BROWSERS_PATH` for Chromium binaries |
 | `sandbox.timeout_ms` | `30000` | Default per-exec wall clock, hard cap 295000 |
 | `sandbox.memory_mb` | `512` | Container memory limit |
 | `sandbox.cpus` | `1.0` | CPU limit |
@@ -400,18 +424,32 @@ Stored as explicit `settings` rows and reloaded on config change:
   session are cancelled by a generation check instead of leaking into the new one.
 - The session detail page exposes a manual **Reset sandbox** action through
   `POST /api/v1/sessions/{id}/sandbox/reset`.
-- A timeout kills the process, **removes the container and deletes the workspace**,
-  so background commands and files cannot survive.
+- A timeout kills the process and removes the container; the workspace is
+  removed by reset/idle cleanup, so background commands cannot survive.
 - `destroy` removes both container and workspace; shutdown/reaper use the same path.
 - stdout/stderr are capped at 1 MiB each; excess is drained and discarded.
 - `sandbox_send_file` resolves `/workspace/...` with canonicalization, rejects
   traversal/symlink escapes, and enforces the 50 MiB Telegram document limit.
 - `sandbox_view_image` uses the same canonicalization and rejects non-image
   extensions and files over 6 MiB before base64 encoding.
+- `sandbox_browser` writes a fixed helper and a JSON job under
+  `/workspace/upload/browser/`, then runs `node` with a hard timeout. The
+  helper blocks `file://`, private/local hosts, and non-http(s) navigation, and
+  refuses to escape `/workspace` for screenshots. Chromium runs with
+  `--no-sandbox` inside the already isolated container. Browser tools are hidden when
+  `sandbox.browser=none`, the sandbox is disabled, or `sandbox.network=false`.
+- `sandbox_browser` returns the first screenshot as `ImageContent` only when the
+  resolved model supports image input; otherwise paths and text results are
+  returned.
+- Plugin `ctx.sandbox.browser` is not implemented; plugins can use
+  `ctx.sandbox.exec` to run their own browser helper.
 
 ### Current limits
 
-`sandbox_browser` and the plugin `ctx.sandbox.*` facade are not implemented.
+Core `sandbox_browser` is implemented for the Playwright preset only; Chromium-only
+mode is not offered. Each call starts a fresh browser, so dependent interactions
+must be placed in one action batch. The plugin `ctx.sandbox.browser` facade is
+still pending.
 File read/write intentionally goes through `sandbox_exec`. Changing the image
 does not recreate an already-running container; it takes effect after
 idle/max-lifetime expiry, shutdown, or an explicit reset.

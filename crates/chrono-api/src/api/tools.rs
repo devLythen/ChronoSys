@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
+use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
 
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 /// Tool descriptor returned by the /tools endpoint.
@@ -22,8 +23,49 @@ pub fn router() -> Router<Arc<AppState>> {
 
 /// Return the list of known platform tools that agent-host can register.
 /// This is the canonical tool catalog — keep in sync with agent-host/src/tools.ts.
-async fn list_tools() -> ApiResult<Json<Vec<ToolInfo>>> {
-    Ok(Json(vec![
+async fn list_tools(
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Json<Vec<ToolInfo>>> {
+    let (sandbox_enabled, network_enabled, browser_enabled) = {
+        let store = state
+            .config
+            .lock()
+            .map_err(|_| ApiError::internal("config lock poisoned"))?;
+        let settings = store.settings();
+        let enabled = settings
+            .get("sandbox.enabled")
+            .ok()
+            .flatten()
+            .and_then(|setting| setting.value_json.as_bool())
+            .unwrap_or(false);
+        let network = settings
+            .get("sandbox.network")
+            .ok()
+            .flatten()
+            .and_then(|setting| setting.value_json.as_bool())
+            .unwrap_or(false);
+        let browser = settings
+            .get("sandbox.browser")
+            .ok()
+            .flatten()
+            .and_then(|setting| setting.value_json.as_str().map(|value| value == "playwright"))
+            .unwrap_or(false);
+        (enabled, network, browser)
+    };
+
+    Ok(Json(tool_catalog(
+        sandbox_enabled,
+        network_enabled,
+        browser_enabled,
+    )))
+}
+
+fn tool_catalog(
+    sandbox_enabled: bool,
+    network_enabled: bool,
+    browser_enabled: bool,
+) -> Vec<ToolInfo> {
+    let mut tools = vec![
         ToolInfo {
             name: "message_send".into(),
             label: "Send / forward message".into(),
@@ -62,5 +104,37 @@ async fn list_tools() -> ApiResult<Json<Vec<ToolInfo>>> {
                 Paths must be inside /workspace."
                 .into(),
         },
-    ]))
+    ];
+    if sandbox_enabled && network_enabled && browser_enabled {
+        tools.push(ToolInfo {
+            name: "sandbox_browser".into(),
+            label: "Browse in sandbox".into(),
+            description: "Run a deterministic Playwright action batch: goto, click, fill, wait_for, extract, screenshot, wait. \
+                Each call starts a fresh browser; put dependent actions in one batch. \
+                Only http(s) URLs are allowed; private/local hosts are blocked. \
+                The sandbox image must provide node and Playwright, and sandbox.network must be enabled."
+                .into(),
+        });
+    }
+    tools
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_tool_requires_sandbox_network_and_playwright() {
+        let base = tool_catalog(true, true, false);
+        assert!(!base.iter().any(|tool| tool.name == "sandbox_browser"));
+        assert!(!tool_catalog(false, true, true)
+            .iter()
+            .any(|tool| tool.name == "sandbox_browser"));
+        assert!(!tool_catalog(true, false, true)
+            .iter()
+            .any(|tool| tool.name == "sandbox_browser"));
+        assert!(tool_catalog(true, true, true)
+            .iter()
+            .any(|tool| tool.name == "sandbox_browser"));
+    }
 }

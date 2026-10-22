@@ -24,11 +24,24 @@ pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024;
 /// Maximum image size for native multimodal input / view tool (base64 safe).
 pub const MAX_IMAGE_BYTES: u64 = 6 * 1024 * 1024;
 
+/// Browser automation capability selected by the operator. The container image
+/// must provide `node` and a resolvable Playwright package.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BrowserMode {
+    #[default]
+    None,
+    Playwright,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SandboxConfig {
     pub enabled: bool,
     pub image: String,
     pub network: bool,
+    pub browser: BrowserMode,
+    pub browser_node: String,
+    pub browser_playwright_path: String,
+    pub browser_browsers_path: String,
     pub timeout_ms: u64,
     pub memory_mb: u64,
     pub cpus: f64,
@@ -44,6 +57,10 @@ impl Default for SandboxConfig {
             enabled: false,
             image: String::new(),
             network: false,
+            browser: BrowserMode::None,
+            browser_node: "node".into(),
+            browser_playwright_path: "/opt/chrono/node_modules/playwright".into(),
+            browser_browsers_path: "/ms-playwright".into(),
             timeout_ms: 30_000,
             memory_mb: 512,
             cpus: 1.0,
@@ -462,6 +479,13 @@ impl SandboxManager {
 
         let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
         let workspace = session.workspace.to_string_lossy().to_string();
+        // Chromium writes profiles and shared-memory fallbacks to /tmp; 64 MiB
+        // is too tight for real pages, so browser-enabled sessions get more.
+        let tmp_size = if config.browser == BrowserMode::Playwright {
+            "256m"
+        } else {
+            "64m"
+        };
         let args: Vec<String> = vec![
             "create".into(),
             "--name".into(),
@@ -490,7 +514,7 @@ impl SandboxManager {
             "no-new-privileges".into(),
             "--read-only".into(),
             "--tmpfs".into(),
-            "/tmp:rw,nosuid,nodev,size=64m,mode=1777".into(),
+            format!("/tmp:rw,nosuid,nodev,size={tmp_size},mode=1777"),
             "--mount".into(),
             format!("type=bind,source={workspace},target=/workspace"),
             "--workdir".into(),
