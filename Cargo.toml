@@ -42,3 +42,4 @@ url = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 libc = "0.2"
 tempfile = "3"
+base64 = "0.22"

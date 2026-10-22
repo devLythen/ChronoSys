@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import type { ChronoEvent } from "./ipc/types.ts";
-import { ATTACHMENT_ONLY_PROMPT, buildAttachmentNote } from "./attachments.ts";
+import { ATTACHMENT_ONLY_PROMPT, buildAttachmentNote, inlineImages } from "./attachments.ts";
 
 function event(localPath: string | undefined, text = ""): ChronoEvent {
   return {
@@ -38,4 +38,15 @@ test("failed uploads are marked unavailable", () => {
 
 test("attachment-only messages get a text prompt", () => {
   expect(ATTACHMENT_ONLY_PROMPT.length).toBeGreaterThan(0);
+});
+
+test("inline images are passed only to image-capable models", () => {
+  const e = event("/workspace/upload/m1/photo.jpg");
+  e.message.attachments[0]!.inline_data = "aGVsbG8=";
+  e.message.attachments[0]!.mime = "image/jpeg";
+
+  expect(inlineImages(e, true)).toEqual([
+    { type: "image", data: "aGVsbG8=", mimeType: "image/jpeg" },
+  ]);
+  expect(inlineImages(e, false)).toEqual([]);
 });

@@ -21,6 +21,8 @@ pub const MAX_TIMEOUT_MS: u64 = 295_000;
 pub const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 /// Telegram Bot API document limit, also used for workspace file transfer.
 pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024;
+/// Maximum image size for native multimodal input / view tool (base64 safe).
+pub const MAX_IMAGE_BYTES: u64 = 6 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SandboxConfig {

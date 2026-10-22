@@ -50,6 +50,12 @@ async fn list_tools() -> ApiResult<Json<Vec<ToolInfo>>> {
                 .into(),
         },
         ToolInfo {
+            name: "sandbox_view_image".into(),
+            label: "View sandbox image".into(),
+            description: "Read an image from the sandbox workspace and return it as visual content. Supports png, jpeg, webp, and gif up to 6 MiB."
+                .into(),
+        },
+        ToolInfo {
             name: "sandbox_send_file".into(),
             label: "Send sandbox file".into(),
             description: "Send a file from the session sandbox workspace to the current chat. \

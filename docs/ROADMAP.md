@@ -109,7 +109,7 @@
 
 **Deliverable:** installable native plugins with AI tools and user commands; ephemeral Docker containers for arbitrary code execution.
 
-**Progress:** plugin registry complete; Docker runtime, `sandbox_exec`, chat file bridge, and configurable destruction are complete. Browser tools and the plugin sandbox facade remain.
+**Progress:** plugin registry complete; Docker runtime, `sandbox_exec`, native image input/viewing, chat file bridge, and configurable destruction are complete. Browser tools and the plugin sandbox facade remain.
 
 - [x] Manifest-driven registry: `[[tools]]`/`[[commands]]` metadata, `[[config]]` schema
 - [x] JS entry cross-validation: manifest names must exactly match `registerTool`/`registerCommand`
@@ -122,6 +122,8 @@
 - [x] Gateway-managed Docker runtime: lazy create, workspace mount, resource caps,
       read-only root, no network by default, idle/max-lifetime cleanup, timeout destroy
 - [x] `sandbox_exec` built-in tool: async IPC dispatch, hard timeout, capped output, audit
+- [x] `sandbox_view_image` for image-capable models; inbound images also use native
+      `agent.prompt(text, images)` while remaining available under `/workspace/upload/`
 - [x] Chat ↔ sandbox file bridge: Telegram attachments are downloaded/imported to
       `/workspace/upload/…` by a background job; attachment-only and file+text messages
       both trigger an AI turn. `sandbox_send_file` delivers generated files back.
@@ -131,7 +133,8 @@
 - [ ] Plugin context: `ctx.sandbox.*` facade for sandbox access
 
 File read/write is intentionally handled by `sandbox_exec`; no separate
-`sandbox_read` / `sandbox_write` tools are planned.
+`sandbox_read` / `sandbox_write` tools are planned. Image bytes use
+`sandbox_view_image` because text tools cannot deliver native multimodal input.
 ### M5 — Multi-platform & hardening (week 9–12)
 
 - [x] rolling compaction (manual + automatic, persona-preserving; see M3.5)

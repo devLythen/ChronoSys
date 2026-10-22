@@ -340,7 +340,7 @@ fn handle_message(
     let sender_id = msg.from.as_ref().map(|u| u.id.0.to_string());
     let sender_name = msg.from.as_ref().map(|u| u.full_name());
     let msg_id = msg.id.0;
-    let text = msg.text().unwrap_or("").to_string();
+    let text = message_text(msg);
     let reply_to = msg.reply_to_message().map(|m| m.id.0.to_string());
     let event_id = format!("tg_{msg_id}");
     let mut attachments = Vec::new();
@@ -439,7 +439,17 @@ fn attachment_meta(file_id: &str, mime: Option<String>, name: String) -> Attachm
         mime: mime.unwrap_or_else(|| "application/octet-stream".to_string()),
         name: Some(name),
         local_path: None,
+        inline_data: None,
     }
+}
+
+/// Captions are how Telegram delivers text for photos/documents; without this
+/// fallback an image-with-question arrives as an attachment-only turn.
+fn message_text(msg: &Message) -> String {
+    msg.text()
+        .or_else(|| msg.caption())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn extract_chat_id(args: &Value) -> Result<i64, AdapterError> {
@@ -482,6 +492,21 @@ fn unix_to_gregorian(days: u64) -> (u64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn photo_captions_become_text() {
+        let msg: Message = serde_json::from_value(serde_json::json!({
+            "message_id": 1,
+            "date": 0,
+            "chat": { "id": 1, "type": "private" },
+            "photo": [
+                { "file_id": "file-1", "file_unique_id": "unique-1", "width": 1, "height": 1 }
+            ],
+            "caption": "what is this?"
+        }))
+        .expect("valid photo message");
+        assert_eq!(message_text(&msg), "what is this?");
+    }
 
     #[test]
     fn proxy_urls_get_a_default_scheme() {

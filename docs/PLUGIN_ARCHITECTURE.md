@@ -232,16 +232,19 @@ function names and the plugin name pattern reject dots.
 |------|--------|-------------|
 | `sandbox_exec` | ✅ | Run a shell command in `/workspace`; returns `exit_code`, `stdout`, `stderr`, `truncated` |
 | `sandbox_send_file` | ✅ | Send a `/workspace/...` file to the current chat (50 MiB limit) |
-| inbound attachments | ✅ | Telegram documents/photos/audio/video/voice imported to `/workspace/upload/...`; attachment-only and file+text messages both trigger the AI |
+| `sandbox_view_image` | ✅ | Read a workspace image as native multimodal content for image-capable models (6 MiB limit; png/jpeg/webp/gif) |
+| inbound attachments | ✅ | Telegram documents/photos/audio/video/voice imported to `/workspace/upload/...`; image-capable models also receive native image input; attachment-only and file+text messages both trigger one AI turn |
 | `sandbox_browser` | planned | Headless Chromium with Playwright; screenshot, DOM query, navigation |
 
 File read/write intentionally uses `sandbox_exec` (`cat`, `sed`, redirection)
 rather than dedicated `sandbox_read` / `sandbox_write` tools.
+`sandbox_view_image` is registered only when the resolved model declares image
+input support; it cannot deliver images to text-only models.
 
 ### 13.3 Lifecycle
 
 - **Lazy create**: first sandbox tool call for a session creates a container from `sandbox.image`
-- **Background attachments**: Telegram metadata is forwarded immediately; the gateway downloads/imports in a task, then sends the completed event to agent-host. Attachment-only messages trigger an AI turn with the uploaded path; file+text messages include both.
+- **Background attachments**: the gateway downloads/imports attachments in a task before forwarding the completed event to agent-host. Attachment-only messages trigger one AI turn with the uploaded path; file+text messages include both, and image-capable models also receive native image bytes.
 - **Idle timeout**: container destroyed after `sandbox.idle_secs` of inactivity (default 300; 0 disables)
 - **Max lifetime**: optional absolute TTL via `sandbox.max_lifetime_secs` (0 disables)
 - **Session-scoped**: one container per bot-scoped route (`session_key#bot_id`); workspace mounted read-write at `/workspace`

@@ -309,6 +309,89 @@ export function createSandboxSendFileTool(
 }
 
 /**
+ * Built-in tool: read an image from the sandbox workspace and return it as
+ * native multimodal content, so the model can inspect files it did not upload
+ * in the current turn.
+ */
+export function createSandboxViewImageTool(
+  sessionKey: string,
+  pendingCalls: Map<string, PendingCall>,
+  signal?: AbortSignal,
+): AgentTool {
+  return {
+    name: "sandbox_view_image",
+    label: "View sandbox image",
+    description:
+      "Read an image file from the sandbox workspace and return it as visual content. " +
+      "Use this to inspect images already stored under /workspace (uploaded or generated). " +
+      "Supports png, jpeg, webp, and gif up to 6 MiB.",
+    parameters: Type.Object({
+      path: Type.String({
+        description: "Image path inside the sandbox workspace, e.g. /workspace/upload/.../photo.jpg.",
+      }),
+    }),
+    async execute(toolCallId: string, params: unknown) {
+      if (
+        !params ||
+        typeof params !== "object" ||
+        !("path" in params) ||
+        typeof params.path !== "string" ||
+        !params.path.startsWith("/workspace/")
+      ) {
+        throw new Error("sandbox_view_image requires { path: '/workspace/...' }");
+      }
+      const path = params.path;
+      const request: ToolIpcMessage = {
+        type: "tool.request",
+        session_id: sessionKey,
+        tool_call_id: toolCallId,
+        name: "sandbox_view_image",
+        args: { path },
+        timeout_ms: 30_000,
+      };
+      const response = await waitToolResponse(
+        toolCallId,
+        request,
+        pendingCalls,
+        signal,
+      );
+      if (response.type !== "tool.response" || !response.ok) {
+        throw new Error(
+          response.type === "tool.response"
+            ? response.error?.message ?? "sandbox view image failed"
+            : "unexpected IPC response",
+        );
+      }
+      const result = response.result;
+      if (
+        !result ||
+        typeof result !== "object" ||
+        !("data" in result) ||
+        typeof result.data !== "string" ||
+        !("mime" in result) ||
+        typeof result.mime !== "string"
+      ) {
+        throw new Error("sandbox_view_image returned malformed data");
+      }
+      return {
+        content: [
+          {
+            type: "image" as const,
+            data: result.data,
+            mimeType: result.mime,
+          },
+          {
+            type: "text" as const,
+            text: `Image: ${path}`,
+          },
+        ],
+        details: { path, mime: result.mime },
+      };
+    },
+  };
+}
+
+/**
  * Fallback: send plain assistant body text to the **current** chat only.
  * Cross-chat delivery must use message_send with chat_id.
  */

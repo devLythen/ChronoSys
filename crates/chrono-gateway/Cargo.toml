@@ -11,6 +11,7 @@ chrono-config = { workspace = true }
 chrono-api = { workspace = true }
 chrono-sandbox = { workspace = true }
 chrono-adapter-telegram = { workspace = true }
+base64 = { workspace = true }
 url = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

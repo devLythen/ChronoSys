@@ -187,6 +187,7 @@ Currently implemented built-in tools:
 - `get_time` — return the current date/time in the bot's configured timezone (see policy `timezone`)
 - `sandbox_exec` — run a shell command in the session's Docker workspace (see §13)
 - `sandbox_send_file` — send a `/workspace/...` file back to the current chat (see §13)
+- `sandbox_view_image` — read an image from `/workspace` as native multimodal content (see §13)
 
 Built-in tools are allowlisted per persona via `tools_allowlist_json` in the `personas` table. An empty allowlist means "all known built-in tools". Plugin tools are NOT part of this allowlist — they are gated by the plugin enable toggle and per-tool persona blacklist (see PLUGIN_ARCHITECTURE §7).
 ---
@@ -335,8 +336,9 @@ long-term memory lands (M5).
 ## 13. Sandbox Runtime
 
 The Rust gateway owns Docker containers. agent-host only declares
-`sandbox_exec` / `sandbox_send_file` and sends `tool.request` messages; it
-never talks to Docker or touches the host filesystem.
+`sandbox_exec` / `sandbox_send_file` / `sandbox_view_image` and sends
+`tool.request` messages; it never talks to Docker or touches the host
+filesystem.
 
 ```
 agent-host sandbox_exec
@@ -350,7 +352,16 @@ agent-host sandbox_exec
 agent-host sandbox_send_file
   → gateway resolves /workspace/... inside the session workspace
   → adapter file_send (Telegram sendDocument)
+
+agent-host sandbox_view_image
+  → gateway reads /workspace/... and returns base64 + mime
+  → agent-host emits Pi ImageContent to the multimodal model
 ```
+
+Inbound images are both saved under `/workspace/upload/…` and, for
+image-capable models, passed to `agent.prompt(text, images)` as native image
+content. Persisted transcripts strip inline image bytes; later turns can use
+`sandbox_view_image` to re-read them.
 
 ### Configuration
 
@@ -373,11 +384,11 @@ Stored as explicit `settings` rows and reloaded on config change:
 
 - One container per bot-scoped session key (`session_key#bot_profile_id`); name is `chrono-sandbox-<fnv64(session_key)>`.
 - Workspace: `$CHRONO_HOME/sandboxes/<fnv64>/`, bind-mounted at `/workspace`.
-- Telegram attachments are emitted as metadata immediately; a gateway background
-  job downloads them to `$CHRONO_HOME/inbox/...`, imports them to
-  `/workspace/upload/<message-id>/`, then sends the completed inbound event to
-  agent-host. Attachment-only messages and file+text messages both trigger an AI
-  turn; the prompt lists the uploaded workspace paths.
+- Telegram attachments are downloaded and imported by a gateway background job
+  into `$CHRONO_HOME/inbox/...` and `/workspace/upload/<message-id>/`; only the
+  completed inbound event reaches agent-host. Attachment-only and file+text
+  messages both trigger one AI turn; the prompt lists the uploaded paths and
+  image-capable models also receive inline image bytes.
 - Container root is read-only; `/tmp` is a tmpfs; workspace is read-write.
 - `--cap-drop ALL`, `--security-opt no-new-privileges`, current uid/gid,
   memory/CPU/PID caps.
@@ -395,6 +406,8 @@ Stored as explicit `settings` rows and reloaded on config change:
 - stdout/stderr are capped at 1 MiB each; excess is drained and discarded.
 - `sandbox_send_file` resolves `/workspace/...` with canonicalization, rejects
   traversal/symlink escapes, and enforces the 50 MiB Telegram document limit.
+- `sandbox_view_image` uses the same canonicalization and rejects non-image
+  extensions and files over 6 MiB before base64 encoding.
 
 ### Current limits
 

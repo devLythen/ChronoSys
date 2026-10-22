@@ -1,4 +1,7 @@
+use std::path::Path;
 use std::sync::Arc;
+
+use base64::Engine;
 
 use async_trait::async_trait;
 use chrono_config::ConfigStore;
@@ -9,8 +12,9 @@ use serde_json::{json, Value};
 
 use crate::tool_router::{BackendKind, ToolBackend};
 
-/// `sandbox_exec` / `sandbox_send_file` backend. The tool schema lives in
-/// agent-host; this layer validates arguments and maps results into IPC.
+/// `sandbox_exec` / `sandbox_send_file` / `sandbox_view_image` backend. The
+/// tool schema lives in agent-host; this layer validates arguments and maps
+/// results into IPC.
 pub struct SandboxToolBackend {
     manager: Arc<SandboxManager>,
     adapter: Option<Arc<dyn PlatformAdapter>>,
@@ -45,6 +49,7 @@ impl ToolBackend for SandboxToolBackend {
         match tool_name {
             "sandbox_exec" => self.exec(session_key, args).await,
             "sandbox_send_file" => self.send_file(session_key, chat_id, args).await,
+            "sandbox_view_image" => self.view_image(session_key, args).await,
             _ => Ok(failure(
                 "unsupported",
                 &format!("unsupported sandbox tool: {tool_name}"),
@@ -84,6 +89,60 @@ impl SandboxToolBackend {
             }),
             Err(error) => Ok(failure(sandbox_error_code(&error), &error.to_string())),
         }
+    }
+
+    async fn view_image(
+        &self,
+        session_key: &str,
+        args: &Value,
+    ) -> anyhow::Result<PlatformResult> {
+        let path = match args.get("path").and_then(Value::as_str) {
+            Some(path) => path,
+            None => {
+                return Ok(failure(
+                    "invalid_args",
+                    "sandbox_view_image requires { path: '/workspace/...' }",
+                ))
+            }
+        };
+        let host = match self.manager.resolve_file(session_key, path) {
+            Ok(host) => host,
+            Err(error) => {
+                return Ok(failure(sandbox_error_code(&error), &error.to_string()))
+            }
+        };
+        let Some(mime) = image_mime(&host) else {
+            return Ok(failure(
+                "unsupported_image",
+                "sandbox_view_image supports png, jpeg, webp, and gif",
+            ));
+        };
+        let metadata = match std::fs::metadata(&host) {
+            Ok(metadata) => metadata,
+            Err(error) => return Ok(failure("sandbox_error", &error.to_string())),
+        };
+        if metadata.len() > chrono_sandbox::MAX_IMAGE_BYTES {
+            return Ok(failure(
+                "sandbox_file_too_large",
+                &format!(
+                    "image exceeds {} bytes",
+                    chrono_sandbox::MAX_IMAGE_BYTES
+                ),
+            ));
+        }
+        let bytes = match std::fs::read(&host) {
+            Ok(bytes) => bytes,
+            Err(error) => return Ok(failure("sandbox_error", &error.to_string())),
+        };
+        Ok(PlatformResult {
+            ok: true,
+            result: Some(json!({
+                "path": path,
+                "mime": mime,
+                "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+            })),
+            error: None,
+        })
     }
 
     async fn send_file(
@@ -146,6 +205,21 @@ fn sandbox_error_code(error: &SandboxError) -> &'static str {
         SandboxError::FileTooLarge(_) => "sandbox_file_too_large",
         SandboxError::Timeout(_) => "sandbox_timeout",
         SandboxError::Docker(_) | SandboxError::Io(_) => "sandbox_error",
+    }
+}
+
+fn image_mime(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => Some("image/png"),
+        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
+        Some("webp") => Some("image/webp"),
+        Some("gif") => Some("image/gif"),
+        _ => None,
     }
 }
 
@@ -331,6 +405,44 @@ mod tests {
             seen["path"].as_str().unwrap(),
             expected_host.to_string_lossy()
         );
+    }
+
+    #[tokio::test]
+    async fn sandbox_view_image_returns_base64_and_mime() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = Arc::new(SandboxManager::new(
+            root.path().to_path_buf(),
+            SandboxConfig::default(),
+        ));
+        let source = root.path().join("photo.png");
+        std::fs::write(&source, "hello").unwrap();
+        let sandbox_path = manager
+            .import_file("acc:chat:dm", "m1", "photo.png", &source)
+            .unwrap();
+        let router = ToolRouter::new(
+            None,
+            Some(Arc::new(SandboxToolBackend::new(manager, None))),
+        );
+        let request = ToolIpcMessage::Request {
+            session_id: "acc:chat:dm".into(),
+            tool_call_id: "call-image".into(),
+            name: "sandbox_view_image".into(),
+            args: json!({ "path": sandbox_path }),
+            timeout_ms: 1_000,
+        };
+
+        let outcome = router.execute(&request, &context()).await;
+        match outcome.response {
+            ToolIpcMessage::Response {
+                ok: true,
+                result: Some(result),
+                ..
+            } => {
+                assert_eq!(result["mime"], "image/png");
+                assert_eq!(result["data"], "aGVsbG8=");
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
     }
 
     #[tokio::test]

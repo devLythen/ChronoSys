@@ -7,7 +7,7 @@ import type { Model, Api, MutableModels, ThinkingLevel } from "@earendil-works/p
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { ChronoEvent, ToolIpcMessage } from "./ipc/types.ts";
 import { conversationMessages, withSystemPrompt } from "./transcript.ts";
-import { ATTACHMENT_ONLY_PROMPT, buildAttachmentNote } from "./attachments.ts";
+import { ATTACHMENT_ONLY_PROMPT, buildAttachmentNote, inlineImages } from "./attachments.ts";
 import {
   sendBodyTextToCurrentChat,
   type PendingCall,
@@ -967,6 +967,7 @@ async function main() {
         agent.signal,
         bot.personaId ?? undefined,
         readContextPolicy(bot).timezone,
+        bot.resolvedModel.model.input.includes("image"),
       );
       agent.state.tools = newTools;
       agent.state.messages = withSystemPrompt([], newPrompt, newTools);
@@ -1108,6 +1109,7 @@ async function main() {
       agent.signal,
       bot.personaId ?? undefined,
       ctxPolicy.timezone,
+      bot.resolvedModel.model.input.includes("image"),
     );
     agent.state.tools = turnTools;
     agent.state.messages = withSystemPrompt(bucket.messages, turnPrompt, turnTools);
@@ -1155,7 +1157,14 @@ async function main() {
       const senderIdentity = buildSenderIdentity(event, ctxPolicy);
       const attachmentNote = buildAttachmentNote(event);
       const userText = event.message.text.trim() || ATTACHMENT_ONLY_PROMPT;
-      await agent.prompt(attachmentNote + senderIdentity + userPrefix + userText);
+      const images = inlineImages(
+        event,
+        bot.resolvedModel.model.input.includes("image"),
+      );
+      await agent.prompt(
+        attachmentNote + senderIdentity + userPrefix + userText,
+        images,
+      );
 
       bucket.messages = conversationMessages(agent.state.messages);
       persistBucket(bucket);

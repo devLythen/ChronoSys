@@ -1,13 +1,13 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentTool, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
-import { createMessageSendTool, createSandboxExecTool, createSandboxSendFileTool, createTimeTool, type PendingCall } from "../tools.ts";
+import { createMessageSendTool, createSandboxExecTool, createSandboxSendFileTool, createSandboxViewImageTool, createTimeTool, type PendingCall } from "../tools.ts";
 import { readPluginPolicy, writePluginPolicy } from "./policy.ts";
 import { loadNativeManifest, pluginInstallRoot, TOOL_RE } from "./manifest.ts";
 import { createPluginApi } from "./sdk.ts";
 import type { ChronoNativeCommandDefinition, ChronoNativeToolDefinition, NativePluginManifest, NativePluginRecord, NativePluginView } from "./types.ts";
 
-const BUILTIN_TOOLS = ["message_send", "get_time", "sandbox_exec", "sandbox_send_file"] as const;
+const BUILTIN_TOOLS = ["message_send", "get_time", "sandbox_exec", "sandbox_send_file", "sandbox_view_image"] as const;
 
 type Candidate = { root: string; manifest?: NativePluginManifest; error?: string };
 
@@ -59,7 +59,7 @@ export class ToolRegistry {
     return view;
   }
 
-  createToolsForAllowlist(allowlist: string[], sessionKey: string, pendingCalls: Map<string, PendingCall>, signal?: AbortSignal, personaId?: string, timezone = "UTC"): AgentTool[] {
+  createToolsForAllowlist(allowlist: string[], sessionKey: string, pendingCalls: Map<string, PendingCall>, signal?: AbortSignal, personaId?: string, timezone = "UTC", supportsImage = false): AgentTool[] {
     const result: AgentTool[] = [];
     // Built-in tools: gated by allowlist
     if (allowlist.length === 0 || allowlist.includes("message_send")) {
@@ -73,6 +73,9 @@ export class ToolRegistry {
     }
     if (allowlist.length === 0 || allowlist.includes("sandbox_send_file")) {
       result.push(createSandboxSendFileTool(sessionKey, pendingCalls, signal));
+    }
+    if (supportsImage && (allowlist.length === 0 || allowlist.includes("sandbox_view_image"))) {
+      result.push(createSandboxViewImageTool(sessionKey, pendingCalls, signal));
     }
     // Plugin tools: controlled by per-tool persona blacklist, not the persona
     // allowlist (PLUGIN_ARCHITECTURE.md §7).

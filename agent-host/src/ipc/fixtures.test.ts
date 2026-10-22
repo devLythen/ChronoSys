@@ -21,7 +21,15 @@ describe("fixtures discriminators", () => {
     expect(ev.type).toBe("inbound.message");
     expect(ev.session_key).toBe("acct1:chat1:shared");
     expect(ev.chat.kind).toBe("group");
-    expect(ev.message.attachments).toEqual([]);
+    expect(ev.message.attachments).toEqual([
+      {
+        id: "file1",
+        mime: "image/png",
+        name: "photo.png",
+        local_path: "/workspace/upload/msg1/photo.png",
+        inline_data: "aGVsbG8=",
+      },
+    ]);
   });
 
   test("tool_request", () => {

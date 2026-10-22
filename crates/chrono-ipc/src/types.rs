@@ -59,6 +59,11 @@ pub struct AttachmentRef {
     /// attachment; absent when download failed or the sandbox is unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_path: Option<String>,
+    /// Base64 image bytes for native multimodal prompt input. Populated only
+    /// for image attachments under the inline size cap; omitted from WebSocket
+    /// payloads and persisted transcripts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_data: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

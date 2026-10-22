@@ -9,7 +9,24 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 export function conversationMessages(
   messages: readonly AgentMessage[],
 ): AgentMessage[] {
-  return messages.filter((message) => message.role !== "system");
+  return messages
+    .filter((message) => message.role !== "system")
+    .map(withoutInlineImages);
+}
+
+/** Native image blocks are rehydrated through sandbox tools, not persisted. */
+function withoutInlineImages(message: AgentMessage): AgentMessage {
+  if (message.role !== "user" && message.role !== "toolResult") return message;
+  if (!Array.isArray(message.content)) return message;
+  const content = message.content.filter((block) => block.type !== "image");
+  if (content.length === message.content.length) return message;
+  return {
+    ...message,
+    content:
+      content.length > 0
+        ? content
+        : [{ type: "text", text: "[image omitted; use sandbox_view_image]" }],
+  };
 }
 
 /** Build the transcript for a turn: current prompt/tools lead, history follows. */

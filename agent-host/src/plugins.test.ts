@@ -36,6 +36,14 @@ describe("native plugin registry", () => {
       expect(sandbox.map((tool) => tool.name)).toEqual(["sandbox_exec", "sandbox_send_file"]);
       const platformOnly = registry.createToolsForAllowlist(["message_send"], "session-1", new Map());
       expect(platformOnly.map((tool) => tool.name)).toEqual(["message_send"]);
+      const imageTool = registry.createToolsForAllowlist(
+        ["sandbox_view_image"], "session-1", new Map(), undefined, undefined, "UTC", true,
+      );
+      expect(imageTool.map((tool) => tool.name)).toEqual(["sandbox_view_image"]);
+      const textOnly = registry.createToolsForAllowlist(
+        ["sandbox_view_image"], "session-1", new Map(), undefined, undefined, "UTC", false,
+      );
+      expect(textOnly).toEqual([]);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 

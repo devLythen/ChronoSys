@@ -802,6 +802,7 @@ async fn ingest_attachments(mut job: AttachmentJob) {
                 mime: attachment.mime.clone(),
                 name: attachment.name.clone(),
                 local_path: None,
+                inline_data: None,
             });
             continue;
         }
@@ -812,6 +813,7 @@ async fn ingest_attachments(mut job: AttachmentJob) {
                 mime: attachment.mime.clone(),
                 name: attachment.name.clone(),
                 local_path: None,
+                inline_data: None,
             });
             continue;
         };
@@ -842,11 +844,23 @@ async fn ingest_attachments(mut job: AttachmentJob) {
             eprintln!("[gateway] attachment ingest failed ({name}): {message}");
             let _ = std::fs::remove_file(&staging);
         }
+        let inline_data = local_path
+            .as_deref()
+            .filter(|_| {
+                is_image_attachment(
+                    &attachment.mime,
+                    attachment.name.as_deref().unwrap_or(""),
+                )
+            })
+            .and_then(|path| {
+                inline_image_data(&job.sandbox, &job.sandbox_key, path)
+            });
         updated_attachments.push(chrono_ipc::AttachmentRef {
             id: attachment.id.clone(),
             mime: attachment.mime.clone(),
             name: attachment.name.clone(),
             local_path,
+            inline_data,
         });
     }
 
@@ -864,12 +878,17 @@ async fn ingest_attachments(mut job: AttachmentJob) {
     let ChronoEvent::InboundMessage { message, .. } = &mut job.event;
     message.attachments = updated_attachments;
 
+    let mut ws_event = job.event.clone();
+    let ChronoEvent::InboundMessage { message, .. } = &mut ws_event;
+    for attachment in &mut message.attachments {
+        attachment.inline_data = None;
+    }
     let payload = json!({
         "type": "platform.inbound",
         "platform": platform.clone(),
         "account_id": job.account_id,
         "session_key": session_key.clone(),
-        "event": job.event.clone(),
+        "event": ws_event,
     });
     let _ = job.ws_events.send(chrono_api::WsEvent {
         topics: vec![format!("sessions:{session_key}"), format!("platform:{platform}")],
@@ -888,6 +907,40 @@ impl AttachmentJob {
             ChronoEvent::InboundMessage { message, .. } => &message.attachments,
         }
     }
+}
+
+fn is_image_attachment(mime: &str, name: &str) -> bool {
+    let mime = mime.to_ascii_lowercase();
+    if matches!(
+        mime.as_str(),
+        "image/png" | "image/jpeg" | "image/jpg" | "image/webp" | "image/gif"
+    ) {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    [".png", ".jpg", ".jpeg", ".webp", ".gif"]
+        .iter()
+        .any(|extension| lower.ends_with(extension))
+}
+
+fn inline_image_data(
+    sandbox: &SandboxManager,
+    sandbox_key: &str,
+    path: &str,
+) -> Option<String> {
+    use base64::Engine;
+    let host = sandbox.resolve_file(sandbox_key, path).ok()?;
+    let metadata = std::fs::metadata(&host).ok()?;
+    if metadata.len() > chrono_sandbox::MAX_IMAGE_BYTES {
+        eprintln!(
+            "[gateway] image {} exceeds inline limit ({} bytes)",
+            path,
+            metadata.len()
+        );
+        return None;
+    }
+    let bytes = std::fs::read(host).ok()?;
+    Some(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 fn staging_path(
@@ -1074,6 +1127,14 @@ mod tests {
         }
     }
 
+    #[test]
+    fn image_attachment_detection_handles_mime_and_extension() {
+        assert!(is_image_attachment("image/png", "photo.bin"));
+        assert!(is_image_attachment("application/octet-stream", "PHOTO.JPG"));
+        assert!(!is_image_attachment("image/svg+xml", "vector.svg"));
+        assert!(!is_image_attachment("text/plain", "notes.txt"));
+    }
+
     #[tokio::test]
     async fn attachment_job_imports_and_notifies_without_blocking() {
         let root = tempfile::tempdir().unwrap();
@@ -1084,6 +1145,7 @@ mod tests {
         let child = Arc::new(FakeChild {
             frames: Mutex::new(Vec::new()),
         });
+        let (ws_tx, mut ws_rx) = tokio::sync::broadcast::channel(8);
         let job = AttachmentJob {
             event: ChronoEvent::InboundMessage {
                 session_key: "acc:chat:dm".into(),
@@ -1105,9 +1167,10 @@ mod tests {
                     reply_to: None,
                     attachments: vec![AttachmentRef {
                         id: "file-1".into(),
-                        mime: "text/plain".into(),
-                        name: Some("report.txt".into()),
+                        mime: "image/png".into(),
+                        name: Some("photo.png".into()),
                         local_path: None,
+                        inline_data: None,
                     }],
                 },
                 received_at: "2026-01-01T00:00:00Z".into(),
@@ -1115,7 +1178,7 @@ mod tests {
             adapter: Some(Arc::new(FakeAdapter)),
             sandbox: manager.clone(),
             child: child.clone(),
-            ws_events: tokio::sync::broadcast::channel(8).0,
+            ws_events: ws_tx,
             inbox_root: root.path().join("inbox"),
             account_id: "acc".into(),
             sandbox_key: "acc:chat:dm#bot".into(),
@@ -1125,6 +1188,11 @@ mod tests {
 
         ingest_attachments(job).await;
 
+        let ws_payload = ws_rx.recv().await.unwrap().payload;
+        assert!(
+            ws_payload["event"]["message"]["attachments"][0]["inline_data"].is_null(),
+            "WS payload must not carry image bytes"
+        );
         let frames = child.frames.lock();
         assert_eq!(frames.len(), 1);
         let payload: Value = serde_json::from_slice(&frames[0]).unwrap();
@@ -1132,7 +1200,8 @@ mod tests {
         let path = payload["message"]["attachments"][0]["local_path"]
             .as_str()
             .unwrap();
-        assert_eq!(path, "/workspace/upload/m1/report.txt");
+        assert_eq!(path, "/workspace/upload/m1/photo.png");
+        assert_eq!(payload["message"]["attachments"][0]["inline_data"], "aGVsbG8=");
         let host = manager
             .resolve_file("acc:chat:dm#bot", path)
             .expect("imported file");
