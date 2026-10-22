@@ -76,7 +76,7 @@ via **Platforms → Bot API URL** or `CHRONO_TELEGRAM_API_URL`.
 
 ```bash
 cargo test                          # 37 Rust tests
-cd agent-host && bun test           # 27 TypeScript tests
+cd agent-host && bun test           # 29 TypeScript tests
 cd webui && npx tsc --noEmit        # TypeScript typecheck
 cargo test -p chrono-sandbox -p chrono-gateway -- --ignored  # Docker sandbox smoke
 ```
