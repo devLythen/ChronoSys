@@ -120,11 +120,15 @@
 - [x] Gateway-managed Docker runtime: lazy create, workspace mount, resource caps,
       read-only root, no network by default, idle/max-lifetime cleanup, timeout destroy
 - [x] `sandbox_exec` built-in tool: async IPC dispatch, hard timeout, capped output, audit
-- [x] Chat ↔ sandbox file bridge: Telegram attachments imported to `/workspace/inbox/…`;
+- [x] Chat ↔ sandbox file bridge: Telegram attachments are downloaded/imported by a
+      background job; attachment-only messages do not trigger an AI turn.
       `sandbox_send_file` delivers generated files back to the chat
 - [x] Destruction controls: idle timeout, max lifetime, `/new` reset, manual session reset
-- [ ] `sandbox_browser`, `sandbox_read`, `sandbox_write`
+- [ ] `sandbox_browser`
 - [ ] Plugin context: `ctx.sandbox.*` facade for sandbox access
+
+File read/write is intentionally handled by `sandbox_exec`; no separate
+`sandbox_read` / `sandbox_write` tools are planned.
 ### M5 — Multi-platform & hardening (week 9–12)
 
 - [x] rolling compaction (manual + automatic, persona-preserving; see M3.5)

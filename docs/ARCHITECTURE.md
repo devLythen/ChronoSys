@@ -349,8 +349,11 @@ Stored as explicit `settings` rows and reloaded on config change:
 
 - One container per session key; name is `chrono-sandbox-<fnv64(session_key)>`.
 - Workspace: `$CHRONO_HOME/sandboxes/<fnv64>/`, bind-mounted at `/workspace`.
-- Telegram attachments are downloaded to `$CHRONO_HOME/inbox/...`, then moved
-  into `/workspace/inbox/<message-id>/`; the agent sees only workspace paths.
+- Telegram attachments are emitted as metadata immediately; a gateway background
+  job downloads them to `$CHRONO_HOME/inbox/...`, moves them to
+  `/workspace/inbox/<message-id>/`, then sends `attachment.ready` to agent-host.
+  Attachment-only messages do not start an AI turn; the ready note is appended
+  to the transcript for the next turn.
 - Container root is read-only; `/tmp` is a tmpfs; workspace is read-write.
 - `--cap-drop ALL`, `--security-opt no-new-privileges`, current uid/gid,
   memory/CPU/PID caps.
@@ -369,7 +372,7 @@ Stored as explicit `settings` rows and reloaded on config change:
 
 ### Current limits
 
-`sandbox_browser`, `sandbox_read`, `sandbox_write`, and the plugin
-`ctx.sandbox.*` facade are not implemented. Changing the image does not
-recreate an already-running container; it takes effect after idle/max-lifetime
-expiry, shutdown, or an explicit reset.
+`sandbox_browser` and the plugin `ctx.sandbox.*` facade are not implemented.
+File read/write intentionally goes through `sandbox_exec`. Changing the image
+does not recreate an already-running container; it takes effect after
+idle/max-lifetime expiry, shutdown, or an explicit reset.

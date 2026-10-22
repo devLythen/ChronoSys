@@ -348,9 +348,34 @@ function buildAttachmentNote(event: ChronoEvent): string {
     const label = attachment.name ? `${attachment.mime}, ${attachment.name}` : attachment.mime;
     return attachment.local_path
       ? `- ${attachment.local_path} (${label})`
-      : `- unavailable (${label})`;
+      : `- uploading (${label})`;
   });
   return `[Attachments]\n${lines.join("\n")}\nUse sandbox tools with these /workspace paths.\n\n`;
+}
+
+type ReadyAttachment = {
+  name?: string;
+  mime?: string;
+  local_path?: string;
+  error?: string;
+};
+
+function readReadyAttachments(raw: unknown): ReadyAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const attachments: ReadyAttachment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    attachments.push({
+      name: "name" in item && typeof item.name === "string" ? item.name : undefined,
+      mime: "mime" in item && typeof item.mime === "string" ? item.mime : undefined,
+      local_path:
+        "local_path" in item && typeof item.local_path === "string"
+          ? item.local_path
+          : undefined,
+      error: "error" in item && typeof item.error === "string" ? item.error : undefined,
+    });
+  }
+  return attachments;
 }
 function resolveContextWindow(model: Model<Api>, policy: ContextPolicy): number {
   return model.contextWindow > 0 ? model.contextWindow : policy.contextWindowFallback;
@@ -656,6 +681,46 @@ async function main() {
     return bucket;
   }
 
+  /** Route whose agent turn is currently running, if any. */
+  let activeRoute: string | null = null;
+  /** Notes arriving mid-turn; flushed into the bucket after the prompt. */
+  const pendingNotes = new Map<string, string[]>();
+
+  function appendAttachmentNote(
+    note: string,
+    route: string,
+    sessionKey: string,
+    botId: string,
+  ): void {
+    if (activeRoute === route) {
+      const queued = pendingNotes.get(route) ?? [];
+      queued.push(note);
+      pendingNotes.set(route, queued);
+      return;
+    }
+    const bucket = getOrCreateBucket(route, sessionKey, botId);
+    bucket.messages.push({
+      role: "user",
+      content: note,
+      timestamp: Date.now(),
+    } as AgentMessage);
+    persistBucket(bucket);
+  }
+
+  function flushPendingNotes(route: string, bucket: Bucket): void {
+    const queued = pendingNotes.get(route);
+    if (!queued || queued.length === 0) return;
+    for (const note of queued) {
+      bucket.messages.push({
+        role: "user",
+        content: note,
+        timestamp: Date.now(),
+      } as AgentMessage);
+    }
+    pendingNotes.delete(route);
+    persistBucket(bucket);
+  }
+
   // ── Event loop ─────────────────────────────────────────────────
   const inboundQueue: ChronoEvent[] = [];
   const inboundWaiters: InboundWaiter[] = [];
@@ -824,6 +889,41 @@ async function main() {
           continue;
         }
  
+        if (controlType === "attachment.ready") {
+          const sessionKey =
+            msg && typeof msg === "object" && "session_key" in msg
+              ? String(msg.session_key)
+              : "";
+          const botProfileId =
+            msg && typeof msg === "object" && "bot_profile_id" in msg
+              ? String(msg.bot_profile_id)
+              : "";
+          const attachments =
+            msg && typeof msg === "object" && "attachments" in msg
+              ? readReadyAttachments(msg.attachments)
+              : [];
+          if (sessionKey && botProfileId && attachments.length > 0) {
+            const lines = attachments.map((attachment) => {
+              const label = attachment.name ?? attachment.mime ?? "file";
+              return attachment.local_path
+                ? `- ${attachment.local_path} (${label})`
+                : `- upload failed: ${label}${attachment.error ? ` (${attachment.error})` : ""}`;
+            });
+            const note = `[User uploaded file]\n${lines.join("\n")}`;
+            appendAttachmentNote(
+              note,
+              `${sessionKey}#${botProfileId}`,
+              sessionKey,
+              botProfileId,
+            );
+            logEvent({
+              type: "host_info",
+              message: `attachment imported session=${sessionKey} files=${attachments.length}`,
+            });
+          }
+          continue;
+        }
+
          if (controlType === "config.reload") {
           try { await registry.reload(); } catch (error) { logEvent({ type: "host_warn", message: `plugin registry reload failed: ${error instanceof Error ? error.message : String(error)}` }); }
           if (config) await registry.reconcilePersonas(new Set(config.listPersonas().map((p) => p.id)));
@@ -1025,6 +1125,18 @@ async function main() {
       continue;
     }
 
+    // Attachment-only messages do not resume the AI. The gateway imports
+    // files in the background and sends attachment.ready, which appends a
+    // user transcript entry for the next turn.
+    if (!event.message.text.trim() && event.message.attachments.length > 0) {
+      logEvent({
+        type: "host_info",
+        message: `attachment-only message bot=${bot.id}; awaiting background import`,
+      });
+      writeControl({ type: "done" });
+      continue;
+    }
+
     // ── Load active UUID session transcript ──────────────────────
     const bucket = getOrCreateBucket(route, event.session_key, bot.id);
 
@@ -1141,6 +1253,7 @@ async function main() {
       }
     }
 
+    activeRoute = route;
     try {
       const historyBefore = bucket.messages.length;
       const userPrefix = buildUserPrefix(event, ctxPolicy);
@@ -1206,6 +1319,9 @@ async function main() {
       // errors): keep the host alive for the next inbound message instead
       // of exiting the process. Only stdin loss is fatal (handled above).
       continue;
+    } finally {
+      activeRoute = null;
+      flushPendingNotes(route, bucket);
     }
   }
 

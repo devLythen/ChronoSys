@@ -9,10 +9,7 @@ use crate::secrets::resolve_secret;
 
 /// Build a live platform adapter for an enabled account.
 /// Secrets are resolved here from WebUI-written `secret_ref`, never at CLI boot.
-pub fn build_adapter(
-    account: &PlatformAccount,
-    chrono_home: &std::path::Path,
-) -> Result<Arc<dyn PlatformAdapter>> {
+pub fn build_adapter(account: &PlatformAccount) -> Result<Arc<dyn PlatformAdapter>> {
     if !account.enabled {
         bail!("account {} is disabled", account.id);
     }
@@ -21,11 +18,7 @@ pub fn build_adapter(
             let token = resolve_secret(&account.secret_ref).with_context(|| {
                 format!("resolve secret for account {} (telegram)", account.id)
             })?;
-            let adapter = TelegramAdapter::new(
-                token,
-                account.id.clone(),
-                chrono_home.join("inbox"),
-            );
+            let adapter = TelegramAdapter::new(token, account.id.clone());
             Ok(Arc::new(adapter))
         }
         other => bail!("unsupported platform '{other}' for account {}", account.id),

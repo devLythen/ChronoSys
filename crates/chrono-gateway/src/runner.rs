@@ -121,6 +121,19 @@ struct GatewayState {
     sandbox: Arc<SandboxManager>,
 }
 
+struct AttachmentJob {
+    adapter: Option<Arc<dyn PlatformAdapter>>,
+    sandbox: Arc<SandboxManager>,
+    child: Arc<dyn chrono_api::AgentQuery>,
+    inbox_root: PathBuf,
+    account_id: String,
+    bot_profile_id: String,
+    session_key: String,
+    chat_id: String,
+    message_id: String,
+    attachments: Vec<chrono_ipc::AttachmentRef>,
+}
+
 impl GatewayState {
     fn resolve_binding(&self, account_id: &str, event: &ChronoEvent) -> Option<ResolvedBinding> {
         let bindings = self.bindings.get(account_id)?;
@@ -440,7 +453,7 @@ pub async fn run_gateway(
             routed = event_rx.recv() => {
                 match routed {
                     Some(routed) => {
-                        if let Err(e) = handle_inbound_event(&state, routed, &ws_events) {
+                        if let Err(e) = handle_inbound_event(&state, routed, &ws_events, &chrono_home) {
                             eprintln!("[gateway] inbound handler error: {e:#}");
                         }
                     }
@@ -562,7 +575,7 @@ fn sync_from_config(
         if existing.contains(&id) {
             continue;
         }
-        match build_adapter(&account, chrono_home) {
+        match build_adapter(&account) {
             Ok(adapter) => {
                 let tx = event_tx.clone();
                 let account_id = id.clone();
@@ -624,6 +637,7 @@ fn handle_inbound_event(
     state: &Arc<ParkingMutex<GatewayState>>,
     routed: RoutedEvent,
     ws_events: &tokio::sync::broadcast::Sender<chrono_api::WsEvent>,
+    chrono_home: &Path,
 ) -> Result<()> {
     let mut state = state.lock();
 
@@ -696,31 +710,21 @@ fn handle_inbound_event(
         &resolved.session_mode,
     );
     *bot_profile_id = Some(resolved.bot_profile_id.clone());
-    let route_key = session_key.clone();
-    let message_id = message.id.clone();
-
-    // Adapters stage downloads under $CHRONO_HOME/inbox. Move them into the
-    // session workspace and expose only /workspace paths to the agent.
-    for attachment in &mut message.attachments {
-        let Some(staged) = attachment.local_path.take() else {
-            continue;
-        };
-        let name = attachment
-            .name
-            .clone()
-            .unwrap_or_else(|| "attachment".to_string());
-        match state
-            .sandbox
-            .import_file(&route_key, &message_id, &name, Path::new(&staged))
-        {
-            Ok(path) => attachment.local_path = Some(path),
-            Err(error) => {
-                eprintln!("[gateway] attachment import failed: {error}");
-                let _ = std::fs::remove_file(Path::new(&staged));
-                attachment.local_path = None;
-            }
-        }
-    }
+    let attachment_job = (!message.attachments.is_empty()).then(|| AttachmentJob {
+        adapter: state
+            .adapters
+            .get(&routed.account_id)
+            .map(|live| live.adapter.clone()),
+        sandbox: state.sandbox.clone(),
+        child: state.child.clone(),
+        inbox_root: chrono_home.join("inbox"),
+        account_id: routed.account_id.clone(),
+        bot_profile_id: resolved.bot_profile_id.clone(),
+        session_key: session_key.clone(),
+        chat_id: chat.id.clone(),
+        message_id: message.id.clone(),
+        attachments: message.attachments.clone(),
+    });
 
     {
         let ref_event = &event;
@@ -758,9 +762,122 @@ fn handle_inbound_event(
     let payload = serde_json::to_vec(&event).unwrap_or_default();
     if let Err(e) = state.child.write_frame(&payload) {
         eprintln!("[gateway] failed to write event to agent: {e}");
-    } else {
+    }
+    if let Some(job) = attachment_job {
+        tokio::spawn(ingest_attachments(job));
     }
     Ok(())
+}
+
+async fn ingest_attachments(job: AttachmentJob) {
+    let mut ready = Vec::with_capacity(job.attachments.len());
+    for attachment in job.attachments {
+        let name = attachment
+            .name
+            .clone()
+            .unwrap_or_else(|| "attachment".to_string());
+        let staging = staging_path(
+            &job.inbox_root,
+            &job.account_id,
+            &job.chat_id,
+            &job.message_id,
+            &name,
+        );
+        let mut error = None;
+        let Some(adapter) = &job.adapter else {
+            error = Some("no live adapter".to_string());
+            ready.push(json!({
+                "name": attachment.name,
+                "mime": attachment.mime,
+                "local_path": null,
+                "error": error,
+            }));
+            continue;
+        };
+
+        if let Err(import_error) = adapter.download_attachment(&attachment.id, &staging).await {
+            error = Some(import_error.to_string());
+        }
+        let local_path = if error.is_none() {
+            match job
+                .sandbox
+                .import_file(&job.session_key, &job.message_id, &name, &staging)
+            {
+                Ok(path) => Some(path),
+                Err(import_error) => {
+                    error = Some(import_error.to_string());
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(message) = &error {
+            eprintln!("[gateway] attachment ingest failed ({name}): {message}");
+            let _ = std::fs::remove_file(&staging);
+        }
+        ready.push(json!({
+            "name": attachment.name,
+            "mime": attachment.mime,
+            "local_path": local_path,
+            "error": error,
+        }));
+    }
+
+    let control = json!({
+        "type": "attachment.ready",
+        "session_key": job.session_key,
+        "bot_profile_id": job.bot_profile_id,
+        "message_id": job.message_id,
+        "attachments": ready,
+    });
+    let payload = serde_json::to_vec(&control).unwrap_or_default();
+    if let Err(error) = job.child.write_frame(&payload) {
+        eprintln!("[gateway] failed to deliver attachment.ready: {error}");
+    }
+}
+
+fn staging_path(
+    root: &Path,
+    account_id: &str,
+    chat_id: &str,
+    message_id: &str,
+    name: &str,
+) -> PathBuf {
+    root.join(safe_component(account_id))
+        .join(safe_component(chat_id))
+        .join(safe_component(message_id))
+        .join(safe_filename(name))
+}
+
+fn safe_component(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len().min(64));
+    for character in raw.chars().take(64) {
+        if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+            out.push(character);
+        } else {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches('.');
+    if trimmed.is_empty() {
+        "item".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn safe_filename(raw: &str) -> String {
+    let name = Path::new(raw)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("attachment");
+    let sanitized = safe_component(name);
+    if sanitized.len() > 120 {
+        sanitized[..120].to_string()
+    } else {
+        sanitized
+    }
 }
 
 fn handle_agent_control(
@@ -817,4 +934,134 @@ fn unix_to_gregorian(days: u64) -> (u64, u64, u64) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = if month <= 2 { y + 1 } else { y };
     (year as u64, month as u64, day as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use chrono_ipc::adapter::{AdapterResult, PlatformResult};
+    use chrono_ipc::{AttachmentRef, ToolError};
+    use parking_lot::Mutex;
+
+    #[test]
+    fn staging_path_cannot_escape_inbox() {
+        let path = staging_path(
+            Path::new("/tmp/inbox"),
+            "account",
+            "chat",
+            "message",
+            "../../etc/passwd",
+        );
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/inbox/account/chat/message/passwd")
+        );
+        assert_eq!(safe_component("..."), "item");
+    }
+
+    struct FakeAdapter;
+    struct FakeChild {
+        frames: Mutex<Vec<Vec<u8>>>,
+    }
+
+    #[async_trait]
+    impl PlatformAdapter for FakeAdapter {
+        fn id(&self) -> &str {
+            "fake"
+        }
+
+        fn account_id(&self) -> &str {
+            "acc"
+        }
+
+        fn bot_username(&self) -> &str {
+            "bot"
+        }
+
+        async fn start(
+            &self,
+            _on_event: Box<dyn Fn(RoutedEvent) + Send + Sync>,
+        ) -> AdapterResult<()> {
+            Ok(())
+        }
+
+        async fn invoke(
+            &self,
+            _tool_name: &str,
+            _args: &Value,
+        ) -> AdapterResult<PlatformResult> {
+            Ok(PlatformResult {
+                ok: true,
+                result: None,
+                error: Some(ToolError {
+                    code: "unused".into(),
+                    message: "unused".into(),
+                }),
+            })
+        }
+
+        async fn download_attachment(
+            &self,
+            _remote_id: &str,
+            destination: &Path,
+        ) -> AdapterResult<()> {
+            if let Some(parent) = destination.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(destination, "hello").unwrap();
+            Ok(())
+        }
+    }
+
+    impl chrono_api::AgentQuery for FakeChild {
+        fn write_frame(&self, payload: &[u8]) -> anyhow::Result<()> {
+            self.frames.lock().push(payload.to_vec());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn attachment_job_imports_and_notifies_without_blocking() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = Arc::new(SandboxManager::new(
+            root.path().to_path_buf(),
+            chrono_sandbox::SandboxConfig::default(),
+        ));
+        let child = Arc::new(FakeChild {
+            frames: Mutex::new(Vec::new()),
+        });
+        let job = AttachmentJob {
+            adapter: Some(Arc::new(FakeAdapter)),
+            sandbox: manager.clone(),
+            child: child.clone(),
+            inbox_root: root.path().join("inbox"),
+            account_id: "acc".into(),
+            bot_profile_id: "bot".into(),
+            session_key: "acc:chat:dm".into(),
+            chat_id: "chat".into(),
+            message_id: "m1".into(),
+            attachments: vec![AttachmentRef {
+                id: "file-1".into(),
+                mime: "text/plain".into(),
+                name: Some("report.txt".into()),
+                local_path: None,
+            }],
+        };
+
+        ingest_attachments(job).await;
+
+        let frames = child.frames.lock();
+        assert_eq!(frames.len(), 1);
+        let payload: Value = serde_json::from_slice(&frames[0]).unwrap();
+        assert_eq!(payload["type"], "attachment.ready");
+        let path = payload["attachments"][0]["local_path"]
+            .as_str()
+            .unwrap();
+        assert_eq!(path, "/workspace/inbox/m1/report.txt");
+        let host = manager
+            .resolve_file("acc:chat:dm", path)
+            .expect("imported file");
+        assert_eq!(std::fs::read_to_string(host).unwrap(), "hello");
+    }
 }

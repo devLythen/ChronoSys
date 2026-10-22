@@ -232,12 +232,14 @@ function names and the plugin name pattern reject dots.
 | `sandbox_send_file` | ✅ | Send a `/workspace/...` file to the current chat (50 MiB limit) |
 | inbound attachments | ✅ | Telegram documents/photos/audio/video/voice imported to `/workspace/inbox/...` (no tool call needed) |
 | `sandbox_browser` | planned | Headless Chromium with Playwright; screenshot, DOM query, navigation |
-| `sandbox_read` | planned | Read a file from the session workspace |
-| `sandbox_write` | planned | Write a file in the session workspace |
+
+File read/write intentionally uses `sandbox_exec` (`cat`, `sed`, redirection)
+rather than dedicated `sandbox_read` / `sandbox_write` tools.
 
 ### 13.3 Lifecycle
 
 - **Lazy create**: first sandbox tool call for a session creates a container from `sandbox.image`
+- **Background attachments**: Telegram metadata is forwarded immediately; the gateway downloads/imports in a task and sends `attachment.ready`. Attachment-only messages do not resume the AI; the transcript gains a user file note.
 - **Idle timeout**: container destroyed after `sandbox.idle_secs` of inactivity (default 300; 0 disables)
 - **Max lifetime**: optional absolute TTL via `sandbox.max_lifetime_secs` (0 disables)
 - **Session-scoped**: one container per session; workspace mounted read-write at `/workspace`

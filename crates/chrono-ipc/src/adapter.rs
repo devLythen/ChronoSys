@@ -43,6 +43,17 @@ pub trait PlatformAdapter: Send + Sync {
         tool_name: &str,
         args: &Value,
     ) -> AdapterResult<PlatformResult>;
+
+    /// Download a platform attachment to `destination` on the host.
+    async fn download_attachment(
+        &self,
+        _remote_id: &str,
+        _destination: &std::path::Path,
+    ) -> AdapterResult<()> {
+        Err(AdapterError::Other(
+            "attachment download is not supported by this adapter".into(),
+        ))
+    }
     /// Advertise available bot commands to the platform (e.g. Telegram setMyCommands).
     async fn sync_commands(&self, _commands: &[Value]) -> AdapterResult<()> { Ok(()) }
 }
