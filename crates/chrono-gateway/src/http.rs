@@ -71,6 +71,7 @@ pub async fn start_http_server(
         .ok()
         .flatten()
         .and_then(|setting| setting.value_json.as_str().map(str::trim).filter(|url| !url.is_empty()).map(ToOwned::to_owned));
+    let webui_url = webui_hint(addr, public_url.as_deref());
     let webui_dist = options
         .webui_dist
         .or_else(|| std::env::var("CHRONO_WEBUI_DIST").ok().map(PathBuf::from))
@@ -103,7 +104,10 @@ pub async fn start_http_server(
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("bind control plane on {addr}"))?;
-    gateway_log!(info, "control plane listening on http://{addr}");
+    gateway_log!(
+        info,
+        "control plane listening on http://{addr}; WebUI {webui_url}"
+    );
 
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -117,4 +121,45 @@ pub async fn start_http_server(
         adapter_count,
         ws_events,
     })
+}
+
+/// User-facing WebUI URL for the startup banner. Wildcard binds are shown as
+/// loopback; `server.public_url` overrides the display address.
+fn webui_hint(addr: SocketAddr, public_url: Option<&str>) -> String {
+    if let Some(url) = public_url {
+        return url.to_string();
+    }
+    let display_ip = if addr.ip().is_unspecified() {
+        match addr.ip() {
+            std::net::IpAddr::V4(_) => std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            std::net::IpAddr::V6(_) => std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+        }
+    } else {
+        addr.ip()
+    };
+    format!("http://{}", SocketAddr::new(display_ip, addr.port()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webui_hint_rewrites_wildcard_addresses() {
+        assert_eq!(
+            webui_hint("0.0.0.0:9000".parse().unwrap(), None),
+            "http://127.0.0.1:9000"
+        );
+        assert_eq!(
+            webui_hint("[::]:9000".parse().unwrap(), None),
+            "http://[::1]:9000"
+        );
+        assert_eq!(
+            webui_hint(
+                "0.0.0.0:9000".parse().unwrap(),
+                Some("https://chrono.example.com")
+            ),
+            "https://chrono.example.com"
+        );
+    }
 }

@@ -266,8 +266,7 @@ Expected empty-config startup (all `info`, no warnings):
 
 ```
 [chrono] starting (CHRONO_HOME=/.../ChronoSys/.chrono)
-[chrono] configure via WebUI → http://127.0.0.1:8787
-[gateway] control plane listening on http://127.0.0.1:8787
+[gateway] control plane listening on http://127.0.0.1:8787; WebUI http://127.0.0.1:8787
 [gateway] config reloaded (0 live adapter(s))
 [gateway] control plane ready (adapters managed from config DB / WebUI)
 [agent] No enabled LLM providers yet — configure via WebUI

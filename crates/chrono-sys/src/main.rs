@@ -2,7 +2,7 @@
 // Start with: cargo run -p chrono-sys
 // Or after install: chrono
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -72,31 +72,11 @@ fn run(cli: Cli) -> anyhow::Result<()> {
 
     let db_path = chrono_home.join("state/chrono.db");
     let store = ConfigStore::open(&db_path).context("open config DB")?;
-    let public_url = store
-        .settings()
-        .get("server.public_url")
-        .ok()
-        .flatten()
-        .and_then(|setting| {
-            setting
-                .value_json
-                .as_str()
-                .map(str::trim)
-                .filter(|url| !url.is_empty())
-                .map(ToOwned::to_owned)
-        });
 
     eprintln!(
         "\x1b[36m[chrono]\x1b[0m starting (CHRONO_HOME={})",
         chrono_home.display()
     );
-    match public_url.as_deref() {
-        Some(url) => eprintln!("\x1b[36m[chrono]\x1b[0m configure via WebUI → {url}"),
-        None => eprintln!(
-            "\x1b[36m[chrono]\x1b[0m configure via WebUI → {}",
-            bind_hint(http_options.bind)
-        ),
-    }
 
     let rt = tokio::runtime::Runtime::new().expect("create tokio runtime");
     rt.block_on(run_gateway(
@@ -107,49 +87,4 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         http_options,
     ))
     .context("gateway failed")
-}
-
-
-fn bind_hint(bind: Option<SocketAddr>) -> String {
-    let addr = bind
-        .or_else(|| {
-            let host = std::env::var("CHRONO_API_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-            let port = std::env::var("CHRONO_API_PORT").unwrap_or_else(|_| "8787".into());
-            format!("{host}:{port}").parse().ok()
-        })
-        .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8787));
-    let display_ip = if addr.ip().is_unspecified() {
-        match addr.ip() {
-            IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
-            IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
-        }
-    } else {
-        addr.ip()
-    };
-    format!("http://{}", SocketAddr::new(display_ip, addr.port()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn cli() -> Cli {
-        Cli {
-            host: None,
-            home: None,
-            webui_dist: None,
-        }
-    }
-
-    #[test]
-    fn bind_hint_rewrites_wildcard_addresses() {
-        assert_eq!(
-            bind_hint(Some("0.0.0.0:9000".parse().unwrap())),
-            "http://127.0.0.1:9000"
-        );
-        assert_eq!(
-            bind_hint(Some("[::]:9000".parse().unwrap())),
-            "http://[::1]:9000"
-        );
-    }
 }
