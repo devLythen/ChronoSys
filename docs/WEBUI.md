@@ -55,8 +55,11 @@ Platforms (platform_accounts)
 
 消息跑通的最小条件（Overview 页逐项检查）：
 
-1. 至少一个 **enabled provider**，有 credential，至少一个 **enabled model**
-2. 至少一份 **enabled config**，`model_ref` 指向上述模型
+1. 至少一个 provider 有 credential，且至少一个 model 被加入 allowlist
+2. 至少一份 config，`model_ref` 指向上述模型
+3. 至少一个 persona 有非空 system prompt
+4. 至少一个平台账号
+5. 至少一个 attachment 绑定账号与 config
 ---
 ## 3. 信息架构
 
@@ -152,7 +155,7 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 
 **`POST /bindings` 要求 body.id 非空。** 前端生成：`{accountId}-{configId}-{timestamp36}`。
 
-**`secret_ref` 永不回传。** 列表返回 `has_secret: bool`。编辑时输入框默认为空，留空表示保留原值。
+**`secret_ref` 以明文回传。** Provider 与 account 的 GET 响应包含 `secret_ref`，WebUI 编辑时预填；留空表示保留原值。这是有意的设计（pre-v1，见 ARCHITECTURE 设计哲学），不是脱敏缺口。
 
 **写操作自动触发 `config.reload`。** 保存后 gateway 重新 sync adapter，agent-host 热读新配置，无需手动重启。
 
@@ -160,8 +163,8 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 
 | 字段 | Providers | Config | Persona | Platforms |
 |------|:---------:|:------:|:-------:|:---------:|
-| provider / credential / model 参数 | ✅ | 只读 | — | — |
-| display_name / enabled / model_ref / policy | — | ✅ | 保留 | — |
+| provider kind / base_url / credential / model 参数 | ✅ | 只读 | — | — |
+| model_ref / persona_id / policy | — | ✅ | 保留 | — |
 | system_prompt / tools / skills | — | 只读 | ✅ | — |
 | account secret / adapter_config | — | — | — | ✅ |
 | attachment（account → config） | — | 只读 | — | ✅ |
@@ -197,7 +200,7 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 ### Config
 - 卡片网格：标题(ID) + 模型(Cpu 图标) + 人格(User 图标) + Provider 跳转(Box 图标)
 - 底栏按钮：Provider 跳转 → Persona 跳转 → Delete
-- **model_ref 是 Select 下拉**，数据源：enabled provider + enabled model 的交集
+- **model_ref 是 Select 下拉**，数据源：所有 provider 下已加入 allowlist 的 model（`provider/model`）
 - Policy 编辑器：结构化表单 — 溢出策略(compaction/drop)、压缩模型与提示词、命令黑名单(默认全部启用)、群组 @mention 开关、时间戳、发送者身份(none/prefix/block)、时区
 - Persona 字段只读预览，链接到 Persona 页编辑
 - 创建时 model 必选
@@ -209,8 +212,10 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 
 ### Providers
 - 卡片网格：标题(ID) + kind badge + base_url(Link 图标) + 模型数量(Cpu 图标)
-- Credential 弹窗：auth_kind 选择 + secret_ref 输入
-- Model 弹窗：model_id / display_name / temperature / max_tokens / thinking_level
+- Provider kind：`openai-completions` / `openai-responses` / `deepseek` / `anthropic`；自定义 OpenAI-compatible provider 必须选前两种之一并填写 base_url
+- Credential 弹窗：`auth_kind` 固定 `api_key` + secret_ref 输入（明文保存）
+- Fetch：调用 `{base_url}/models`，返回的 model 可一键加入 allowlist
+- Model 弹窗：model_id / temperature / max_tokens / top_p / thinking_level / extra_body_json；打开时查询 pi 目录并展示只读 capabilities（未知模型提示无能力数据）
 
 ### Sessions
 - 列表：5 秒自动刷新
@@ -245,15 +250,15 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 
 ## 8. 常见错误
 
-1. 把 Persona 当成独立资源路径（`/personas`）——后端无此表
+1. 在 Config 页编辑 Persona 内容——Persona 是独立表，应在 Persona 页修改
 2. Config 页直接改 temperature——那是 model 行字段，应在 Providers
 3. Platforms 页只建账号不 attach config——永远不会路由
 4. PUT bots 只提交脏字段——擦掉另一页的编辑
 5. model_ref 手填自由文本——必须来自 allowlist 下拉
 6. 创建 binding 不传 id——API 400
-7. 列表展示 secret 明文
+7. 假设 provider/config/model 有 enabled 开关——它们存在即启用；只有 platform account 和 plugin 有开关
 8. tools / skills 存成对象或逗号字符串
-9. 忽略 enabled 标志——disabled 的实体运行时会跳过
+9. 自定义 provider 使用未知 kind——agent-host 会拒绝注册，必须选 OpenAI-compatible kind
 
 ---
 

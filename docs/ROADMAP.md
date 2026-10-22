@@ -46,11 +46,11 @@
 - [x] agent-host: `buildModels()` + `ChronoCredentialStore` from DB; `resolveModelRef()`
 - [x] Fail closed: empty DB → system starts cleanly, waits for WebUI configuration
 - [x] `display_name` removed from all config entities — `id` is the sole identifier
-- [x] CLI: `chrono init`, `chrono llm …`, `chrono config doctor` *(removed — WebUI covers all operator workflows)*
+- [x] CLI config commands (`chrono init`, `chrono llm …`, `chrono config doctor`) removed — WebUI is the only operator surface
 
 **Exit:** system starts with empty DB, configures via WebUI; `createModels` + `streamSimple` work for configured model.
 
-### M2 — Telegram adapter + sandbox (week 3–5) ✅
+### M2 — Telegram adapter (week 3–5) ✅
 
 **Deliverable:** real bot replies in a private chat **using config DB accounts/bindings**.
 
@@ -63,7 +63,7 @@
 - [x] Telegram `/new` command (registered via setMyCommands)
 - [x] UUID session persistence (`$CHRONO_HOME/state/sessions.db`)
 - [x] `message_send` + `message_reply` with optional `chat_id`
-- [x] `policy_json.max_context_messages` hard refuse (compaction later)
+- [x] `policy_json.max_context_messages` hard refuse (superseded by M3.5 compaction/drop policy)
 - [x] Bot profile hot-read from config DB each turn
 
 **Exit:** bot answers in DM; token via account secret_ref; model via config DB.
@@ -85,9 +85,29 @@
 - [x] Plugin-native registry: manifest [[tools]]/[[commands]]/[[config]], policy toggle/blacklist, install/delete
 **Exit:** operators configure everything via WebUI; no log diving for normal ops.
 
+### M3.5 — Provider/runtime hardening (post-M3) ✅
+
+**Deliverable:** production-usable model connections without silent fallbacks.
+
+- [x] Built-in pi provider catalog registration + custom OpenAI-compatible providers
+      (`openai-completions` / `openai-responses`); unknown provider kinds rejected at reload
+- [x] Custom providers inherit capabilities by model name; unknown model names register
+      with conservative defaults (128K context, 8K max tokens) instead of being skipped
+- [x] Per-model overrides: temperature, max_tokens, top_p, thinking_level, and
+      `extra_body_json` merged into the provider request payload
+- [x] Transient model-request retries (network / 5xx / 429 / timeout; 2 retries → 3 attempts)
+- [x] Model stream failures are non-fatal: reason logged, agent-host and session survive
+- [x] Context compaction: `/compact`, policy max-turns trigger, pre-prompt 85% guard,
+      post-turn 80% trigger; dedicated compaction model/prompt; persona preserved
+- [x] Policy: sender identity (none/prefix/block), IANA timezone + `get_time` tool,
+      command blacklist replacing the old command whitelist
+- [x] `config.reload` logs the concrete bot/model resolution failure
+
 ### M4 — Plugin system + Docker sandbox (week 7–9) 🚧
 
 **Deliverable:** installable native plugins with AI tools and user commands; ephemeral Docker containers for arbitrary code execution.
+
+**Progress:** native plugin registry is complete; Docker sandbox and the chat ↔ sandbox file bridge are not started.
 
 - [x] Manifest-driven registry: `[[tools]]`/`[[commands]]` metadata, `[[config]]` schema
 - [x] JS entry cross-validation: manifest names must exactly match `registerTool`/`registerCommand`
@@ -103,12 +123,13 @@
 - [ ] Chat ↔ sandbox file bridge: receive media/message from Telegram, upload generated files back
 ### M5 — Multi-platform & hardening (week 9–12)
 
-- [ ] compaction + memory scopes
-- [ ] replace hard `max_context_messages` refuse with: rolling summary → long-term memory
-      (RAG and/or graph) → inject retrieved snippets under ACL
+- [x] rolling compaction (manual + automatic, persona-preserving; see M3.5)
+- [ ] long-term memory scopes: RAG and/or graph store with ACL-filtered retrieval
+- [ ] inject retrieved memory snippets after the rolling summary under the same ACL
 - [ ] **Shared-context mode** (`policy_json.context_scope = bot|account`): platform-wide or
-      bot-wide transcript **only** after compaction + long-term memory (RAG/graph) + ACL
-      retrieval land; until then runtime stays session-isolated
+      bot-wide transcript **only** after long-term memory (RAG/graph) + ACL
+      retrieval land; until then runtime stays session-isolated (current code logs
+      a warning and falls back to `session`)
 - [ ] human approval queue for dangerous tools
 - [ ] container image + systemd unit
 - [ ] backup/restore of `$CHRONO_HOME` (includes state DB + secrets)
@@ -126,7 +147,7 @@
 
 ---
 
-## 3. Language assignment (concrete)
+## 2. Language assignment (concrete)
 
 | Crate / package | Lang | Notes |
 |-----------------|------|-------|
@@ -139,39 +160,43 @@ Python is **never** required for core install.
 
 ---
 
-## 4. Zero-pollution strategy
+## 3. Zero-pollution strategy
 
-### 4.1 Filesystem contract
+### 3.1 Filesystem contract
 
-| Path | Purpose |
-|------|---------|
-| `$CHRONO_HOME` | Single root (default: `$XDG_DATA_HOME/chronosys` or `~/.local/share/chronosys`) |
-| `$CHRONO_HOME/config.toml` | Bootstrap only (bind, workers, sandbox backend) |
-| `$CHRONO_HOME/state/chrono.db` | Config DB: providers, models, accounts, bots, bindings |
-| `$CHRONO_HOME/secrets/` | Encrypted credential blobs / keychain refs |
-| `$CHRONO_HOME/sessions/` | pi-compatible session stores |
-| `$CHRONO_HOME/plugins/` | installed plugins |
-| `$CHRONO_HOME/sandboxes/` | session workspaces |
-| `$CHRONO_HOME/logs/` | audit + process logs |
-| `$CHRONO_CACHE` | optional model/http cache (default XDG cache) |
+| Path | Purpose | Status |
+|------|---------|--------|
+| `$CHRONO_HOME` | Single writable root. Current default: `./.chrono`; XDG default (`$XDG_DATA_HOME/chronosys`) is a roadmap item. | implemented |
+| `$CHRONO_HOME/config.toml` | Bootstrap knobs (bind, agent runtime, sandbox) | planned — no TOML is read today |
+| `$CHRONO_HOME/state/chrono.db` | Config DB: providers (+ plaintext credentials), models, personas, accounts, bots, bindings, settings | implemented |
+| `$CHRONO_HOME/state/sessions.db` | Durable conversation transcripts + route → active session mapping | implemented |
+| `$CHRONO_HOME/plugins/installed/<id>/` | Installed native plugins | implemented |
+| `$CHRONO_HOME/logs/audit.jsonl` | Audit log | implemented |
+| `$CHRONO_HOME/secrets/` | Encrypted credential blobs / keychain refs | not used — secrets are plaintext in the state DB |
+| `$CHRONO_HOME/sandboxes/` | Per-session sandbox workspaces | planned |
+| `$CHRONO_CACHE` | Optional model/HTTP cache | planned |
 
-Env overrides:
+Implemented environment variables:
 
 ```bash
-export CHRONO_HOME=/var/lib/chronosys
-export CHRONO_CONFIG=/etc/chronosys/config.toml
-export CHRONO_NO_USER_PI=1          # never read/write ~/.pi
-export CHRONO_SANDBOX=bwrap         # none|bwrap|docker
+export CHRONO_HOME=/var/lib/chronosys     # default: ./.chrono
+export CHRONO_API_HOST=127.0.0.1          # default 127.0.0.1
+export CHRONO_API_PORT=8787               # default 8787
+export CHRONO_AUTH_TOKEN=…                # required when API binds off-loopback
+export CHRONO_WEBUI_DIST=/path/to/webui/dist
 ```
 
-### 4.2 What we never do by default
+Planned (not read by the current binary): `CHRONO_CONFIG`, `CHRONO_NO_USER_PI`,
+`CHRONO_SANDBOX`, `CHRONO_CACHE`.
+
+### 3.2 What we never do by default
 
 - Global `npm install -g` / `pip install` on host
 - Write to `~/.pi`, `~/.npm`, project dirs outside sandbox
 - Mutate system systemd without explicit `chrono install-service`
 - Require root (sandbox features degrade with warning if unprivileged)
 
-### 4.3 Dependency isolation
+### 3.3 Dependency isolation
 
 | Runtime | Isolation |
 |---------|-----------|
@@ -180,7 +205,7 @@ export CHRONO_SANDBOX=bwrap         # none|bwrap|docker
 | Python plugins | `uv venv` only under `$CHRONO_HOME/venvs` |
 | Sandbox | ephemeral; wiped on GC |
 
-### 4.4 Container (recommended prod)
+### 3.4 Container (recommended prod)
 
 ```yaml
 # deploy/docker-compose.yml (sketch)
@@ -201,18 +226,22 @@ volumes:
 
 Rootless Podman supported. Media/tmp use container volume only.
 
-### 4.5 Dev mode
+### 3.5 Dev mode (current)
 
 ```bash
-chrono dev
-# uses ./ .chrono/ as CHRONO_HOME for the repo (gitignored)
-# hot reload webui + agent-host
-# never touches real ~/.local/share/chronosys unless CHRONO_HOME set
+# Gateway + agent-host, state in the repo (gitignored)
+CHRONO_HOME=./.chrono cargo run -p chrono-sys
+# `cargo run -p chrono-sys` defaults to ./.chrono, so the explicit env is optional.
+
+# WebUI dev server (Vite :5173, proxies /api → :8787)
+cd webui && bun run dev
 ```
 
-`.chrono/` and `target/` and `node_modules/` are gitignored.
+There is no `chrono dev` command and no hot reload for Rust or agent-host;
+restart the gateway after changing them. `.chrono/`, `target/`, `node_modules/`,
+`webui/dist/`, and `agent-host/dist/` are gitignored.
 
-### 4.6 Supply chain
+### 3.6 Supply chain
 
 - Pin pi workspace via path in dev; lock versions in release
 - `npm ci --ignore-scripts` for agent-host (align with pi hardening)
@@ -221,31 +250,27 @@ chrono dev
 
 ---
 
-## 5. Config: bootstrap TOML vs state DB
+## 4. Config: bootstrap vs state DB
 
-**Principle: no business defaults.** A fresh `$CHRONO_HOME` is not a working bot. Operators must create providers, credentials, models, accounts, bot profiles, and bindings (CLI or WebUI) before live traffic.
+**Principle: no business defaults.** A fresh `$CHRONO_HOME` is not a working bot. Operators must create providers, credentials, models, accounts, bot profiles, and bindings in the WebUI before live traffic.
 
-### 5.1 Bootstrap only (`$CHRONO_HOME/config.toml` or `CHRONO_CONFIG`)
+### 4.1 Bootstrap (current: environment only; TOML planned)
 
-Process-level knobs. Safe to ship a minimal sample. Does **not** define bots or models.
+The current binary reads process knobs from environment variables only (see §3.1).
+No `config.toml` / `CHRONO_CONFIG` loading exists yet. The TOML sketch below is the
+planned target shape; do not rely on it today.
 
 ```toml
-# Bootstrap only — not product state.
+# PLANNED — not read by the current binary.
 [gateway]
 bind = "127.0.0.1:8787"
-auth_token_env = "CHRONO_TOKEN"   # if unset, control plane requires explicit setup
-
-[paths]
-# optional overrides; default under CHRONO_HOME
-# state_db = "state/chrono.db"
-# secrets_dir = "secrets"
+auth_token_env = "CHRONO_AUTH_TOKEN"
 
 [agent]
 runtime = "bun"   # bun | node
-workers = 2
 
 [sandbox]
-backend = "bwrap" # none | bwrap | docker
+backend = "docker" # none | bwrap | docker
 default_network = false
 
 [pi]
@@ -253,64 +278,54 @@ import_user_skills = false
 # packages from node_modules only; never packages_root path dep
 ```
 
-There is **no** `default_model` in bootstrap. Model selection is always `bot_profiles.model_ref` → `llm_models` → pi-ai `getModel(provider, id)`.
+There is **no** `default_model` in bootstrap. Model selection is always `bot_profiles.model_ref` → `llm_models` → pi-ai provider runtime.
 
-### 5.2 State database (`$CHRONO_HOME/state/chrono.db`)
+### 4.2 State database (`$CHRONO_HOME/state/chrono.db`)
 
-See ARCHITECTURE §5.1. Owns:
+See ARCHITECTURE §6. Owns:
 
-- multi LLM providers + credentials (refs) + allowlisted models
+- multi LLM providers + plaintext credentials + allowlisted models
 - multi platform accounts + adapter config
-- multi bot profiles + bindings
+- multi bot profiles + persona references + bindings
 - feature flags in `settings` (still explicit rows, not code defaults for safety-critical paths)
 
-### 5.3 Operator flows (target UX)
+### 4.3 Operator flow (current)
 
-```bash
-# 1) init home (creates empty DB + dirs; still not runnable for live chat)
-chrono init
+```text
+1. Providers  → add provider (kind + base_url) → set API key → fetch/select models
+                → optional per-model temperature / max_tokens / top_p /
+                  thinking_level / extra_body_json
+2. Persona    → system prompt + built-in tool allowlist + skills
+3. Config     → select model_ref + persona + context/command policy
+4. Platforms  → add platform account (Telegram token) → attach one Config
+```
 
-# 2) LLM provider + credential
-chrono llm provider add my-llm --kind builtin
-chrono llm credential set my-llm --api-key-env MY_LLM_API_KEY
+The WebUI is the only configuration surface. There is no `chrono init`,
+`chrono llm …`, or `chrono bind …` CLI today. A missing provider/credential/model/
+account/attachment does not crash the process: the gateway starts, the bot simply
+does not route, and the Overview closure checklist shows the missing step.
 
-# 3) Refresh model catalogue from pi-ai → operator selects models in WebUI/CLI
-chrono llm provider refresh my-llm
-chrono llm model select my-llm main-model --temperature 0.7
-chrono llm model select my-llm fast-model
+### 4.4 Demo / CI exception
 
-# 4) Platform account
-chrono account add tg1 --platform telegram --token-env TELEGRAM_BOT_TOKEN
-
-# 5) Bot profile (model_ref = provider_id/model_id)
-chrono bot add greeter --model my-llm/main-model --system-prompt-file ./prompts/greeter.md
-chrono bot tools greeter --allow message.send,chat.history
-chrono bind add --account tg1 --pattern 'dm:*' --bot greeter --mode dm
-
-
-Missing any required link → start fails with a structured checklist (provider / credential / model / account / binding), not a silent fallback.
-
-### 5.4 Demo / CI exception
-
-The system starts with an empty config DB and waits for WebUI setup. It does not create production defaults. A demo seed script (`agent-host/src/seed.ts`) can populate the DB for testing, but it is never run automatically.
+The system starts with an empty config DB and waits for WebUI setup. It does not create production defaults. `agent-host/src/seed.ts` can create the schema and example rows for testing, but it is never run automatically.
 
 ---
 
-## 6. Testing strategy
+## 5. Testing strategy
 
 | Layer | How |
 |-------|-----|
-| IPC contract | golden JSON fixtures |
-| agent-host | pi faux provider; mock gateway |
-| adapters | recorded HTTP fixtures |
-| sandbox | integration tests on Linux CI only |
-| e2e | `scripts/e2e-fake-chat.sh` |
-
-No live LLM required for CI (`CHRONO_FAKE_LLM=1`).
+| IPC contract | golden JSON fixtures + frame roundtrip (`chrono-ipc`, 10 tests) |
+| config store | SQLite migration + CRUD integration (`chrono-config`, 10 tests) |
+| gateway/API | WebSocket topic routing (`chrono-api`, 2 tests) |
+| agent-host | IPC fixtures, session store, plugin registry, provider resolution (`bun test`, 23 tests) |
+| adapters | no recorded HTTP fixtures yet; manual Telegram smoke |
+| sandbox | planned — no tests until the Docker runtime lands |
+| e2e | not implemented (no `scripts/` harness, no fake LLM mode) |
 
 ---
 
-## 7. Definition of done for v1.0
+## 6. Definition of done for v1.0
 
 1. Telegram DM + group (mention-gated) with tool-only side effects.
 2. Sandbox: Docker containers per session with exec + browser.

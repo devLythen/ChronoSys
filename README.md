@@ -2,7 +2,7 @@
 
 Agent-centric framework for connecting chat platforms to tool-calling AI agents. **All side effects go through agent tools** (send message, plugins). Powered by [pi](https://github.com/earendil-works/pi) (`@earendil-works/pi-agent-core` + `@earendil-works/pi-ai`).
 
-> Status: **M3 (active development)**. Telegram bot works end-to-end; WebUI manages all config entities; context compaction operational. See [Roadmap](docs/ROADMAP.md).
+> Status: **M4 (active development)**. Telegram bot works end-to-end; WebUI manages all config entities; native plugin tools/commands are installable; LLM context compaction is operational. Docker sandbox and long-term memory remain. See [Roadmap](docs/ROADMAP.md).
 
 ## Docs
 
@@ -69,8 +69,8 @@ Then open `http://127.0.0.1:8787` and configure via WebUI:
 ### Testing
 
 ```bash
-cargo test                          # 20 Rust tests
-cd agent-host && bun test           # 10 TypeScript tests
+cargo test                          # 22 Rust tests
+cd agent-host && bun test           # 23 TypeScript tests
 cd webui && npx tsc --noEmit        # TypeScript typecheck
 ```
 

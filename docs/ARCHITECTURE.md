@@ -50,9 +50,6 @@ crates/
 
 ---
 
-## 2. Process Architecture
----
-
 ## 2. LLM Credential Flow
 
 Agent-host bridges the config DB to pi-ai via `ChronoCredentialStore` (`agent-host/src/credential-store.ts`). When pi-ai needs an API key:
@@ -62,6 +59,28 @@ Agent-host bridges the config DB to pi-ai via `ChronoCredentialStore` (`agent-ho
 3. Returns `{ type: "api_key", key: secret_ref }` — the plaintext key
 
 This is the only path for LLM auth. There is no separate env var or config file for API keys.
+
+---
+
+## 3. Provider Runtime
+
+`buildModels()` (`agent-host/src/resolve.ts`) starts from pi-ai `createModels`, registers every builtin pi-ai provider, then registers config-DB providers that are absent from the builtin catalog as custom OpenAI-compatible providers.
+
+**Custom providers**
+
+- `llm_providers.kind` must be `openai-completions` or `openai-responses`. Unknown/legacy kinds are rejected at reload with a `[agent]` warning; there is no silent default.
+- `base_url` is required. The API key comes from `llm_credentials` through `ChronoCredentialStore`.
+- A DB model whose id matches a builtin catalog model inherits that model's capabilities by name (context window, reasoning/thinking levels, cost, input modalities).
+- Connection fields always come from the custom provider row: inherited `baseUrl` and `api` are stripped, then re-applied from the provider config.
+- A model id unknown to the catalog still registers with conservative defaults: 128K context, 8K max tokens (or the DB override), text-only input, no reasoning.
+
+**Request path**
+
+- `bot_profiles.model_ref` must be `provider_id/model_id`; the model must be allowlisted in `llm_models` and known to the runtime.
+- Per-model overrides: `temperature`, `max_tokens`, `top_p`, `thinking_level` (clamped to model support), and `extra_body_json`.
+- `extra_body_json` is parsed as an object and merged over the provider request payload via `onPayload`.
+- `models.streamSimple` is wrapped with `maxRetries = 2` for transient failures (network, 5xx, 429, timeout): up to three attempts per request.
+- A model stream failure is logged with its stop reason and does not terminate agent-host; the session transcript remains available for the next inbound message.
 
 ---
 
@@ -109,8 +128,10 @@ This is the only path for LLM auth. There is no separate env var or config file 
 
 ```
 LlmProvider     provider slot (id, kind, base_url)
+                kind: builtin pi id, openai-completions, or openai-responses
 LlmCredential   API key (auth_kind, secret_ref — plaintext)
-LlmModel        allowlisted model (provider_id + model_id, params)
+LlmModel        allowlisted model (provider_id + model_id; temperature,
+                max_tokens, top_p, thinking_level, extra_body_json)
 Persona         system prompt + tools allowlist + skills allowlist
 BotProfile      "Config" in UI — model_ref, persona_id FK, policy
 PlatformAccount platform identity + secret_ref + adapter_config
@@ -123,14 +144,14 @@ Session         durable conversation transcript (sessions.db)
 ---
 ## 7. Startup Behavior
 
-1. `chrono` resolves `CHRONO_HOME` (default `.chrono`), canonicalizes to absolute path
+1. `chrono` resolves `CHRONO_HOME` (current default `./.chrono`; XDG default is planned), canonicalizes to an absolute path
 2. Creates `$CHRONO_HOME/state/` if missing
 3. Opens `chrono.db` (creates empty DB with schema if first run)
-4. Spawns `bun run agent-host/src/main.ts` with `CHRONO_HOME` env set to absolute path
-5. Gateway starts HTTP server on `127.0.0.1:8787`
-6. Agent-host reads config DB; if empty, logs info and waits for `config.reload`
+4. Spawns `bun run agent-host/src/main.ts` with `CHRONO_HOME` set to the absolute path
+5. Gateway starts HTTP on `CHRONO_API_HOST:CHRONO_API_PORT` (default `127.0.0.1:8787`); off-loopback binds require `CHRONO_AUTH_TOKEN`
+6. Agent-host reads the config DB; if empty, logs info and waits for `config.reload`
 
-**No crash on empty config.** The system starts and stays alive. Operators configure via WebUI; gateway sends `config.reload` frame to agent-host when config changes.
+**No crash on empty config.** The system starts and stays alive. Operators configure via WebUI; gateway sends `config.reload` to agent-host when config changes. A provider or bot resolution failure is logged with its concrete reason; the process keeps running.
 
 ---
 ## 8. Tools
@@ -244,3 +265,41 @@ logEvent({ type: "host_error", message: err.message });
 ```
 
 The function strips the `host_` prefix and maps the remainder to ANSI color.
+
+---
+
+## 12. Context Management
+
+Transcripts are stored per route (`session_key#bot_id`) in
+`$CHRONO_HOME/state/sessions.db`. A bucket holds the active session UUID,
+the full `AgentMessage[]`, and the last date separator. `/new` rotates the
+session; `/compact` summarizes in place.
+
+Policy fields (`bot_profiles.policy_json`):
+
+| Field | Meaning |
+|-------|---------|
+| `max_turns` | Trigger threshold in user turns; `-1` disables |
+| `compact_strategy` | `drop` (default) or `compact` |
+| `drop_turns` | User turns discarded per drop event (default 1) |
+| `compact_model_ref` | Optional dedicated `provider/model`; empty = chat model |
+| `compact_prompt` | Instructions for the summarizer; bot system prompt always appended |
+| `context_window_fallback` | Used when the model has no context window (default 128000) |
+
+Compaction (`compactSessionMessages`) summarizes the oldest messages and keeps
+the recent tail: 40% of messages for short transcripts, otherwise enough recent
+messages to fit 50% of the model context window. The summary is stored as an
+assistant message carrying `[Previous conversation summary]`, followed by the
+kept tail. A failed summarize call keeps the original transcript and logs a
+warning.
+
+Triggers, all in `agent-host/src/main.ts`:
+
+1. `/compact` (unless disabled by `disabled_commands`)
+2. before a prompt when `max_turns` is exceeded (compact or drop)
+3. before a prompt when the estimate exceeds 85% of the context window
+4. after a turn when the estimate exceeds 80% (compact strategy only)
+
+`context_scope` (`session` / `bot` / `account`) is reserved: the runtime logs a
+warning for non-session values and falls back to session isolation until
+long-term memory lands (M5).
