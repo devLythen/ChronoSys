@@ -102,6 +102,8 @@
 - [x] Policy: sender identity (none/prefix/block), IANA timezone + `get_time` tool,
       command blacklist replacing the old command whitelist
 - [x] `config.reload` logs the concrete bot/model resolution failure
+- [x] Pi 1.4.0 migration: new token-estimation and `completeSimple` summary APIs,
+      transcript system-message replay, and provider fallback for removed catalog models
 
 ### M4 — Plugin system + Docker sandbox (week 7–9) 🚧
 

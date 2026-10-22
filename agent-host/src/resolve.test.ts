@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openConfig, type ChronoConfig } from "./config.ts";
-import { buildModels, queryModelCaps, parseExtraBody } from "./resolve.ts";
+import { buildModels, queryModelCaps, parseExtraBody, resolveModelRef } from "./resolve.ts";
 
 // ── model caps: name-wide fallback ────────────────────────────────
 
@@ -19,7 +19,7 @@ test("caps are found by model name even when the provider id is unknown", () => 
 });
 
 test("exact provider+model lookup still wins", () => {
-  const exact = queryModelCaps("deepseek", "deepseek-v4-flash");
+  const exact = queryModelCaps("deepseek", "deepseek-v4-pro");
   expect(exact).not.toBeNull();
   expect(exact!.provider).toBe("deepseek");
 });
@@ -27,6 +27,26 @@ test("exact provider+model lookup still wins", () => {
 test("unknown model names return null", () => {
   expect(queryModelCaps("opkg-lite", "definitely-not-a-real-model-xyz")).toBeNull();
   expect(queryModelCaps("nope", "nope")).toBeNull();
+});
+
+test("allowlisted model removed from the catalog keeps a provider fallback", () => {
+  const { config, cleanup } = makeConfig();
+  try {
+    configDbInsert(config, "deepseek", null, "sk-test", ["deepseek-v4-flash"]);
+    const models = buildModels(config);
+    expect(models).not.toBeNull();
+    const resolved = resolveModelRef(
+      config,
+      models!,
+      "deepseek/deepseek-v4-flash",
+    );
+    expect(resolved.model.provider).toBe("deepseek");
+    expect(resolved.model.id).toBe("deepseek-v4-flash");
+    expect(resolved.model.contextWindow).toBe(128000);
+    expect(resolved.model.maxTokens).toBe(8192);
+  } finally {
+    cleanup();
+  }
 });
 
 test("parseExtraBody parses valid JSON and rejects invalid input", () => {

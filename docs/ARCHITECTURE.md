@@ -74,9 +74,16 @@ This is the only path for LLM auth. There is no separate env var or config file 
 - Connection fields always come from the custom provider row: inherited `baseUrl` and `api` are stripped, then re-applied from the provider config.
 - A model id unknown to the catalog still registers with conservative defaults: 128K context, 8K max tokens (or the DB override), text-only input, no reasoning.
 
+**Catalog changes**
+
+- Pi model catalogs are tied to the pinned `@earendil-works/pi-*` versions.
+- An allowlisted model that disappears from the catalog stays usable if its provider still exists: the runtime clones the provider's protocol/endpoint and applies 128K / 8K fallback capabilities. It logs `model ... is not in the pi catalog; using fallback capabilities`.
+- New catalog models are not auto-added to `llm_models`; operators import them explicitly through the provider UI.
+- Capability changes for an existing model id are picked up after a gateway restart.
+
 **Request path**
 
-- `bot_profiles.model_ref` must be `provider_id/model_id`; the model must be allowlisted in `llm_models` and known to the runtime.
+- `bot_profiles.model_ref` must be `provider_id/model_id`; the model must be allowlisted in `llm_models` and have a provider runtime (catalog entry or fallback).
 - Per-model overrides: `temperature`, `max_tokens`, `top_p`, `thinking_level` (clamped to model support), and `extra_body_json`.
 - `extra_body_json` is parsed as an object and merged over the provider request payload via `onPayload`.
 - `models.streamSimple` is wrapped with `maxRetries = 2` for transient failures (network, 5xx, 429, timeout): up to three attempts per request.

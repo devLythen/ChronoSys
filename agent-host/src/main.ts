@@ -1,8 +1,12 @@
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
-import { estimateContextTokens, generateSummary, estimateTokens } from "@earendil-works/pi-agent-core";
+import {
+  estimateContextTokens,
+  estimateMessageTokens,
+} from "@earendil-works/pi-ai/utils/estimate";
 import type { Model, Api, MutableModels, ThinkingLevel } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { ChronoEvent, ToolIpcMessage } from "./ipc/types.ts";
+import { conversationMessages, withSystemPrompt } from "./transcript.ts";
 import {
   sendBodyTextToCurrentChat,
   type PendingCall,
@@ -377,6 +381,7 @@ function readReadyAttachments(raw: unknown): ReadyAttachment[] {
   }
   return attachments;
 }
+
 function resolveContextWindow(model: Model<Api>, policy: ContextPolicy): number {
   return model.contextWindow > 0 ? model.contextWindow : policy.contextWindowFallback;
 }
@@ -456,7 +461,7 @@ async function compactSessionMessages(
     let accum = 0;
     cutIndex = messages.length;
     for (let i = messages.length - 1; i >= 0; i--) {
-      accum += estimateTokens(messages[i]!);
+      accum += estimateMessageTokens(messages[i]!);
       if (accum >= keepTokens) { cutIndex = i; break; }
     }
     if (cutIndex <= 0) cutIndex = countCut;
@@ -465,22 +470,36 @@ async function compactSessionMessages(
   const recentMessages = messages.slice(cutIndex);
 
   const instructions = buildCompactionInstructions(customInstructions, systemPrompt);
-  const result = await generateSummary(
-    oldMessages,
-    models,
-    model,
-    keepTokens,
-    signal,
-    instructions,
-  );
-  if (!result.ok) {
-    logEvent({ type: "host_warn", message: `compaction failed: ${result.error.message}` });
+  let summary: string;
+  try {
+    const result = await models.completeSimple(
+      model,
+      { systemPrompt: instructions, messages: oldMessages },
+      {
+        signal,
+        maxTokens: Math.min(
+          keepTokens,
+          model.maxTokens > 0 ? model.maxTokens : keepTokens,
+        ),
+      },
+    );
+    const text = extractAssistantText(result);
+    if (!text) {
+      logEvent({ type: "host_warn", message: "compaction returned an empty summary" });
+      return messages;
+    }
+    summary = text;
+  } catch (error) {
+    logEvent({
+      type: "host_warn",
+      message: `compaction failed: ${error instanceof Error ? error.message : String(error)}`,
+    });
     return messages;
   }
 
   const summaryMsg: AgentMessage = {
     role: "assistant",
-    content: [{ type: "text", text: `[Previous conversation summary]\n${result.value}` }],
+    content: [{ type: "text", text: `[Previous conversation summary]\n${summary}` }],
     api: model.api,
     provider: model.provider,
     model: model.id,
@@ -1047,14 +1066,13 @@ async function main() {
         type: "host_info",
         message: `session rotated route=${route} id=${bucket.sessionId}`,
       });
-      agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+      const newPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
       agent.state.model = bot.resolvedModel.model;
       agent.state.thinkingLevel = resolveThinkingLevel(
         bot.resolvedModel.model,
         bot.resolvedModel.overrides,
       ) as ThinkingLevel;
-      agent.state.messages = [];
-      agent.state.tools = registry.createToolsForAllowlist(
+      const newTools = registry.createToolsForAllowlist(
         bot.toolsAllowlist.length > 0 ? bot.toolsAllowlist : defaultToolsAllowlist,
         event.session_key,
         pendingCalls,
@@ -1062,6 +1080,8 @@ async function main() {
         bot.personaId ?? undefined,
         readContextPolicy(bot).timezone,
       );
+      agent.state.tools = newTools;
+      agent.state.messages = withSystemPrompt([], newPrompt, newTools);
       try {
         const tools = agent.state.tools;
         const send = tools.find((t) => t.name === "message_send");
@@ -1115,7 +1135,6 @@ async function main() {
       const origEst = estimateContextTokens(bucket.messages);
       const origPct = Math.round((origEst.tokens / bot.resolvedModel.model.contextWindow) * 100);
       bucket.messages = compacted;
-      agent.state.messages = compacted;
       persistBucket(bucket);
       const newEst = estimateContextTokens(compacted);
       const newPct = Math.round((newEst.tokens / bot.resolvedModel.model.contextWindow) * 100);
@@ -1192,7 +1211,7 @@ async function main() {
       }
     }
 
-    agent.state.systemPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+    const turnPrompt = bot.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     agent.state.model = bot.resolvedModel.model;
     agent.state.thinkingLevel = resolveThinkingLevel(
       bot.resolvedModel.model,
@@ -1206,8 +1225,7 @@ async function main() {
       bucket.lastDate = today;
       persistBucket(bucket);
     }
-    agent.state.messages = bucket.messages;
-    agent.state.tools = registry.createToolsForAllowlist(
+    const turnTools = registry.createToolsForAllowlist(
       bot.toolsAllowlist.length > 0 ? bot.toolsAllowlist : defaultToolsAllowlist,
       event.session_key,
       pendingCalls,
@@ -1215,6 +1233,8 @@ async function main() {
       bot.personaId ?? undefined,
       ctxPolicy.timezone,
     );
+    agent.state.tools = turnTools;
+    agent.state.messages = withSystemPrompt(bucket.messages, turnPrompt, turnTools);
 
     logEvent({
       type: "host_info",
@@ -1232,7 +1252,7 @@ async function main() {
         );
         if (compacted !== bucket.messages) {
           bucket.messages = compacted;
-          agent.state.messages = compacted;
+          agent.state.messages = withSystemPrompt(compacted, turnPrompt, turnTools);
           persistBucket(bucket);
           logEvent({ type: "host_info", message: `pre-prompt compact bot=${bot.id} tokens=${preEst.tokens}/${ctxWindow}` });
         }
@@ -1246,7 +1266,7 @@ async function main() {
         }
         if (cut > 0 && cut < bucket.messages.length) {
           bucket.messages = bucket.messages.slice(cut);
-          agent.state.messages = bucket.messages;
+          agent.state.messages = withSystemPrompt(bucket.messages, turnPrompt, turnTools);
           persistBucket(bucket);
           logEvent({ type: "host_info", message: `pre-prompt drop bot=${bot.id} tokens=${preEst.tokens}/${ctxWindow}` });
         }
@@ -1261,7 +1281,7 @@ async function main() {
       const attachmentNote = buildAttachmentNote(event);
       await agent.prompt(attachmentNote + senderIdentity + userPrefix + event.message.text);
 
-      bucket.messages = agent.state.messages.slice();
+      bucket.messages = conversationMessages(agent.state.messages);
       persistBucket(bucket);
 
       // ── Post-turn auto-compact when context exceeds 80% threshold ──
@@ -1274,7 +1294,6 @@ async function main() {
         );
         if (compacted !== bucket.messages) {
           bucket.messages = compacted;
-          agent.state.messages = compacted;
           persistBucket(bucket);
           logEvent({ type: "host_info", message: `post-turn compact bot=${bot.id} tokens=${postEst.tokens}/${ctxWindow}` });
         }
@@ -1312,7 +1331,7 @@ async function main() {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logEvent({ type: "host_error", message });
-      bucket.messages = agent.state.messages.slice();
+      bucket.messages = conversationMessages(agent.state.messages);
       persistBucket(bucket);
       writeControl({ type: "error", message });
       // Model/stream failures are recoverable (network, auth, provider

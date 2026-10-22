@@ -71,7 +71,7 @@ Then open `http://127.0.0.1:8787` and configure via WebUI:
 
 ```bash
 cargo test                          # 36 Rust tests
-cd agent-host && bun test           # 24 TypeScript tests
+cd agent-host && bun test           # 27 TypeScript tests
 cd webui && npx tsc --noEmit        # TypeScript typecheck
 cargo test -p chrono-sandbox -p chrono-gateway -- --ignored  # Docker sandbox smoke
 ```

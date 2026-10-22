@@ -237,6 +237,29 @@ export function resolveModelRef(
 
   const piModel = models.getModel(providerId, modelId);
   if (!piModel) {
+    // Pi catalogs change. Keep an explicitly allowlisted model usable when its
+    // provider still exists, using conservative capabilities and the
+    // provider's current protocol/endpoint. This avoids breaking bot profiles
+    // on a catalog removal; the operator still sees the warning.
+    const template = models.getProvider(providerId)?.getModels()[0];
+    if (template) {
+      process.stderr.write(
+        `\x1b[33m[agent] model ${modelRef} is not in the pi catalog; using fallback capabilities\x1b[0m\n`,
+      );
+      const fallback: Model<Api> = {
+        id: modelId,
+        name: modelId,
+        api: template.api,
+        provider: providerId,
+        baseUrl: template.baseUrl,
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: dbModel.max_tokens ?? 8192,
+      };
+      return { model: fallback, overrides: dbModel };
+    }
     throw new Error(
       `model "${modelRef}" not found in pi-ai catalog for provider "${providerId}".`,
     );
