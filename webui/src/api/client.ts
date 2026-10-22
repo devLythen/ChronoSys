@@ -1,22 +1,15 @@
-import { useAuthStore } from "../store";
-
 const BASE = "/api/v1";
 
 class ApiClient {
-  private get headers(): HeadersInit {
-    const token = useAuthStore.getState().token;
-    const h: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) h["Authorization"] = `Bearer ${token}`;
-    return h;
-  }
-
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await fetch(`${BASE}${path}`, {
+      credentials: "same-origin",
       ...init,
-      headers: { ...this.headers, ...init?.headers },
+      headers: { "Content-Type": "application/json", ...init?.headers },
     });
+    if (res.status === 401) {
+      window.dispatchEvent(new Event("chrono:unauthorized"));
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       const detail = body?.detail || body?.error || res.statusText;
@@ -24,6 +17,32 @@ class ApiClient {
     }
     if (res.status === 204) return undefined as T;
     return res.json();
+  }
+
+  // ── Auth ────────────────────────────────────────────────────
+  authStatus() {
+    return this.request<import("./types").AuthStatus>("/auth/status");
+  }
+  setup(body: { username: string; password: string }) {
+    return this.request<import("./types").AuthStatus>("/auth/setup", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+  login(body: { username: string; password: string }) {
+    return this.request<import("./types").AuthStatus>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+  logout() {
+    return this.request<{ ok: boolean }>("/auth/logout", { method: "POST" });
+  }
+  changePassword(body: { current_password: string; new_password: string }) {
+    return this.request<import("./types").AuthStatus>("/auth/password", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   }
 
   // ── Health ──────────────────────────────────────────────────
@@ -281,7 +300,7 @@ class ApiClient {
   installPluginZip(archive: File) {
     const body = new FormData();
     body.append("archive", archive);
-    return fetch(`${BASE}/plugins/install/zip`, { method: "POST", body, headers: useAuthStore.getState().token ? { Authorization: `Bearer ${useAuthStore.getState().token}` } : undefined }).then(async (res) => {
+    return fetch(`${BASE}/plugins/install/zip`, { method: "POST", body, credentials: "same-origin" }).then(async (res) => {
       if (!res.ok) throw new Error(`${res.status}: ${(await res.json().catch(() => ({}))).error ?? res.statusText}`);
       return res.json() as Promise<{ plugins: import("./types").PluginView[] }>;
     });

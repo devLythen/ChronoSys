@@ -58,9 +58,21 @@ cd agent-host && bun install --ignore-scripts
 
 # Start the gateway (serves WebUI on :8787)
 cargo run -p chrono-sys
+
+# Expose on all interfaces; the first browser visit creates the admin account
+cargo run -p chrono-sys -- --host 0.0.0.0:8787
+
+# Full CLI reference
+cargo run -p chrono-sys -- --help
 ```
 
-Then open `http://127.0.0.1:8787` and configure via WebUI:
+Complete the first-run onboarding before exposing the port to an untrusted
+network: until an admin password exists, whoever reaches the UI can claim it.
+Then open `http://127.0.0.1:8787` (or your public URL) and configure via WebUI.
+Set **Settings → Server access → Public URL** for the startup banner and CORS
+allow-list; it needs a gateway restart. The first WebUI visit shows onboarding:
+create the admin username/password. Later visits show the login page; the
+password can be changed under **Settings → Authentication**.
 
 1. **Providers** — add an LLM provider (e.g. DeepSeek) with API key
 2. **Persona** — create a persona with system prompt and tools
@@ -75,7 +87,7 @@ via **Platforms → Bot API URL** or `CHRONO_TELEGRAM_API_URL`.
 ### Testing
 
 ```bash
-cargo test                          # 46 Rust tests
+cargo test                          # 50 Rust tests
 cd agent-host && bun test           # 35 TypeScript tests
 cd webui && npx tsc --noEmit        # TypeScript typecheck
 cargo test -p chrono-sandbox -p chrono-gateway -- --ignored  # Docker sandbox smoke

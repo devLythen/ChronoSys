@@ -80,7 +80,7 @@
 - [x] Model settings: thinking level dropdown populated from runtime capabilities
 - [x] Persona editor: tools allowlist checkbox grid, skills tag editor
 - [x] Config hot-reload notification to agent-host
-- [x] bearer token auth (loopback bypass)
+- [x] WebUI password login, first-run onboarding, HttpOnly session cookies, password change
 - [x] WebSocket real-time push — Telegram inbound/outbound topics, subscriptions, reconnect/resync
 - [x] Plugin-native registry: manifest [[tools]]/[[commands]]/[[config]], policy toggle/blacklist, install/delete
 **Exit:** operators configure everything via WebUI; no log diving for normal ops.
@@ -194,13 +194,21 @@ Python is **never** required for core install.
 | `$CHRONO_HOME/sandboxes/` | Per-session sandbox workspaces (bind-mounted at `/workspace`) | implemented |
 | `$CHRONO_CACHE` | Optional model/HTTP cache | planned |
 
-Implemented environment variables:
+CLI flags (preferred for startup-only values):
+
+```bash
+chrono --host 0.0.0.0:8787                # overrides CHRONO_API_HOST/PORT
+chrono --home /var/lib/chronosys
+chrono --webui-dist /path/to/webui/dist
+chrono --help
+```
+
+Environment fallbacks remain supported:
 
 ```bash
 export CHRONO_HOME=/var/lib/chronosys     # default: ./.chrono
 export CHRONO_API_HOST=127.0.0.1          # default 127.0.0.1
 export CHRONO_API_PORT=8787               # default 8787
-export CHRONO_AUTH_TOKEN=…                # required when API binds off-loopback
 export CHRONO_WEBUI_DIST=/path/to/webui/dist
 ```
 
@@ -272,17 +280,17 @@ restart the gateway after changing them. `.chrono/`, `target/`, `node_modules/`,
 
 **Principle: no business defaults.** A fresh `$CHRONO_HOME` is not a working bot. Operators must create providers, credentials, models, accounts, bot profiles, and bindings in the WebUI before live traffic.
 
-### 4.1 Bootstrap (current: environment only; TOML planned)
+### 4.1 Bootstrap (current: CLI with environment fallback; TOML planned)
 
-The current binary reads process knobs from environment variables only (see §3.1).
-No `config.toml` / `CHRONO_CONFIG` loading exists yet. The TOML sketch below is the
-planned target shape; do not rely on it today.
+The current binary reads startup knobs from CLI flags (`--host`, `--home`,
+`--webui-dist`), with the environment fallbacks in §3.1. No `config.toml` / `CHRONO_CONFIG` loading exists yet. The
+TOML sketch below is the planned target shape; do not rely on it today.
 
 ```toml
 # PLANNED — not read by the current binary.
 [gateway]
 bind = "127.0.0.1:8787"
-auth_token_env = "CHRONO_AUTH_TOKEN"
+public_url = "https://chrono.example.com"
 
 [agent]
 runtime = "bun"   # bun | node

@@ -37,8 +37,10 @@ pub struct AppState {
     pub chrono_home: PathBuf,
     pub sessions_db_path: PathBuf,
     pub audit_log_path: PathBuf,
-    pub auth_token: Option<String>,
+    pub auth_sessions: SessionStore,
     pub webui_dist_path: PathBuf,
+    /// Optional public base URL from `server.public_url`; used for CORS.
+    pub public_url: Option<String>,
     pub started_at: Instant,
     /// Live platform adapters currently polling (updated by gateway sync).
     pub adapter_count: Arc<AtomicUsize>,
@@ -46,6 +48,60 @@ pub struct AppState {
     pub child: Arc<dyn AgentQuery>,
     pub pending_queries: Arc<ParkingMutex<HashMap<String, oneshot::Sender<Value>>>>,
     pub ws_events: broadcast::Sender<WsEvent>,
+}
+
+#[derive(Clone)]
+pub struct AuthSession {
+    pub username: String,
+    pub expires_at: Instant,
+}
+
+/// In-memory WebUI sessions. Restarting the gateway logs everyone out; the
+/// admin password hash persists in the config DB.
+#[derive(Default)]
+pub struct SessionStore {
+    inner: Mutex<HashMap<String, AuthSession>>,
+}
+
+impl SessionStore {
+    pub fn create(&self, username: &str, ttl: Duration) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut sessions = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        sessions.insert(
+            id.clone(),
+            AuthSession {
+                username: username.to_string(),
+                expires_at: Instant::now() + ttl,
+            },
+        );
+        id
+    }
+
+    pub fn get(&self, id: &str) -> Option<AuthSession> {
+        let mut sessions = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match sessions.get(id) {
+            Some(session) if session.expires_at > Instant::now() => Some(session.clone()),
+            Some(_) => {
+                sessions.remove(id);
+                None
+            }
+            None => None,
+        }
+    }
+
+    pub fn remove(&self, id: &str) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(id);
+    }
+
+    pub fn remove_all(&self) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
 }
 
 impl AppState {

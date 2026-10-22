@@ -199,6 +199,12 @@ export interface Setting {
   updated_at: string;
 }
 
+export interface AuthStatus {
+  configured: boolean;
+  authenticated: boolean;
+  username: string | null;
+}
+
 // ── API Error ──────────────────────────────────────────────────
 
 export interface ApiError {

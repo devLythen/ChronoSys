@@ -19,7 +19,7 @@ ChronoSys 的管理与观测面板。操作员通过浏览器管理平台账号�
 | 构建 | Vite 6 |
 | UI | React 19 + TypeScript |
 | 样式 | Tailwind CSS v4 + CSS 设计令牌 |
-| 状态 | TanStack Query（服务端）+ Zustand（auth token） |
+| 状态 | TanStack Query（服务端）+ HttpOnly cookie session |
 | 路由 | HashRouter（`/#/overview`，`/#/platforms`，…） |
 | **Providers** | LLM 后端与可用模型目录 | `llm_providers` / `llm_credentials` / `llm_models` | 模型参数在模型行上 |
 | **Config** | 一份可被平台选用的运行配置 | `bot_profiles` | model_ref + persona_id FK + policy |
@@ -74,7 +74,7 @@ Platforms (platform_accounts)
 /#/sessions      活跃与历史会话
 /#/sessions/:id  会话详情（transcript + 元数据）
 /#/audit         工具与适配器审计日志
-/#/settings      Auth token + sandbox server settings + 实例信息
+/#/settings      登录密码 + server/sandbox settings + 实例信息
 /#/plugins/extensions 原生插件管理 — 安装、启用、配置、删除
 /#/plugins/extensions/:id 插件编辑器（注册条目 + 配置字段）
 ```
@@ -126,12 +126,17 @@ Platforms (platform_accounts)
 
 ## 5. REST 契约
 
-Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Authorization: Bearer $CHRONO_AUTH_TOKEN`。浏览器 WebSocket 无法设置该 header，因此 `/api/v1/ws` 使用 URL 编码的 `access_token` query 参数；WebUI 从 Settings 中保存的 token 自动附带它。
+Base：`/api/v1`。首次启动通过 WebUI onboarding 创建管理员密码，之后所有 API 与 `/api/v1/ws` 都使用 HttpOnly cookie session（`chrono_session`）。未登录时只允许 `/auth/status`、`/auth/setup`、`/auth/login`、`/auth/logout` 与 `/health`。
 
 ### 路由
 
 | 方法 | 路径 | 用途 |
 |------|------|------|
+| GET | `/auth/status` | 是否已完成 onboarding / 当前会话 |
+| POST | `/auth/setup` | 首次部署创建管理员（仅未配置时） |
+| POST | `/auth/login` | 用户名密码登录，设置 HttpOnly cookie |
+| POST | `/auth/logout` | 清除当前会话 |
+| POST | `/auth/password` | 修改密码并轮换会话 |
 | GET | `/health` | 闭环状态摘要 |
 | GET/POST | `/providers` | 列表 / 创建 provider |
 | GET/PUT/DELETE | `/providers/{id}` | 读写删 |
@@ -232,7 +237,8 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 - 等宽字体显示 ID，状态 Badge
 
 ### Settings
-- Auth token 管理：设置 / 显示 / 清除
+- Authentication：当前用户名、修改密码（Argon2 哈希）、sign out；首次部署由 onboarding 创建管理员
+- Server access：Public URL（启动 banner 与 CORS allow-list；修改后重启 gateway）
 - Sandbox：enable 开关、image、network、browser（None / Playwright）、Playwright 的 Node 路径、模块路径与浏览器二进制路径、timeout/memory/cpus/pids/idle/max-lifetime 数值、`/new` 销毁开关；保存为 `sandbox.*` settings 行并触发 `config.reload`
 - 实例信息（版本、gateway 地址、技术栈）
 

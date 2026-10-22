@@ -1,5 +1,4 @@
 import { useEffect, useRef, useCallback } from "react";
-import { useAuthStore } from "../store";
 
 type WsServerMessage =
   | { type: "agent.delta"; session_id: string; text: string }
@@ -32,10 +31,8 @@ export function useWebSocket(onMessage?: (msg: WsServerMessage) => void) {
     let attempts = 0;
 
     const connect = () => {
-      const token = useAuthStore.getState().token;
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const query = token ? `?${new URLSearchParams({ access_token: token })}` : "";
-      const ws = new WebSocket(`${protocol}//${window.location.host}/api/v1/ws${query}`);
+      const ws = new WebSocket(`${protocol}//${window.location.host}/api/v1/ws`);
       wsRef.current = ws;
 
       ws.onopen = () => {

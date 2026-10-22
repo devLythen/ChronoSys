@@ -14,6 +14,7 @@ const MIGRATION_004: &str = include_str!("migrations/004_drop_provider_enabled.s
 const MIGRATION_005: &str = include_str!("migrations/005_cleanup_llm_models.sql");
 const MIGRATION_006: &str = include_str!("migrations/006_model_params.sql");
 const MIGRATION_007: &str = include_str!("migrations/007_drop_display_name.sql");
+const MIGRATION_008: &str = include_str!("migrations/008_admin_auth.sql");
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -119,6 +120,14 @@ impl ConfigStore {
             )?;
         }
 
+        if current < 8 {
+            self.conn.execute_batch(MIGRATION_008)?;
+            self.conn.execute(
+                "INSERT INTO schema_migrations (version, name) VALUES (8, '008_admin_auth')",
+                [],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -143,6 +152,41 @@ impl ConfigStore {
     pub fn settings(&self) -> SettingStore<'_> {
         SettingStore { conn: &self.conn }
     }
+
+    /// Single-admin WebUI credentials, if onboarding has completed.
+    pub fn admin_credentials(&self) -> Result<Option<AdminCredentials>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT username, password_hash FROM admin_credentials WHERE id = 1")?;
+        let mut rows = stmt.query([])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(AdminCredentials {
+                username: row.get(0)?,
+                password_hash: row.get(1)?,
+            })),
+            None => Ok(None),
+        }
+    }
+
+    /// Create or replace the single admin credential row.
+    pub fn set_admin_credentials(&self, username: &str, password_hash: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO admin_credentials (id, username, password_hash, updated_at)
+             VALUES (1, ?1, ?2, datetime('now'))
+             ON CONFLICT(id) DO UPDATE SET
+                username=excluded.username,
+                password_hash=excluded.password_hash,
+                updated_at=excluded.updated_at",
+            rusqlite::params![username, password_hash],
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AdminCredentials {
+    pub username: String,
+    pub password_hash: String,
 }
 
 #[cfg(test)]
@@ -160,5 +204,20 @@ mod tests {
             )
             .unwrap();
         assert!(count >= 6);
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    #[test]
+    fn admin_credentials_roundtrip() {
+        let store = ConfigStore::open_in_memory().unwrap();
+        assert!(store.admin_credentials().unwrap().is_none());
+        store.set_admin_credentials("admin", "$argon2id$hash").unwrap();
+        let credentials = store.admin_credentials().unwrap().unwrap();
+        assert_eq!(credentials.username, "admin");
+        assert_eq!(credentials.password_hash, "$argon2id$hash");
     }
 }

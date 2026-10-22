@@ -275,6 +275,7 @@ pub async fn run_gateway(
     bun_path: String,
     agent_host_dir: PathBuf,
     config_store: ConfigStore,
+    http_options: http::HttpOptions,
 ) -> Result<()> {
     let child = GatewayChild::spawn(&bun_path, &agent_host_dir, &chrono_home)
         .context("spawn agent-host")?;
@@ -311,9 +312,15 @@ pub async fn run_gateway(
         agent_alive,
         adapter_count,
         ws_events,
-    } = http::start_http_server(&chrono_home, config_store, child.clone(), pending_queries.clone())
-        .await
-        .context("start control plane")?;
+    } = http::start_http_server(
+        &chrono_home,
+        config_store,
+        child.clone(),
+        pending_queries.clone(),
+        http_options,
+    )
+    .await
+    .context("start control plane")?;
 
     // 4. Adapter events → main loop
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<RoutedEvent>();

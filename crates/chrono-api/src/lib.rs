@@ -9,6 +9,7 @@ pub use state::{AgentControl, AgentQuery, AppState, WsEvent};
 
 use std::sync::Arc;
 
+use axum::http::{header::HeaderValue, Method};
 use axum::routing::get;
 use axum::Router;
 use tower_http::cors::CorsLayer;
@@ -17,6 +18,7 @@ use tower_http::services::{ServeDir, ServeFile};
 /// Build the full gateway HTTP router (API under `/api/v1` + static WebUI fallback).
 pub fn build_router(state: Arc<AppState>) -> Router {
     let api = Router::new()
+        .nest("/auth", auth::router())
         .nest("/providers", api::providers::router())
         .nest("/accounts", api::accounts::router())
         .nest("/bots", api::bots::router())
@@ -37,11 +39,50 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .nest("/api/v1", api)
         .fallback_service(ui)
-        .layer(CorsLayer::permissive())
+        .layer(cors_layer(state.public_url.as_deref()))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,
         ))
         .with_state(state)
+}
+
+/// Restrict browser CORS to the configured public origin plus local Vite dev
+/// origins. Without `server.public_url`, preserve the permissive behavior.
+fn cors_layer(public_url: Option<&str>) -> CorsLayer {
+    let Some(raw) = public_url else {
+        return CorsLayer::permissive();
+    };
+    let Ok(url) = url::Url::parse(raw) else {
+        return CorsLayer::permissive();
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return CorsLayer::permissive();
+    }
+    let origin = url.origin().ascii_serialization();
+    let Ok(origin) = HeaderValue::from_str(&origin) else {
+        return CorsLayer::permissive();
+    };
+    let origins = vec![
+        origin,
+        HeaderValue::from_static("http://localhost:5173"),
+        HeaderValue::from_static("http://127.0.0.1:5173"),
+    ];
+    CorsLayer::new()
+        .allow_origin(origins)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::ACCEPT,
+            axum::http::header::ORIGIN,
+        ])
+        .allow_credentials(true)
 }
 

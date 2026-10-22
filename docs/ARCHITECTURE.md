@@ -168,11 +168,11 @@ Session         durable conversation transcript (sessions.db)
 ---
 ## 7. Startup Behavior
 
-1. `chrono` resolves `CHRONO_HOME` (current default `./.chrono`; XDG default is planned), canonicalizes to an absolute path
+1. `chrono` resolves `--home` or `CHRONO_HOME` (current default `./.chrono`; XDG default is planned), canonicalizes to an absolute path
 2. Creates `$CHRONO_HOME/state/` if missing
 3. Opens `chrono.db` (creates empty DB with schema if first run)
 4. Spawns `bun run agent-host/src/main.ts` with `CHRONO_HOME` set to the absolute path
-5. Gateway starts HTTP on `CHRONO_API_HOST:CHRONO_API_PORT` (default `127.0.0.1:8787`); off-loopback binds require `CHRONO_AUTH_TOKEN`
+5. Gateway starts HTTP on `--host <IP:PORT>` or `CHRONO_API_HOST:CHRONO_API_PORT` (default `127.0.0.1:8787`). The first WebUI visit creates an admin password (Argon2 hash in `admin_credentials`); subsequent API/WebSocket access uses an HttpOnly session cookie. `server.public_url` controls the startup banner and CORS allow-list (restart required).
 6. Agent-host reads the config DB; if empty, logs info and waits for `config.reload`
 
 **No crash on empty config.** The system starts and stays alive. Operators configure via WebUI; gateway sends `config.reload` to agent-host when config changes. A provider or bot resolution failure is logged with its concrete reason; the process keeps running.
@@ -222,8 +222,15 @@ SQLite at `$CHRONO_HOME/state/chrono.db`. Schema managed by migrations in `crate
 | `platform_accounts` | Messaging platform identities |
 | `bindings` | Account → bot profile routing rules |
 | `settings` | Key-value operational settings |
+| `admin_credentials` | Single admin username + Argon2 password hash; never exposed via the settings API |
 
 `secret_ref` values are plaintext API keys or bot tokens. API responses return them directly.
+
+Server-level settings:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `server.public_url` | empty | Public WebUI base URL used by the startup banner and CORS allow-list; empty keeps permissive CORS. Applies after gateway restart. |
 ---
 
 ## 11. Logging

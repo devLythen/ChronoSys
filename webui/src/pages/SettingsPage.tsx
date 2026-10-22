@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePageEnter } from "../hooks/useAnimations";
-import { useAuthStore } from "../store";
 import { api } from "../api/client";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
@@ -46,6 +45,64 @@ const SANDBOX_DEFAULTS: SandboxForm = {
 
 function numberValue(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function ServerAccessSection() {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api.listSettings(),
+  });
+  const [publicUrl, setPublicUrl] = useState("");
+
+  useEffect(() => {
+    if (!settings) return;
+    const value = settings.find((setting) => setting.key === "server.public_url")?.value_json;
+    setPublicUrl(typeof value === "string" ? value : "");
+  }, [settings]);
+
+  const save = useMutation({
+    mutationFn: () => api.putSetting("server.public_url", publicUrl.trim()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      toast.add("success", "Server public URL saved; restart gateway to apply");
+    },
+    onError: (error: Error) => toast.add("error", error.message),
+  });
+
+  return (
+    <section className="space-y-6">
+      <div>
+        <h2 className="t-headline">Server access</h2>
+        <p className="t-body text-muted-fg mt-1">
+          Bind address is set at startup with <code className="font-mono text-[11px]">--host</code>.
+          The public URL controls the startup banner and the browser CORS allow-list.
+        </p>
+      </div>
+      <Card>
+        <div className="space-y-4">
+          <Input
+            label="Public URL"
+            value={publicUrl}
+            onChange={(event) => setPublicUrl(event.target.value)}
+            placeholder="https://chrono.example.com"
+            hint="Use the URL users open in a browser, without /api. Applies after gateway restart."
+          />
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-fg">
+              {isLoading
+                ? "Loading server settings…"
+                : "Empty keeps permissive CORS and shows the local bind address."}
+            </p>
+            <Button onClick={() => save.mutate()} disabled={save.isPending}>
+              {save.isPending ? "Saving…" : "Save public URL"}
+            </Button>
+          </div>
+        </div>
+      </Card>
+    </section>
+  );
 }
 
 function ServerSettingsSection() {
@@ -265,28 +322,100 @@ function ServerSettingsSection() {
   );
 }
 
-export default function SettingsPage() {
-  const token = useAuthStore((s) => s.token);
-  const setToken = useAuthStore((s) => s.setToken);
+function ChangePasswordSection() {
   const toast = useToast();
+  const queryClient = useQueryClient();
+  const { data: auth } = useQuery({
+    queryKey: ["auth-status"],
+    queryFn: () => api.authStatus(),
+  });
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
 
+  const change = useMutation({
+    mutationFn: () =>
+      api.changePassword({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    onSuccess: () => {
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setError("");
+      queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+      toast.add("success", "Password updated");
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  function submit() {
+    setError("");
+    if (newPassword.length < 8) return setError("New password must be at least 8 characters.");
+    if (newPassword !== confirmPassword) return setError("Passwords do not match.");
+    change.mutate();
+  }
+
+  return (
+    <section className="space-y-6">
+      <div>
+        <h2 className="t-headline">Authentication</h2>
+        <p className="t-body text-muted-fg mt-1">
+          Signed in as <span className="font-mono text-fg">{auth?.username ?? "unknown"}</span>.
+          The admin password is stored as an Argon2 hash in the local config database.
+        </p>
+      </div>
+      <Card>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          <Input
+            label="Current password"
+            type="password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input
+              label="New password"
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              hint="At least 8 characters."
+            />
+            <Input
+              label="Confirm new password"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+            />
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <div className="flex justify-end">
+            <Button
+              type="submit"
+              disabled={change.isPending || !currentPassword || !newPassword}
+            >
+              {change.isPending ? "Updating…" : "Change password"}
+            </Button>
+          </div>
+        </form>
+      </Card>
+    </section>
+  );
+}
+
+export default function SettingsPage() {
   const pageRef = usePageEnter<HTMLDivElement>();
-
-  const [tokenInput, setTokenInput] = useState("");
-  const [showToken, setShowToken] = useState(false);
-
-  function handleSetToken() {
-    const t = tokenInput.trim();
-    if (!t) return;
-    setToken(t);
-    setTokenInput("");
-    toast.add("success", "Auth token saved");
-  }
-
-  function handleClearToken() {
-    setToken(null);
-    toast.add("info", "Auth token removed");
-  }
 
   return (
     <div ref={pageRef} className="space-y-6 md:space-y-8">
@@ -300,81 +429,9 @@ export default function SettingsPage() {
 
       <div className="rule-heavy" />
 
-      {/* Auth Token */}
-      <section className="space-y-6">
-        <div>
-          <h2 className="t-headline">Authentication</h2>
-          <p className="t-body text-muted-fg mt-1">
-            API token for accessing the ChronoSys gateway. Required when binding to non-localhost addresses.
-          </p>
-        </div>
+      <ChangePasswordSection />
 
-        <Card>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="t-label text-muted-fg">Status</p>
-                <p className="text-sm mt-0.5">
-                  {token ? (
-                    <span className="text-success font-medium">Token configured</span>
-                  ) : (
-                    <span className="text-muted-fg">No token set</span>
-                  )}
-                </p>
-              </div>
-              {token && (
-                <Button variant="ghost" size="sm" onClick={handleClearToken}>
-                  Clear
-                </Button>
-              )}
-            </div>
-
-            {token && (
-              <div>
-                <p className="t-label text-muted-fg mb-1">Current token</p>
-                <div className="flex items-center gap-2">
-                  <code className="text-xs font-mono bg-muted px-2 py-1 select-all">
-                    {showToken ? token : token.slice(0, 8) + "••••••••"}
-                  </code>
-                  <button
-                    onClick={() => setShowToken(!showToken)}
-                    className="text-xs text-muted-fg hover:text-fg transition-colors"
-                  >
-                    {showToken ? "Hide" : "Show"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="rule-thin" />
-
-            <div>
-              <p className="t-label text-muted-fg mb-2">
-                {token ? "Update token" : "Set token"}
-              </p>
-              <form
-                onSubmit={(e) => { e.preventDefault(); handleSetToken(); }}
-                className="flex gap-2"
-              >
-                <Input
-                  type="password"
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  placeholder="Enter auth token"
-                  className="flex-1"
-                />
-                <Button type="submit" disabled={!tokenInput.trim()}>
-                  {token ? "Update" : "Set"}
-                </Button>
-              </form>
-              <p className="text-xs text-muted-fg mt-1.5">
-                Tokens are stored in browser local storage. Set <code className="font-mono text-[11px]">CHRONO_AUTH_TOKEN</code> on the server.
-              </p>
-            </div>
-          </div>
-        </Card>
-      </section>
-
+      <ServerAccessSection />
       <ServerSettingsSection />
 
       {/* Decorative halftone block */}

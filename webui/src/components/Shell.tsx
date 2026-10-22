@@ -1,7 +1,9 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useState, useRef, useLayoutEffect, useEffect } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api/client";
 import {
-  PanelLeftClose, PanelLeft, ChevronRight,
+  PanelLeftClose, PanelLeft, ChevronRight, LogOut,
   LayoutDashboard, Globe, Sliders, Server, User,
   Puzzle, Plug, Wrench, MessageSquare, ScrollText, Cog,
 } from "lucide-react";
@@ -152,6 +154,14 @@ function SidebarSection({
 export default function Shell() {
   const [collapsed, setCollapsed] = useState(false);
   const [manualOverride, setManualOverride] = useState(false);
+  const queryClient = useQueryClient();
+  const logout = useMutation({
+    mutationFn: () => api.logout(),
+    onSuccess: () => {
+      queryClient.clear();
+      window.location.reload();
+    },
+  });
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 1023px)");
@@ -213,6 +223,20 @@ export default function Shell() {
             />
           ))}
         </nav>
+        <div className="border-t border-border p-2">
+          <button
+            onClick={() => logout.mutate()}
+            disabled={logout.isPending}
+            className={cn(
+              "w-full flex items-center gap-2 px-2 py-2 text-sm text-muted-fg hover:text-fg hover:bg-muted transition-colors",
+              collapsed && "justify-center",
+            )}
+            title="Sign out"
+          >
+            <LogOut size={16} />
+            {!collapsed && <span>Sign out</span>}
+          </button>
+        </div>
       </aside>
 
       {/* Main */}

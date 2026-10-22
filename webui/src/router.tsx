@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import type { ComponentType, LazyExoticComponent } from "react";
 import { createHashRouter, Navigate } from "react-router-dom";
+import AuthGate from "./components/AuthGate";
 import Shell from "./components/Shell";
 
 function RouteFallback() {
@@ -36,28 +37,34 @@ const PluginsExtensions = lazy(() => import("./pages/PluginsExtensions"));
 const PluginEditor = lazy(() => import("./pages/PluginEditor"));
 const PluginsMcp = lazy(() => import("./pages/PluginsMcp"));
 const PluginsSkills = lazy(() => import("./pages/PluginsSkills"));
+
 export const router = createHashRouter([
   {
-    element: <Shell />,
+    element: <AuthGate />,
     children: [
-      { index: true, element: <Navigate to="/overview" replace /> },
-      { path: "overview", element: <Page Component={Overview} /> },
-      { path: "platforms", element: <Page Component={PlatformsPage} /> },
-      { path: "platforms/:id", element: <Page Component={AccountEditor} /> },
-      { path: "config", element: <Page Component={ConfigList} /> },
-      { path: "config/:id", element: <Page Component={ConfigEditor} /> },
-      { path: "providers", element: <Page Component={ProvidersPage} /> },
-      { path: "providers/:id", element: <Page Component={ProviderEditor} /> },
-      { path: "persona", element: <Page Component={PersonaList} /> },
-      { path: "persona/:id", element: <Page Component={PersonaEditor} /> },
-      { path: "sessions", element: <Page Component={SessionsList} /> },
-      { path: "sessions/:id", element: <Page Component={SessionDetail} /> },
-      { path: "audit", element: <Page Component={AuditPage} /> },
-      { path: "settings", element: <Page Component={SettingsPage} /> },
-      { path: "plugins/extensions", element: <Page Component={PluginsExtensions} /> },
-      { path: "plugins/extensions/:id", element: <Page Component={PluginEditor} /> },
-      { path: "plugins/mcp", element: <Page Component={PluginsMcp} /> },
-      { path: "plugins/skills", element: <Page Component={PluginsSkills} /> },
+      {
+        element: <Shell />,
+        children: [
+          { index: true, element: <Navigate to="/overview" replace /> },
+          { path: "overview", element: <Page Component={Overview} /> },
+          { path: "platforms", element: <Page Component={PlatformsPage} /> },
+          { path: "platforms/:id", element: <Page Component={AccountEditor} /> },
+          { path: "config", element: <Page Component={ConfigList} /> },
+          { path: "config/:id", element: <Page Component={ConfigEditor} /> },
+          { path: "providers", element: <Page Component={ProvidersPage} /> },
+          { path: "providers/:id", element: <Page Component={ProviderEditor} /> },
+          { path: "persona", element: <Page Component={PersonaList} /> },
+          { path: "persona/:id", element: <Page Component={PersonaEditor} /> },
+          { path: "sessions", element: <Page Component={SessionsList} /> },
+          { path: "sessions/:id", element: <Page Component={SessionDetail} /> },
+          { path: "audit", element: <Page Component={AuditPage} /> },
+          { path: "settings", element: <Page Component={SettingsPage} /> },
+          { path: "plugins/extensions", element: <Page Component={PluginsExtensions} /> },
+          { path: "plugins/extensions/:id", element: <Page Component={PluginEditor} /> },
+          { path: "plugins/mcp", element: <Page Component={PluginsMcp} /> },
+          { path: "plugins/skills", element: <Page Component={PluginsSkills} /> },
+        ],
+      },
     ],
   },
 ]);
