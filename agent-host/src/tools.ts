@@ -8,19 +8,6 @@ export type PendingCall = {
   reject: (e: Error) => void;
 };
 
-const TRAILING_TEXT_CLOSE = /\s*<\/text>\s*$/i;
-
-/**
- * Some providers occasionally append a stray `</text>` to the last parallel
- * tool call. Strip it only when the message has no matching `<text>` opener,
- * so intentional markup/code is left intact.
- */
-export function cleanOutboundText(text: string): string {
-  if (!TRAILING_TEXT_CLOSE.test(text)) return text;
-  if (/<text(?:\s|>)/i.test(text)) return text;
-  return text.replace(TRAILING_TEXT_CLOSE, "").trimEnd();
-}
-
 
 /**
  * Preferred outbound path: send or forward text to a chosen chat.
@@ -42,7 +29,6 @@ export function createMessageSendTool(
       "Send a message to the chat at any point during your response. " +
       "You can call this multiple times for natural sentence-by-sentence delivery. " +
       "If you use this tool to communicate, you may output no text — just end the thinking chain. " +
-      "Send plain chat text only; never wrap message bodies in XML/HTML tags such as <text>. " +
       "Omit chat_id to send to the current conversation; set it to reach another chat.",
     parameters: Type.Object({
       text: Type.String({ description: "Message body to send" }),
@@ -63,7 +49,7 @@ export function createMessageSendTool(
       ) {
         throw new Error("message_send requires { text: string, chat_id?: string }");
       }
-      const text = cleanOutboundText((params as { text: string }).text);
+      const text = (params as { text: string }).text;
       const chatIdRaw = (params as { chat_id?: unknown }).chat_id;
       const chatId =
         typeof chatIdRaw === "string" && chatIdRaw.length > 0
@@ -332,7 +318,7 @@ export async function sendBodyTextToCurrentChat(
   pendingCalls: Map<string, PendingCall>,
   signal?: AbortSignal,
 ): Promise<void> {
-  const trimmed = cleanOutboundText(text).trim();
+  const trimmed = text.trim();
   if (!trimmed) return;
 
   const toolCallId = `body_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

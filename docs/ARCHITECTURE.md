@@ -183,7 +183,7 @@ Session         durable conversation transcript (sessions.db)
 The canonical tool registry is defined in `agent-host/src/tools.ts` and mirrored in `crates/chrono-api/src/api/tools.rs` (for the `/api/v1/tools` endpoint).
 
 Currently implemented built-in tools:
-- `message_send` — send/forward text to a chat; preferred path for all intentional outbound messages. Strips a stray trailing `</text>` when no matching `<text>` opener exists (provider streaming artifact).
+- `message_send` — send/forward text to a chat; preferred path for all intentional outbound messages
 - `get_time` — return the current date/time in the bot's configured timezone (see policy `timezone`)
 - `sandbox_exec` — run a shell command in the session's Docker workspace (see §13)
 - `sandbox_send_file` — send a `/workspace/...` file back to the current chat (see §13)
