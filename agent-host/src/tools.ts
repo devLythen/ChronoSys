@@ -139,6 +139,102 @@ export function createTimeTool(timezone: string): AgentTool {
 }
 
 /**
+ * Built-in tool: run a shell command in the session's Docker sandbox.
+ *
+ * The gateway owns the container and workspace; this function only frames the
+ * request. Arguments are validated again in Rust.
+ */
+export function createSandboxExecTool(
+  sessionKey: string,
+  pendingCalls: Map<string, PendingCall>,
+  signal?: AbortSignal,
+): AgentTool {
+  return {
+    name: "sandbox_exec",
+    label: "Run command in sandbox",
+    description:
+      "Run a shell command in the session's isolated Docker workspace. " +
+      "Use this for code execution, file inspection, and generated artifacts. " +
+      "The workspace is /workspace; network access is disabled unless the operator enables it. " +
+      "Returns exit_code, stdout, stderr, and a truncated flag.",
+    parameters: Type.Object({
+      cmd: Type.String({
+        description: "Shell command to run inside the sandbox.",
+      }),
+      cwd: Type.Optional(
+        Type.String({
+          description:
+            "Relative working directory under /workspace. Absolute paths and '..' are rejected.",
+        }),
+      ),
+      timeout_ms: Type.Optional(
+        Type.Number({
+          minimum: 1,
+          maximum: 295000,
+          description: "Wall-clock timeout in milliseconds. Omit to use the operator's sandbox timeout setting.",
+        }),
+      ),
+    }),
+    async execute(toolCallId: string, params: unknown) {
+      if (
+        !params ||
+        typeof params !== "object" ||
+        !("cmd" in params) ||
+        typeof params.cmd !== "string" ||
+        !params.cmd.trim()
+      ) {
+        throw new Error("sandbox_exec requires { cmd: string, cwd?: string, timeout_ms?: number }");
+      }
+      const requested =
+        "timeout_ms" in params &&
+        typeof params.timeout_ms === "number" &&
+        Number.isFinite(params.timeout_ms)
+          ? Math.min(Math.max(Math.floor(params.timeout_ms), 1), 295_000)
+          : undefined;
+      const args: Record<string, unknown> = { cmd: params.cmd };
+      if (requested !== undefined) args.timeout_ms = requested;
+      if ("cwd" in params && typeof params.cwd === "string" && params.cwd.trim()) {
+        args.cwd = params.cwd;
+      }
+
+      const request: ToolIpcMessage = {
+        type: "tool.request",
+        session_id: sessionKey,
+        tool_call_id: toolCallId,
+        name: "sandbox_exec",
+        args,
+        // Outer envelope must outlive the sandbox's own timeout so Rust can
+        // return a structured timeout instead of racing the IPC deadline.
+        timeout_ms: requested === undefined ? 300_000 : Math.min(requested + 5_000, 300_000),
+      };
+
+      const response = await waitToolResponse(
+        toolCallId,
+        request,
+        pendingCalls,
+        signal,
+      );
+      if (response.type !== "tool.response" || !response.ok) {
+        throw new Error(
+          response.type === "tool.response"
+            ? response.error?.message ?? "sandbox exec failed"
+            : "unexpected IPC response",
+        );
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(response.result ?? {}),
+          },
+        ],
+        details: response.result,
+      };
+    },
+  };
+}
+
+/**
  * Fallback: send plain assistant body text to the **current** chat only.
  * Cross-chat delivery must use message_send with chat_id.
  */

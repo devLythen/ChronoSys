@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono_config::ConfigStore;
+use parking_lot::Mutex as ParkingMutex;
 use serde_json::Value;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc as tokio_mpsc;
@@ -42,7 +43,7 @@ pub struct AppState {
     pub adapter_count: Arc<AtomicUsize>,
     pub agent_alive: Arc<AtomicBool>,
     pub child: Arc<dyn AgentQuery>,
-    pub pending_queries: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
+    pub pending_queries: Arc<ParkingMutex<HashMap<String, oneshot::Sender<Value>>>>,
     pub ws_events: broadcast::Sender<WsEvent>,
 }
 
@@ -61,11 +62,11 @@ impl AppState {
     pub async fn query_agent(&self, msg: &Value) -> Result<Value> {
         let query_id = uuid::Uuid::new_v4().to_string();
         let mut msg = msg.clone();
-        if let Value::Object(ref mut map) = msg {
+        if let Value::Object(map) = &mut msg {
             map.insert("query_id".to_string(), Value::String(query_id.clone()));
         }
         let (tx, rx) = oneshot::channel();
-        self.pending_queries.lock().unwrap().insert(query_id, tx);
+        self.pending_queries.lock().insert(query_id, tx);
         self.child.write_frame(&serde_json::to_vec(&msg)?)?;
         tokio::time::timeout(Duration::from_secs(5), rx)
             .await

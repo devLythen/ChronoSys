@@ -23,7 +23,12 @@ pub enum BackendKind {
 pub trait ToolBackend: Send + Sync {
     fn kind(&self) -> BackendKind;
     fn label(&self) -> &str;
-    async fn invoke(&self, tool_name: &str, args: &Value) -> anyhow::Result<PlatformResult>;
+    async fn invoke(
+        &self,
+        session_key: &str,
+        tool_name: &str,
+        args: &Value,
+    ) -> anyhow::Result<PlatformResult>;
 }
 
 /// Platform tools (`message_send`, `message_reply`, …) dispatched to the
@@ -48,7 +53,12 @@ impl ToolBackend for PlatformBackend {
         self.adapter.id()
     }
 
-    async fn invoke(&self, tool_name: &str, args: &Value) -> anyhow::Result<PlatformResult> {
+    async fn invoke(
+        &self,
+        _session_key: &str,
+        tool_name: &str,
+        args: &Value,
+    ) -> anyhow::Result<PlatformResult> {
         self.adapter
             .invoke(tool_name, args)
             .await
@@ -60,6 +70,7 @@ impl ToolBackend for PlatformBackend {
 pub struct ToolContext<'a> {
     pub account_id: &'a str,
     pub chat_id: &'a str,
+    pub session_key: &'a str,
 }
 
 /// Result of one routed tool call, including audit metadata.
@@ -129,14 +140,12 @@ impl ToolRouter {
         };
         let Some(backend) = backend else {
             let (code, message) = match kind {
-                BackendKind::Sandbox => (
-                    "sandbox_unavailable",
-                    "sandbox execution is not configured",
-                ),
-                BackendKind::Platform => (
-                    "no_adapter",
-                    "no live platform adapter for this account",
-                ),
+                BackendKind::Sandbox => {
+                    ("sandbox_unavailable", "sandbox execution is not configured")
+                }
+                BackendKind::Platform => {
+                    ("no_adapter", "no live platform adapter for this account")
+                }
             };
             return ToolOutcome {
                 response: error_response(&tool_call_id, code, message),
@@ -167,7 +176,7 @@ impl ToolRouter {
         let started = Instant::now();
         let result = tokio::time::timeout(
             Duration::from_millis(timeout_ms),
-            backend.invoke(&name, &args),
+            backend.invoke(ctx.session_key, &name, &args),
         )
         .await;
         let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -206,8 +215,7 @@ impl ToolRouter {
                 BackendKind::Platform => "platform",
                 BackendKind::Sandbox => "sandbox",
             },
-            platform: matches!(kind, BackendKind::Platform)
-                .then(|| backend.label().to_string()),
+            platform: matches!(kind, BackendKind::Platform).then(|| backend.label().to_string()),
             elapsed_ms,
             timed_out,
         }
@@ -272,7 +280,12 @@ mod tests {
             "fake"
         }
 
-        async fn invoke(&self, _tool_name: &str, args: &Value) -> anyhow::Result<PlatformResult> {
+        async fn invoke(
+            &self,
+            _session_key: &str,
+            _tool_name: &str,
+            args: &Value,
+        ) -> anyhow::Result<PlatformResult> {
             *self.seen_args.lock() = Some(args.clone());
             tokio::time::sleep(self.delay).await;
             Ok(self.result.clone())
@@ -293,6 +306,7 @@ mod tests {
         ToolContext {
             account_id: "acc",
             chat_id: "42",
+            session_key: "acc:chat:dm",
         }
     }
 
@@ -301,7 +315,9 @@ mod tests {
         let backend = FakeBackend::new(BackendKind::Platform, Duration::ZERO, true);
         let router = ToolRouter::new(Some(backend.clone()), None);
 
-        let outcome = router.execute(&request("message_send", 1_000), &ctx()).await;
+        let outcome = router
+            .execute(&request("message_send", 1_000), &ctx())
+            .await;
 
         assert!(matches!(
             outcome.response,
@@ -318,7 +334,9 @@ mod tests {
         let backend = FakeBackend::new(BackendKind::Sandbox, Duration::ZERO, true);
         let router = ToolRouter::new(None, Some(backend.clone()));
 
-        let outcome = router.execute(&request("sandbox_exec", 1_000), &ctx()).await;
+        let outcome = router
+            .execute(&request("sandbox_exec", 1_000), &ctx())
+            .await;
 
         assert!(matches!(
             outcome.response,
@@ -351,8 +369,12 @@ mod tests {
     async fn missing_backend_fails_closed() {
         let router = ToolRouter::new(None, None);
 
-        let platform = router.execute(&request("message_send", 1_000), &ctx()).await;
-        let sandbox = router.execute(&request("sandbox_exec", 1_000), &ctx()).await;
+        let platform = router
+            .execute(&request("message_send", 1_000), &ctx())
+            .await;
+        let sandbox = router
+            .execute(&request("sandbox_exec", 1_000), &ctx())
+            .await;
 
         match platform.response {
             ToolIpcMessage::Response { error, .. } => {
@@ -383,7 +405,12 @@ mod tests {
             "barrier"
         }
 
-        async fn invoke(&self, _tool_name: &str, _args: &Value) -> anyhow::Result<PlatformResult> {
+        async fn invoke(
+            &self,
+            _session_key: &str,
+            _tool_name: &str,
+            _args: &Value,
+        ) -> anyhow::Result<PlatformResult> {
             self.entered.fetch_add(1, Ordering::SeqCst);
             self.barrier.wait().await;
             Ok(PlatformResult {
@@ -404,11 +431,19 @@ mod tests {
 
         let first = {
             let router = router.clone();
-            tokio::spawn(async move { router.execute(&request("message_send", 1_000), &ctx()).await })
+            tokio::spawn(async move {
+                router
+                    .execute(&request("message_send", 1_000), &ctx())
+                    .await
+            })
         };
         let second = {
             let router = router.clone();
-            tokio::spawn(async move { router.execute(&request("message_send", 1_000), &ctx()).await })
+            tokio::spawn(async move {
+                router
+                    .execute(&request("message_send", 1_000), &ctx())
+                    .await
+            })
         };
 
         let (first, second) = tokio::time::timeout(Duration::from_secs(1), async {

@@ -237,6 +237,7 @@ dependencies = [
  "chrono-config",
  "chrono-ipc",
  "futures",
+ "parking_lot",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -269,9 +270,11 @@ dependencies = [
  "chrono-api",
  "chrono-config",
  "chrono-ipc",
+ "chrono-sandbox",
  "parking_lot",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
 ]
@@ -284,6 +287,17 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "chrono-sandbox"
+version = "0.0.1"
+dependencies = [
+ "libc",
+ "parking_lot",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
 ]
 
 [[package]]

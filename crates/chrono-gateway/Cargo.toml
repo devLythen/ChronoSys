@@ -9,6 +9,7 @@ license.workspace = true
 chrono-ipc = { workspace = true }
 chrono-config = { workspace = true }
 chrono-api = { workspace = true }
+chrono-sandbox = { workspace = true }
 chrono-adapter-telegram = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -18,3 +19,6 @@ tokio = { workspace = true }
 axum = { workspace = true }
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

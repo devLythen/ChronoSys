@@ -161,6 +161,7 @@ The canonical tool registry is defined in `agent-host/src/tools.ts` and mirrored
 Currently implemented built-in tools:
 - `message_send` — send/forward text to a chat; preferred path for all intentional outbound messages
 - `get_time` — return the current date/time in the bot's configured timezone (see policy `timezone`)
+- `sandbox_exec` — run a shell command in the session's Docker workspace (see §13)
 
 Built-in tools are allowlisted per persona via `tools_allowlist_json` in the `personas` table. An empty allowlist means "all known built-in tools". Plugin tools are NOT part of this allowlist — they are gated by the plugin enable toggle and per-tool persona blacklist (see PLUGIN_ARCHITECTURE §7).
 ---
@@ -303,3 +304,56 @@ Triggers, all in `agent-host/src/main.ts`:
 `context_scope` (`session` / `bot` / `account`) is reserved: the runtime logs a
 warning for non-session values and falls back to session isolation until
 long-term memory lands (M5).
+
+---
+
+## 13. Sandbox Runtime
+
+The Rust gateway owns Docker containers. agent-host only declares the
+`sandbox_exec` tool and sends a `tool.request`; it never talks to Docker or
+touches the host filesystem.
+
+```
+agent-host sandbox_exec
+  → tool.request (session_id, cmd, cwd?, timeout_ms?)
+  → gateway ToolRouter (async task, hard timeout)
+  → SandboxToolBackend
+  → SandboxManager (chrono-sandbox crate)
+  → docker create/start/exec/rm
+  → tool.response { exit_code, stdout, stderr, truncated }
+```
+
+### Configuration
+
+Stored as explicit `settings` rows and reloaded on config change:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `sandbox.enabled` | `false` | Fail closed until enabled |
+| `sandbox.image` | empty | Image with a POSIX shell; required |
+| `sandbox.network` | `false` | `false` → `--network none` |
+| `sandbox.timeout_ms` | `30000` | Default per-exec wall clock, hard cap 295000 |
+| `sandbox.memory_mb` | `512` | Container memory limit |
+| `sandbox.cpus` | `1.0` | CPU limit |
+| `sandbox.pids_limit` | `256` | PID limit |
+| `sandbox.idle_secs` | `300` | Idle container GC; `0` disables |
+
+### Lifecycle
+
+- One container per session key; name is `chrono-sandbox-<fnv64(session_key)>`.
+- Workspace: `$CHRONO_HOME/sandboxes/<fnv64>/`, bind-mounted at `/workspace`.
+- Container root is read-only; `/tmp` is a tmpfs; workspace is read-write.
+- `--cap-drop ALL`, `--security-opt no-new-privileges`, current uid/gid,
+  memory/CPU/PID caps.
+- Lazy create on first exec; idle reaper every 30s; shutdown removes all
+  containers; startup removes orphans tagged with this `CHRONO_HOME`.
+- A timeout kills the process and **removes the container**, so background
+  commands cannot continue.
+- stdout/stderr are capped at 1 MiB each; excess is drained and discarded.
+
+### Current limits
+
+`sandbox_browser`, `sandbox_read`, `sandbox_write`, chat file transfer, and the
+plugin `ctx.sandbox.*` facade are not implemented. Changing the image does not
+recreate an already-running container; it takes effect after idle/shutdown or
+an explicit destroy.

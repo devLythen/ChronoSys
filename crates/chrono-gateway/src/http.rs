@@ -8,6 +8,7 @@ use std::time::Instant;
 use anyhow::{bail, Context, Result};
 use chrono_api::{build_router, AgentControl, AppState};
 use chrono_config::ConfigStore;
+use parking_lot::Mutex as ParkingMutex;
 use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -57,7 +58,7 @@ pub async fn start_http_server(
     chrono_home: &std::path::Path,
     config: ConfigStore,
     child: Arc<GatewayChild>,
-    pending_queries: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
+    pending_queries: Arc<ParkingMutex<HashMap<String, oneshot::Sender<Value>>>>,
 ) -> Result<HttpServer> {
     let (addr, auth_token) = resolve_bind_and_auth()?;
     let (agent_tx, agent_ctrl_rx) = tokio_mpsc::unbounded_channel::<AgentControl>();

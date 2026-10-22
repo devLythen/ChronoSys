@@ -107,7 +107,7 @@
 
 **Deliverable:** installable native plugins with AI tools and user commands; ephemeral Docker containers for arbitrary code execution.
 
-**Progress:** native plugin registry is complete; Docker sandbox and the chat ↔ sandbox file bridge are not started.
+**Progress:** plugin registry complete; Docker runtime + `sandbox_exec` vertical slice complete (per-session container, workspace, limits, timeout, idle cleanup). File bridge, browser, and plugin sandbox facade remain.
 
 - [x] Manifest-driven registry: `[[tools]]`/`[[commands]]` metadata, `[[config]]` schema
 - [x] JS entry cross-validation: manifest names must exactly match `registerTool`/`registerCommand`
@@ -117,8 +117,10 @@
 - [x] WebUI: Extensions list, plugin editor, install ZIP/GitHub, delete
 - [x] Persona editor: plugin tool modal with per-tool blacklist toggles
 - [x] `host_command_sync` → Telegram `setMyCommands` for registered user commands
-- [ ] Gateway-managed Docker runtime (create, exec, timeout, cleanup)
-- [ ] `sandbox.exec`, `sandbox.browser`, `sandbox.read`, `sandbox.write`
+- [x] Gateway-managed Docker runtime: lazy create, workspace mount, resource caps,
+      read-only root, no network by default, idle cleanup, explicit destroy on timeout
+- [x] `sandbox_exec` built-in tool: async IPC dispatch, hard timeout, capped output, audit
+- [ ] `sandbox_browser`, `sandbox_read`, `sandbox_write`
 - [ ] Plugin context: `ctx.sandbox.*` facade for sandbox access
 - [ ] Chat ↔ sandbox file bridge: receive media/message from Telegram, upload generated files back
 ### M5 — Multi-platform & hardening (week 9–12)
@@ -173,7 +175,7 @@ Python is **never** required for core install.
 | `$CHRONO_HOME/plugins/installed/<id>/` | Installed native plugins | implemented |
 | `$CHRONO_HOME/logs/audit.jsonl` | Audit log | implemented |
 | `$CHRONO_HOME/secrets/` | Encrypted credential blobs / keychain refs | not used — secrets are plaintext in the state DB |
-| `$CHRONO_HOME/sandboxes/` | Per-session sandbox workspaces | planned |
+| `$CHRONO_HOME/sandboxes/` | Per-session sandbox workspaces (bind-mounted at `/workspace`) | implemented |
 | `$CHRONO_CACHE` | Optional model/HTTP cache | planned |
 
 Implemented environment variables:
@@ -298,6 +300,7 @@ See ARCHITECTURE §6. Owns:
 2. Persona    → system prompt + built-in tool allowlist + skills
 3. Config     → select model_ref + persona + context/command policy
 4. Platforms  → add platform account (Telegram token) → attach one Config
+5. Settings   → optionally enable Sandbox and set image/limits (required for sandbox_exec)
 ```
 
 The WebUI is the only configuration surface. There is no `chrono init`,
@@ -315,12 +318,12 @@ The system starts with an empty config DB and waits for WebUI setup. It does not
 
 | Layer | How |
 |-------|-----|
-| IPC contract | golden JSON fixtures + frame roundtrip (`chrono-ipc`, 10 tests) |
-| config store | SQLite migration + CRUD integration (`chrono-config`, 10 tests) |
-| gateway/API | WebSocket topic routing (`chrono-api`, 2 tests) |
-| agent-host | IPC fixtures, session store, plugin registry, provider resolution (`bun test`, 23 tests) |
+| IPC contract | golden JSON fixtures + frame roundtrip (`chrono-ipc`) |
+| config store | SQLite migration + CRUD integration (`chrono-config`) |
+| gateway/API | WebSocket topic routing + async tool router (concurrency, timeout, fail-closed) |
+| agent-host | IPC fixtures, session store, plugin registry, provider resolution, tool allowlist |
+| sandbox | unit tests for config/workdir/session slug; Docker exec/timeout test is `#[ignore]` and runs with `cargo test -p chrono-sandbox -- --ignored` |
 | adapters | no recorded HTTP fixtures yet; manual Telegram smoke |
-| sandbox | planned — no tests until the Docker runtime lands |
 | e2e | not implemented (no `scripts/` harness, no fake LLM mode) |
 
 ---

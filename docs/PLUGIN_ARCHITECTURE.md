@@ -200,47 +200,58 @@ The test suite uses fixtures under `__fixtures__/` that are copied to temp direc
 - Gateway logs `[gateway] syncing commands to N adapter(s)` when receiving `host_command_sync`
 - Agent-host stderr shows `host_warn` for plugins that fail to load or have duplicate/mismatched registrations
 
-## 13. Docker sandbox (planned)
+## 13. Docker sandbox (exec implemented)
 
 Ephemeral Docker containers exposed as AI tools. The gateway manages container lifecycle — agent-host never talks to Docker directly.
 
 ### 13.1 Architecture
 
 ```text
-agent-host  --tool.request-->  gateway  --docker exec-->  container
-                               gateway  <--stdout/exit--  container
+agent-host  --tool.request-->  gateway ToolRouter  --docker create/start/exec-->  container
+                               gateway SandboxManager  <--stdout/exit/stderr--       container
 agent-host  <--tool.response--
 ```
 
+Tool names are snake_case (`sandbox_exec`, not `sandbox.exec`) because model
+function names and the plugin name pattern reject dots.
+
 ### 13.2 Tools
 
-| Tool | Description |
-|------|-------------|
-| `sandbox.exec` | Run a shell command or script inside the container; returns stdout + exit code |
-| `sandbox.browser` | Headless Chromium with playwright; screenshot, DOM query, page navigation |
-| `sandbox.read` | Read a file from the session workspace mount |
-| `sandbox.write` | Write content to a file in the session workspace mount |
-| `sandbox.receive_file` | Download a chat attachment into the sandbox workspace |
-| `sandbox.send_file`    | Upload a file from the sandbox workspace to the chat |
+| Tool | Status | Description |
+|------|--------|-------------|
+| `sandbox_exec` | ✅ | Run a shell command in `/workspace`; returns `exit_code`, `stdout`, `stderr`, `truncated` |
+| `sandbox_browser` | planned | Headless Chromium with Playwright; screenshot, DOM query, navigation |
+| `sandbox_read` | planned | Read a file from the session workspace |
+| `sandbox_write` | planned | Write a file in the session workspace |
+| `sandbox_receive_file` | planned | Download a chat attachment into the sandbox workspace |
+| `sandbox_send_file` | planned | Upload a sandbox file to the chat |
 
 ### 13.3 Lifecycle
 
-- **Lazy create**: first sandbox tool call for a session spawns a container from a configured image
-- **Idle timeout**: container destroyed after N seconds of inactivity (default 300)
-- **Session-scoped**: one container per session; workspace directory mounted read-write
-- **Explicit destroy**: `/sandbox-reset` command or session rotation kills the container
+- **Lazy create**: first sandbox tool call for a session creates a container from `sandbox.image`
+- **Idle timeout**: container destroyed after `sandbox.idle_secs` of inactivity (default 300; 0 disables)
+- **Session-scoped**: one container per session; workspace mounted read-write at `/workspace`
+- **Timeout**: kills the container, not just the `docker exec` client
+- **Shutdown/orphans**: gateway shutdown removes managed containers; startup removes containers tagged for the same `$CHRONO_HOME`
+- **Explicit destroy**: `/sandbox-reset` command and session rotation are not wired yet
 
 ### 13.4 Constraints
 
-- CPU shares, memory limit, disk quota per container (configurable in settings)
-- Network: default deny; opt-in `sandbox.network` capability for outbound HTTP
-- No host mount except the session workspace; no Docker socket access from inside
-- Every invocation audited: command, exit code, wall time, truncated stdout
+- CPU, memory, and PID limits from settings; read-only container root; tmpfs `/tmp`
+- Network: default `--network none`; opt-in via `sandbox.network`
+- `--cap-drop ALL`, `no-new-privileges`, current uid/gid
+- No host mount except the session workspace; no Docker socket inside the container
+- Every invocation audited: command, exit code, wall time, truncated flag
 
-### 13.5 Plugin context
+### 13.5 Plugin context (planned)
+
+Plugins cannot call the sandbox yet. The target facade is:
 
 ```ts
 ctx.sandbox.exec({ cmd: "python -c 'print(1+1)'", timeoutMs: 5000 })
 ctx.sandbox.browser({ url: "https://example.com", waitFor: "networkidle0" })
 ```
+
+This requires a generic plugin-to-gateway tool-call helper; today plugin tools
+only receive `ctx.platform.send`.
 

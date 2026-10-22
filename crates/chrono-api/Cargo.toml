@@ -19,4 +19,5 @@ reqwest = { workspace = true }
 uuid = { workspace = true }
 url = { workspace = true }
 zip = { workspace = true }
+parking_lot = { workspace = true }
 

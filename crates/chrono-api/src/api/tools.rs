@@ -41,5 +41,13 @@ async fn list_tools() -> ApiResult<Json<Vec<ToolInfo>>> {
                 Use this instead of guessing when you need to know the local time."
                 .into(),
         },
+        ToolInfo {
+            name: "sandbox_exec".into(),
+            label: "Run command in sandbox".into(),
+            description: "Run a shell command in the session's isolated Docker workspace. \
+                Working directory is /workspace; network access is disabled unless the \
+                operator enables it. Returns exit_code, stdout, stderr, and truncated."
+                .into(),
+        },
     ]))
 }

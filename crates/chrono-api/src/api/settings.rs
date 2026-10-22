@@ -55,6 +55,7 @@ async fn set_setting(
         let store = lock_config(&state)?;
         store.settings().set(&key, &body.value_json)?;
     }
+    state.notify_reload();
     get_setting(State(state), Path(key)).await
 }
 
@@ -67,6 +68,7 @@ async fn put_setting(
         let store = lock_config(&state)?;
         store.settings().set(&key, &body.value_json)?;
     }
+    state.notify_reload();
     get_setting(State(state), Path(key)).await
 }
 
@@ -78,6 +80,7 @@ async fn delete_setting(
         let store = lock_config(&state)?;
         store.settings().delete(&key)?;
     }
+    state.notify_reload();
     Ok(Json(json!({ "ok": true, "key": key })))
 }
 

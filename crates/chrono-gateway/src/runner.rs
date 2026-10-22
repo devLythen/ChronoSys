@@ -3,14 +3,15 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use chrono_api::AgentControl;
 use chrono_config::{Binding, BotProfile, ConfigStore, PlatformAccount};
 use chrono_ipc::adapter::{PlatformAdapter, RoutedEvent};
 use chrono_ipc::{ChronoEvent, ToolIpcMessage};
+use chrono_sandbox::SandboxManager;
 use parking_lot::Mutex as ParkingMutex;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
@@ -18,6 +19,7 @@ use tokio::task::JoinHandle;
 
 use crate::adapters::build_adapter;
 use crate::http;
+use crate::sandbox_tool::{load_sandbox_config, SandboxToolBackend};
 use crate::tool_router::{PlatformBackend, ToolBackend, ToolContext, ToolRouter};
 use crate::GatewayChild;
 
@@ -116,6 +118,7 @@ struct GatewayState {
     bot_profiles: HashMap<String, BotProfile>,
     audit: AuditLog,
     rate_limiter: RateLimiter,
+    sandbox: Arc<SandboxManager>,
 }
 
 impl GatewayState {
@@ -196,6 +199,7 @@ async fn dispatch_async(
             &ToolContext {
                 account_id: &account_id,
                 chat_id: &chat_id,
+                session_key: &session_id,
             },
         )
         .await;
@@ -263,10 +267,20 @@ pub async fn run_gateway(
         .context("spawn agent-host")?;
     let child = Arc::new(child);
 
-    let pending_queries = Arc::new(Mutex::new(HashMap::new()));
+    let pending_queries = Arc::new(ParkingMutex::new(HashMap::new()));
 
     // 2. Audit log
     let audit = AuditLog::open(&chrono_home).context("open audit log")?;
+
+    // Sandbox: fail-closed defaults; settings are reloaded on every config sync.
+    let sandbox_config = load_sandbox_config(&config_store);
+    let sandbox_enabled = sandbox_config.enabled;
+    let sandbox = Arc::new(SandboxManager::new(chrono_home.clone(), sandbox_config));
+    if sandbox_enabled {
+        if let Err(error) = sandbox.cleanup_orphans().await {
+            gateway_log!(warn, "sandbox orphan cleanup skipped: {error}");
+        }
+    }
 
     let state = Arc::new(ParkingMutex::new(GatewayState {
         child: child.clone(),
@@ -275,6 +289,7 @@ pub async fn run_gateway(
         bot_profiles: HashMap::new(),
         audit,
         rate_limiter: RateLimiter::new(),
+        sandbox: sandbox.clone(),
     }));
 
     // 3. Control plane HTTP (config CRUD from WebUI)
@@ -294,6 +309,15 @@ pub async fn run_gateway(
     if let Err(e) = sync_from_config(&state, &chrono_home, &event_tx, &adapter_count) {
         gateway_log!(warn, "initial config sync: {e:#}");
     }
+
+    let reaper_sandbox = sandbox.clone();
+    let reaper_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            reaper_sandbox.reap_idle().await;
+        }
+    });
 
     // 6. stdout reader (tool dispatch)
     let stdout_child = child.clone();
@@ -316,17 +340,23 @@ pub async fn run_gateway(
             if let ToolIpcMessage::Request { session_id, .. } = &tool_msg {
                 let session_id = session_id.clone();
                 let (account_id, chat_id) = session_context(&session_id);
-                let adapter = {
+                let (adapter, sandbox) = {
                     let state = stdout_state.lock();
-                    state
-                        .adapters
-                        .get(account_id)
-                        .map(|live| live.adapter.clone())
+                    (
+                        state
+                            .adapters
+                            .get(account_id)
+                            .map(|live| live.adapter.clone()),
+                        state.sandbox.clone(),
+                    )
                 };
                 let platform = adapter.map(|adapter| {
                     Arc::new(PlatformBackend::new(adapter)) as Arc<dyn ToolBackend>
                 });
-                let router = ToolRouter::new(platform, None);
+                let sandbox = Some(
+                    Arc::new(SandboxToolBackend::new(sandbox)) as Arc<dyn ToolBackend>
+                );
+                let router = ToolRouter::new(platform, sandbox);
                 stdout_handle.spawn(dispatch_async(
                     router,
                     tool_msg,
@@ -344,7 +374,7 @@ pub async fn run_gateway(
         if let Ok(obj) = serde_json::from_slice::<Value>(&payload) {
             // Check for pending query responses
             if let Some(query_id) = obj.get("query_id").and_then(|v| v.as_str()) {
-                let mut pq = stdout_pending.lock().unwrap();
+                let mut pq = stdout_pending.lock();
                 if let Some(tx) = pq.remove(query_id) {
                     let _ = tx.send(obj);
                 }
@@ -424,7 +454,9 @@ pub async fn run_gateway(
         }
     }
 
-    // Stop adapters on shutdown
+    // Stop adapters and sandbox containers on shutdown
+    reaper_task.abort();
+    sandbox.shutdown().await;
     {
         let mut state = state.lock();
         for (id, live) in state.adapters.drain() {
@@ -446,6 +478,7 @@ fn sync_from_config(
 ) -> Result<()> {
     let db_path = chrono_home.join("state/chrono.db");
     let store = ConfigStore::open(&db_path).context("open config DB for sync")?;
+    let sandbox_config = load_sandbox_config(&store);
 
     let accounts = store
         .accounts()
@@ -485,6 +518,7 @@ fn sync_from_config(
     let mut state = state.lock();
     state.bindings = bindings;
     state.bot_profiles = bot_profiles;
+    state.sandbox.update_config(sandbox_config);
 
     // Stop adapters that are gone or whose fingerprint changed
     let live_ids: Vec<String> = state.adapters.keys().cloned().collect();

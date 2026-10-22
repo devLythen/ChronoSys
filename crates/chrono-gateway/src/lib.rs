@@ -15,6 +15,7 @@ pub mod adapter;
 pub mod adapters;
 pub mod http;
 pub mod runner;
+pub mod sandbox_tool;
 pub mod secrets;
 pub mod tool_router;
 

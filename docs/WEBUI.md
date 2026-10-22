@@ -74,7 +74,7 @@ Platforms (platform_accounts)
 /#/sessions      活跃与历史会话
 /#/sessions/:id  会话详情（transcript + 元数据）
 /#/audit         工具与适配器审计日志
-/#/settings      Auth token + 实例信息
+/#/settings      Auth token + sandbox server settings + 实例信息
 /#/plugins/extensions 原生插件管理 — 安装、启用、配置、删除
 /#/plugins/extensions/:id 插件编辑器（注册条目 + 配置字段）
 ```
@@ -147,6 +147,8 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 | GET | `/tools` | 可用工具目录 |
 | GET | `/sessions` `/sessions/{id}` | 观测 |
 | GET | `/audit` | 审计日志 |
+| GET/POST | `/settings` | 服务端设置列表 / 写入 |
+| GET/PUT/DELETE | `/settings/{key}` | 单项读取 / 写入 / 删除 |
 | WS | `/ws` | 实时推送 |
 
 ### 关键语义
@@ -227,6 +229,7 @@ Base：`/api/v1`。loopback 无需 token；非 loopback 的 REST 请求需 `Auth
 
 ### Settings
 - Auth token 管理：设置 / 显示 / 清除
+- Sandbox：enable 开关、image、network、timeout/memory/cpus/pids/idle 数值；保存为 `sandbox.*` settings 行并触发 `config.reload`
 - 实例信息（版本、gateway 地址、技术栈）
 
 ---
