@@ -54,6 +54,8 @@ export default function AccountEditor() {
   const [adapterId, setAdapterId] = useState("chrono.adapter.telegram");
   const [enabled, setEnabled] = useState(true);
   const [secretRef, setSecretRef] = useState("");
+  const [proxyUrl, setProxyUrl] = useState("");
+  const [apiUrl, setApiUrl] = useState("");
 
   useEffect(() => {
     if (account) {
@@ -61,19 +63,27 @@ export default function AccountEditor() {
       setAdapterId(account.adapter_id);
       setEnabled(account.enabled);
       setSecretRef(account.secret_ref);
+      const config = account.adapter_config_json;
+      setProxyUrl(typeof config.proxy_url === "string" ? config.proxy_url : "");
+      setApiUrl(typeof config.api_url === "string" ? config.api_url : "");
     }
   }, [account]);
 
   const saveMut = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error("Missing account id");
+      const adapterConfig = { ...(account?.adapter_config_json ?? {}) };
+      if (proxyUrl.trim()) adapterConfig.proxy_url = proxyUrl.trim();
+      else delete adapterConfig.proxy_url;
+      if (apiUrl.trim()) adapterConfig.api_url = apiUrl.trim();
+      else delete adapterConfig.api_url;
       return api.updateAccount(id, {
         id,
         platform,
         adapter_id: adapterId,
         enabled,
         secret_ref: secretRef || undefined,
-        adapter_config_json: account?.adapter_config_json ?? {},
+        adapter_config_json: adapterConfig,
         json_ext: account?.json_ext ?? {},
       });
     },
@@ -148,6 +158,22 @@ export default function AccountEditor() {
           value={secretRef}
           onChange={(e) => setSecretRef(e.target.value)}
           placeholder={account?.secret_ref ? "(unchanged if blank)" : "Bot token"}
+        />
+        <Input
+          label="Proxy URL"
+          type="text"
+          value={proxyUrl}
+          onChange={(e) => setProxyUrl(e.target.value)}
+          placeholder="http://127.0.0.1:7890"
+          hint="HTTP or SOCKS proxy. Leave empty to use CHRONO_TELEGRAM_PROXY / HTTPS_PROXY / TELOXIDE_PROXY."
+        />
+        <Input
+          label="Bot API URL"
+          type="text"
+          value={apiUrl}
+          onChange={(e) => setApiUrl(e.target.value)}
+          placeholder="https://api.telegram.org"
+          hint="Optional self-hosted Bot API server, e.g. http://127.0.0.1:8081."
         />
 
       </Card>

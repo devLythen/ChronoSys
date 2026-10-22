@@ -67,10 +67,15 @@ Then open `http://127.0.0.1:8787` and configure via WebUI:
 3. **Config** — create a bot profile selecting model + persona
 4. **Platforms** — add your Telegram bot token and attach the config
 
+If `api.telegram.org` is unreachable, set a proxy in **Platforms → Proxy URL**
+(e.g. `http://127.0.0.1:7890` or `socks5://127.0.0.1:7891`) or export
+`CHRONO_TELEGRAM_PROXY` / `HTTPS_PROXY`. A self-hosted Bot API server can be set
+via **Platforms → Bot API URL** or `CHRONO_TELEGRAM_API_URL`.
+
 ### Testing
 
 ```bash
-cargo test                          # 36 Rust tests
+cargo test                          # 37 Rust tests
 cd agent-host && bun test           # 27 TypeScript tests
 cd webui && npx tsc --noEmit        # TypeScript typecheck
 cargo test -p chrono-sandbox -p chrono-gateway -- --ignored  # Docker sandbox smoke

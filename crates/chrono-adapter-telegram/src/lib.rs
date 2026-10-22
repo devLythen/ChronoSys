@@ -22,12 +22,46 @@ pub struct TelegramAdapter {
 }
 
 impl TelegramAdapter {
-    pub fn new(token: String, account_id: String) -> Self {
-        Self {
-            bot: Arc::new(Bot::new(token)),
+    pub fn new(
+        token: String,
+        account_id: String,
+        proxy_url: Option<String>,
+        api_url: Option<String>,
+    ) -> Result<Self, AdapterError> {
+        let mut builder = teloxide::net::default_reqwest_settings();
+        if let Some(proxy_url) = proxy_url.filter(|value| !value.trim().is_empty()) {
+            let normalized = normalize_proxy_url(&proxy_url);
+            let proxy = reqwest::Proxy::all(&normalized).map_err(|error| {
+                AdapterError::Other(format!("invalid Telegram proxy URL: {error}"))
+            })?;
+            builder = builder.proxy(proxy);
+            eprintln!("[telegram] proxy configured for account {account_id}");
+        }
+        let client = builder
+            .build()
+            .map_err(|error| AdapterError::Other(format!("telegram HTTP client: {error}")))?;
+        let mut bot = Bot::with_client(token, client);
+        if let Some(api_url) = api_url.filter(|value| !value.trim().is_empty()) {
+            let url = reqwest::Url::parse(api_url.trim()).map_err(|error| {
+                AdapterError::Other(format!("invalid Telegram API URL: {error}"))
+            })?;
+            bot = bot.set_api_url(url);
+            eprintln!("[telegram] custom Bot API URL for account {account_id}");
+        }
+        Ok(Self {
+            bot: Arc::new(bot),
             account_id,
             bot_username: OnceLock::new(),
-        }
+        })
+    }
+}
+
+fn normalize_proxy_url(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{trimmed}")
     }
 }
 
@@ -443,4 +477,16 @@ fn unix_to_gregorian(days: u64) -> (u64, u64, u64) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = if month <= 2 { y + 1 } else { y };
     (year as u64, month as u64, day as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proxy_urls_get_a_default_scheme() {
+        assert_eq!(normalize_proxy_url("127.0.0.1:7890"), "http://127.0.0.1:7890");
+        assert_eq!(normalize_proxy_url("http://127.0.0.1:7890"), "http://127.0.0.1:7890");
+        assert_eq!(normalize_proxy_url("socks5://127.0.0.1:7891"), "socks5://127.0.0.1:7891");
+    }
 }

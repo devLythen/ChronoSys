@@ -119,6 +119,21 @@ This is the only path for LLM auth. There is no separate env var or config file 
 
 **Hot path**: adapter inbound → `ChronoEvent` → frame to agent-host stdin → agent processes → tool call frame on stdout → gateway dispatches to adapter → outbound message.
 
+### 4.1 Telegram connectivity
+
+`Bot::new` uses a direct HTTPS client. In networks where `api.telegram.org` is
+blocked or reset, configure a transport explicitly:
+
+- Per account: `platform_accounts.adapter_config_json.proxy_url`
+  (`http://…`, `socks5://…`, or bare `host:port` → normalized to `http://`).
+- Environment fallback: `CHRONO_TELEGRAM_PROXY`, `TELOXIDE_PROXY`,
+  `HTTPS_PROXY`/`https_proxy`, `ALL_PROXY`/`all_proxy`.
+- Self-hosted Bot API: `adapter_config_json.api_url` or
+  `CHRONO_TELEGRAM_API_URL`; localhost API URLs bypass the proxy.
+
+`unexpected EOF`, connection timeouts, or TLS resets before `GetMe` mean the
+network path failed — not an invalid bot token.
+
 ---
 ## 5. Language Domains
 
