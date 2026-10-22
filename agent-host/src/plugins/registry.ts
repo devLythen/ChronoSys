@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentTool, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
-import { createMessageSendTool, createSandboxBrowserTool, createSandboxExecTool, createSandboxSendFileTool, createSandboxViewImageTool, createTimeTool, type PendingCall } from "../tools.ts";
+import { createMessageSendTool, createSandboxBrowserTool, createSandboxEditFileTool, createSandboxExecTool, createSandboxReadFileTool, createSandboxSendFileTool, createSandboxViewImageTool, createSandboxWriteFileTool, createTimeTool, type PendingCall } from "../tools.ts";
 import type { ChronoSandbox } from "./types.ts";
 import { readPluginPolicy, writePluginPolicy } from "./policy.ts";
 import { loadNativeManifest, pluginInstallRoot, TOOL_RE } from "./manifest.ts";
 import { createPluginApi } from "./sdk.ts";
 import type { ChronoNativeCommandDefinition, ChronoNativeToolDefinition, NativePluginManifest, NativePluginRecord, NativePluginView } from "./types.ts";
 
-const BUILTIN_TOOLS = ["message_send", "get_time", "sandbox_exec", "sandbox_send_file", "sandbox_view_image", "sandbox_browser"] as const;
+const BUILTIN_TOOLS = ["message_send", "get_time", "sandbox_exec", "sandbox_send_file", "sandbox_view_image", "sandbox_read_file", "sandbox_write_file", "sandbox_edit_file", "sandbox_browser"] as const;
 
 type Candidate = { root: string; manifest?: NativePluginManifest; error?: string };
 
@@ -103,6 +103,15 @@ export class ToolRegistry {
     }
     if (allowlist.length === 0 || allowlist.includes("sandbox_send_file")) {
       result.push(createSandboxSendFileTool(sessionKey, pendingCalls, signal));
+    }
+    if (allowlist.length === 0 || allowlist.includes("sandbox_read_file")) {
+      result.push(createSandboxReadFileTool(sessionKey, pendingCalls, signal));
+    }
+    if (allowlist.length === 0 || allowlist.includes("sandbox_write_file")) {
+      result.push(createSandboxWriteFileTool(sessionKey, pendingCalls, signal));
+    }
+    if (allowlist.length === 0 || allowlist.includes("sandbox_edit_file")) {
+      result.push(createSandboxEditFileTool(sessionKey, pendingCalls, signal));
     }
     if (supportsImage && (allowlist.length === 0 || allowlist.includes("sandbox_view_image"))) {
       result.push(createSandboxViewImageTool(sessionKey, pendingCalls, signal));

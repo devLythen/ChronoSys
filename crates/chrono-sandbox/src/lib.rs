@@ -23,6 +23,8 @@ pub const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024;
 /// Maximum image size for native multimodal input / view tool (base64 safe).
 pub const MAX_IMAGE_BYTES: u64 = 6 * 1024 * 1024;
+/// Maximum text payload accepted by the workspace write/edit helper.
+pub const MAX_WRITE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Browser automation capability selected by the operator. The container image
 /// must provide `node` and a resolvable Playwright package.
@@ -312,6 +314,64 @@ impl SandboxManager {
             return Err(SandboxError::FileTooLarge(MAX_ATTACHMENT_BYTES));
         }
         Ok(canonical)
+    }
+
+    /// Atomically write a text/binary file inside the session workspace.
+    ///
+    /// The parent is created if needed. Existing symlinks are rejected so a
+    /// write cannot escape through a workspace symlink.
+    pub fn write_workspace_file(
+        &self,
+        session_key: &str,
+        sandbox_path: &str,
+        contents: &[u8],
+    ) -> Result<(), SandboxError> {
+        if contents.len() as u64 > MAX_WRITE_BYTES {
+            return Err(SandboxError::FileTooLarge(MAX_WRITE_BYTES));
+        }
+        let session = self.session(session_key);
+        if self.destroying.lock().contains(&session.key) {
+            return Err(SandboxError::Resetting);
+        }
+        create_workspace(&session.workspace)?;
+        let workspace = std::fs::canonicalize(&session.workspace)?;
+        let relative = sandbox_relative_path(sandbox_path)?;
+        let target = workspace.join(relative);
+        let parent = target
+            .parent()
+            .ok_or_else(|| SandboxError::InvalidFile(sandbox_path.into()))?;
+        std::fs::create_dir_all(parent)?;
+        let parent = std::fs::canonicalize(parent)?;
+        if !parent.starts_with(&workspace) {
+            return Err(SandboxError::FileOutsideWorkspace(sandbox_path.into()));
+        }
+        let target = parent.join(
+            target
+                .file_name()
+                .ok_or_else(|| SandboxError::InvalidFile(sandbox_path.into()))?,
+        );
+        if let Ok(metadata) = std::fs::symlink_metadata(&target) {
+            if metadata.file_type().is_symlink() {
+                return Err(SandboxError::InvalidFile(sandbox_path.into()));
+            }
+            if metadata.is_dir() {
+                return Err(SandboxError::InvalidFile(sandbox_path.into()));
+            }
+        }
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let temporary = parent.join(format!(
+            ".chrono-write-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::write(&temporary, contents)?;
+        if let Err(error) = std::fs::rename(&temporary, &target) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(SandboxError::Io(error));
+        }
+        Ok(())
     }
 
     /// Move an adapter-staged file into the session workspace and return the
@@ -770,6 +830,36 @@ mod tests {
             enabled: true,
             image: "alpine:latest".into(),
             ..SandboxConfig::default()
+        }
+    }
+
+    #[test]
+    fn workspace_write_is_atomic_and_rejects_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = SandboxManager::new(root.path().to_path_buf(), config());
+        manager
+            .write_workspace_file("acc:chat:dm", "/workspace/notes/a.txt", b"hello")
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(
+                manager
+                    .resolve_file("acc:chat:dm", "/workspace/notes/a.txt")
+                    .unwrap()
+            )
+            .unwrap(),
+            "hello"
+        );
+
+        #[cfg(unix)]
+        {
+            let workspace = manager.session("acc:chat:dm").workspace;
+            let outside = root.path().join("outside.txt");
+            std::fs::write(&outside, "outside").unwrap();
+            std::os::unix::fs::symlink(&outside, workspace.join("link.txt")).unwrap();
+            assert!(manager
+                .write_workspace_file("acc:chat:dm", "/workspace/link.txt", b"escape")
+                .is_err());
+            assert_eq!(std::fs::read_to_string(outside).unwrap(), "outside");
         }
     }
 

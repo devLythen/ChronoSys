@@ -392,6 +392,208 @@ export function createSandboxViewImageTool(
 }
 
 /**
+ * Built-in tool: read a UTF-8 file from the sandbox workspace.
+ */
+export function createSandboxReadFileTool(
+  sessionKey: string,
+  pendingCalls: Map<string, PendingCall>,
+  signal?: AbortSignal,
+): AgentTool {
+  return {
+    name: "sandbox_read_file",
+    label: "Read sandbox file",
+    description:
+      "Read a UTF-8 text file from the session sandbox workspace. " +
+      "Use offset/limit for large files. Binary files, images, and very large files " +
+      "must use sandbox_view_image or sandbox_exec instead.",
+    parameters: Type.Object({
+      path: Type.String({ description: "File path inside /workspace/." }),
+      offset: Type.Optional(Type.Number({ minimum: 1, description: "1-based first line to return." })),
+      limit: Type.Optional(Type.Number({ minimum: 1, maximum: 10000, description: "Maximum lines to return (default 2000)." })),
+    }),
+    async execute(toolCallId: string, params: unknown) {
+      if (
+        !params ||
+        typeof params !== "object" ||
+        !("path" in params) ||
+        typeof params.path !== "string" ||
+        !params.path.startsWith("/workspace/")
+      ) {
+        throw new Error("sandbox_read_file requires { path: '/workspace/...' }");
+      }
+      const args: Record<string, unknown> = { path: params.path };
+      if ("offset" in params && typeof params.offset === "number" && Number.isFinite(params.offset)) {
+        args.offset = Math.max(1, Math.floor(params.offset));
+      }
+      if ("limit" in params && typeof params.limit === "number" && Number.isFinite(params.limit)) {
+        args.limit = Math.min(Math.max(Math.floor(params.limit), 1), 10_000);
+      }
+      const request: ToolIpcMessage = {
+        type: "tool.request",
+        session_id: sessionKey,
+        tool_call_id: toolCallId,
+        name: "sandbox_read_file",
+        args,
+        timeout_ms: 15_000,
+      };
+      const response = await waitToolResponse(toolCallId, request, pendingCalls, signal);
+      if (response.type !== "tool.response" || !response.ok) {
+        throw new Error(
+          response.type === "tool.response"
+            ? response.error?.message ?? "sandbox read file failed"
+            : "unexpected IPC response",
+        );
+      }
+      const result = response.result;
+      if (!result || typeof result !== "object" || !("text" in result) || typeof result.text !== "string") {
+        throw new Error("sandbox_read_file returned malformed data");
+      }
+      const record = result as Record<string, unknown>;
+      const total = typeof record.total_lines === "number" ? record.total_lines : 0;
+      const offset = typeof record.offset === "number" ? record.offset : 1;
+      const shown = result.text.length === 0 ? 0 : result.text.split("\n").length;
+      const truncated = record.truncated === true;
+      const footer = truncated
+        ? `\n\n[showing lines ${offset}-${offset + shown - 1} of ${total}; use offset to continue]`
+        : "";
+      return {
+        content: [{ type: "text", text: result.text + footer }],
+        details: {
+          path: params.path,
+          offset,
+          limit: record.limit,
+          total_lines: total,
+          truncated,
+        },
+      };
+    },
+  };
+}
+
+/**
+ * Built-in tool: create or replace a UTF-8 file in the sandbox workspace.
+ */
+export function createSandboxWriteFileTool(
+  sessionKey: string,
+  pendingCalls: Map<string, PendingCall>,
+  signal?: AbortSignal,
+): AgentTool {
+  return {
+    name: "sandbox_write_file",
+    label: "Write sandbox file",
+    description:
+      "Create or replace a UTF-8 text file in the sandbox workspace. " +
+      "Prefer sandbox_edit_file for existing files; use this for new files or an intentional full rewrite.",
+    parameters: Type.Object({
+      path: Type.String({ description: "File path inside /workspace/." }),
+      content: Type.String({ description: "Complete file content." }),
+    }),
+    async execute(toolCallId: string, params: unknown) {
+      if (
+        !params ||
+        typeof params !== "object" ||
+        !("path" in params) ||
+        typeof params.path !== "string" ||
+        !params.path.startsWith("/workspace/") ||
+        !("content" in params) ||
+        typeof params.content !== "string"
+      ) {
+        throw new Error("sandbox_write_file requires { path: '/workspace/...', content: string }");
+      }
+      const request: ToolIpcMessage = {
+        type: "tool.request",
+        session_id: sessionKey,
+        tool_call_id: toolCallId,
+        name: "sandbox_write_file",
+        args: { path: params.path, content: params.content },
+        timeout_ms: 15_000,
+      };
+      const response = await waitToolResponse(toolCallId, request, pendingCalls, signal);
+      if (response.type !== "tool.response" || !response.ok) {
+        throw new Error(
+          response.type === "tool.response"
+            ? response.error?.message ?? "sandbox write file failed"
+            : "unexpected IPC response",
+        );
+      }
+      const result = response.result ?? {};
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
+      };
+    },
+  };
+}
+
+/**
+ * Built-in tool: exact-string edit of an existing sandbox text file.
+ */
+export function createSandboxEditFileTool(
+  sessionKey: string,
+  pendingCalls: Map<string, PendingCall>,
+  signal?: AbortSignal,
+): AgentTool {
+  return {
+    name: "sandbox_edit_file",
+    label: "Edit sandbox file",
+    description:
+      "Replace an exact string in an existing UTF-8 file in /workspace. " +
+      "old_string must match exactly once unless replace_all is true. " +
+      "Read the file first; prefer this over rewriting the whole file.",
+    parameters: Type.Object({
+      path: Type.String({ description: "File path inside /workspace/." }),
+      old_string: Type.String({ description: "Exact text to replace; must not be empty." }),
+      new_string: Type.String({ description: "Replacement text; may be empty." }),
+      replace_all: Type.Optional(Type.Boolean({ description: "Replace every occurrence." })),
+    }),
+    async execute(toolCallId: string, params: unknown) {
+      if (
+        !params ||
+        typeof params !== "object" ||
+        !("path" in params) ||
+        typeof params.path !== "string" ||
+        !params.path.startsWith("/workspace/") ||
+        !("old_string" in params) ||
+        typeof params.old_string !== "string" ||
+        !("new_string" in params) ||
+        typeof params.new_string !== "string"
+      ) {
+        throw new Error("sandbox_edit_file requires { path, old_string, new_string }");
+      }
+      const args: Record<string, unknown> = {
+        path: params.path,
+        old_string: params.old_string,
+        new_string: params.new_string,
+      };
+      if ("replace_all" in params && typeof params.replace_all === "boolean") {
+        args.replace_all = params.replace_all;
+      }
+      const request: ToolIpcMessage = {
+        type: "tool.request",
+        session_id: sessionKey,
+        tool_call_id: toolCallId,
+        name: "sandbox_edit_file",
+        args,
+        timeout_ms: 15_000,
+      };
+      const response = await waitToolResponse(toolCallId, request, pendingCalls, signal);
+      if (response.type !== "tool.response" || !response.ok) {
+        throw new Error(
+          response.type === "tool.response"
+            ? response.error?.message ?? "sandbox edit file failed"
+            : "unexpected IPC response",
+        );
+      }
+      const result = response.result ?? {};
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
+      };
+    },
+  };
+}
+
+/**
  * Built-in tool: run a deterministic Playwright action batch in the session
  * sandbox. The image must provide node + a resolvable playwright package.
  */

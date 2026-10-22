@@ -188,6 +188,9 @@ Currently implemented built-in tools:
 - `sandbox_exec` — run a shell command in the session's Docker workspace (see §13)
 - `sandbox_send_file` — send a `/workspace/...` file back to the current chat (see §13)
 - `sandbox_view_image` — read an image from `/workspace` as native multimodal content (see §13)
+- `sandbox_read_file` — read a UTF-8 text file with line offset/limit (see §13)
+- `sandbox_write_file` — create or replace a UTF-8 text file atomically (see §13)
+- `sandbox_edit_file` — exact-string edit of an existing text file (see §13)
 - `sandbox_browser` — run a Playwright action batch when `sandbox.browser=playwright` (see §13)
 
 Built-in tools are allowlisted per persona via `tools_allowlist_json` in the `personas` table. An empty allowlist means "all known built-in tools". Plugin tools are NOT part of this allowlist — they are gated by the plugin enable toggle and per-tool persona blacklist (see PLUGIN_ARCHITECTURE §7).
@@ -438,6 +441,13 @@ Stored as explicit `settings` rows and reloaded on config change:
   traversal/symlink escapes, and enforces the 50 MiB Telegram document limit.
 - `sandbox_view_image` uses the same canonicalization and rejects non-image
   extensions and files over 6 MiB before base64 encoding.
+- `sandbox_read_file` caps text reads at 2 MiB / 10,000 lines and rejects
+  non-UTF-8 or binary content.
+- `sandbox_write_file` and `sandbox_edit_file` use the same workspace
+  canonicalization, reject symlink targets, cap payloads at 4 MiB, and write
+  through a same-directory temporary file followed by atomic rename.
+- `sandbox_edit_file` requires a non-empty `old_string`, one unique match by
+  default, and supports `replace_all`.
 - `sandbox_browser` writes a fixed helper and a JSON job under
   `/workspace/upload/browser/`, then runs `node` with a hard timeout. The
   helper blocks `file://`, private/local hosts, and non-http(s) navigation, and
@@ -456,6 +466,7 @@ Core `sandbox_browser` is implemented for the Playwright preset only; Chromium-o
 mode is not offered. Each call starts a fresh browser, so dependent interactions
 must be placed in one action batch. The plugin `ctx.sandbox.browser` facade is
 still pending.
-File read/write intentionally goes through `sandbox_exec`. Changing the image
+File read/write uses the dedicated text tools; `sandbox_exec` remains the escape
+hatch for binary files and shell operations. Changing the image
 does not recreate an already-running container; it takes effect after
 idle/max-lifetime expiry, shutdown, or an explicit reset.

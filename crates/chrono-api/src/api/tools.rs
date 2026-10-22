@@ -98,6 +98,24 @@ fn tool_catalog(
                 .into(),
         },
         ToolInfo {
+            name: "sandbox_read_file".into(),
+            label: "Read sandbox file".into(),
+            description: "Read a UTF-8 text file from /workspace with optional line offset/limit. Binary files, images, and files over 2 MiB require sandbox_view_image or sandbox_exec."
+                .into(),
+        },
+        ToolInfo {
+            name: "sandbox_write_file".into(),
+            label: "Write sandbox file".into(),
+            description: "Create or replace a UTF-8 text file in /workspace. Prefer sandbox_edit_file for existing files; use this for new files or intentional full rewrites."
+                .into(),
+        },
+        ToolInfo {
+            name: "sandbox_edit_file".into(),
+            label: "Edit sandbox file".into(),
+            description: "Replace an exact string in an existing /workspace text file. old_string must match once unless replace_all is true. Read the file first."
+                .into(),
+        },
+        ToolInfo {
             name: "sandbox_send_file".into(),
             label: "Send sandbox file".into(),
             description: "Send a file from the session sandbox workspace to the current chat. \

@@ -32,8 +32,18 @@ describe("native plugin registry", () => {
     try {
       const registry = new ToolRegistry(home);
       await registry.reload();
-      const sandbox = registry.createToolsForAllowlist(["sandbox_exec", "sandbox_send_file"], "session-1", new Map());
-      expect(sandbox.map((tool) => tool.name)).toEqual(["sandbox_exec", "sandbox_send_file"]);
+      const sandbox = registry.createToolsForAllowlist(
+        ["sandbox_exec", "sandbox_send_file", "sandbox_read_file", "sandbox_write_file", "sandbox_edit_file"],
+        "session-1",
+        new Map(),
+      );
+      expect(sandbox.map((tool) => tool.name)).toEqual([
+        "sandbox_exec",
+        "sandbox_send_file",
+        "sandbox_read_file",
+        "sandbox_write_file",
+        "sandbox_edit_file",
+      ]);
       const platformOnly = registry.createToolsForAllowlist(["message_send"], "session-1", new Map());
       expect(platformOnly.map((tool) => tool.name)).toEqual(["message_send"]);
       const imageTool = registry.createToolsForAllowlist(
@@ -134,6 +144,53 @@ describe("native plugin registry", () => {
         plugin_id: "example_sandbox",
         tool_name: "example_sandbox_exec",
         outcome: "success",
+      });
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+
+  test("routes sandbox_read_file and renders the truncation footer", async () => {
+    const home = await homeWith();
+    try {
+      const registry = new ToolRegistry(home);
+      await registry.reload();
+      const pending = new Map();
+      const tool = registry
+        .createToolsForAllowlist(["sandbox_read_file"], "session-1", pending)
+        .find((candidate) => candidate.name === "sandbox_read_file");
+      expect(tool).toBeDefined();
+
+      const running = tool!.execute("call-read", {
+        path: "/workspace/notes.txt",
+        offset: 2,
+        limit: 1,
+      });
+      await Promise.resolve();
+      const [nestedCallId, entry] = [...pending.entries()][0]!;
+      entry.resolve({
+        type: "tool.response",
+        tool_call_id: nestedCallId,
+        ok: true,
+        result: {
+          path: "/workspace/notes.txt",
+          text: "second",
+          offset: 2,
+          limit: 1,
+          total_lines: 3,
+          truncated: true,
+        },
+      });
+
+      const completed = await running;
+      expect(completed.content[0]).toEqual({
+        type: "text",
+        text: "second\n\n[showing lines 2-2 of 3; use offset to continue]",
+      });
+      expect(completed.details).toEqual({
+        path: "/workspace/notes.txt",
+        offset: 2,
+        limit: 1,
+        total_lines: 3,
+        truncated: true,
       });
     } finally { await rm(home, { recursive: true, force: true }); }
   });

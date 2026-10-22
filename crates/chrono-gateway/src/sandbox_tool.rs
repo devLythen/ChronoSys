@@ -13,6 +13,10 @@ use uuid::Uuid;
 
 use crate::tool_router::{BackendKind, ToolBackend};
 
+const MAX_READ_BYTES: u64 = 2 * 1024 * 1024;
+const DEFAULT_READ_LINES: usize = 2_000;
+const MAX_READ_LINES: usize = 10_000;
+
 /// `sandbox_exec` / `sandbox_send_file` / `sandbox_view_image` backend. The
 /// tool schema lives in agent-host; this layer validates arguments and maps
 /// results into IPC.
@@ -51,6 +55,9 @@ impl ToolBackend for SandboxToolBackend {
             "sandbox_exec" => self.exec(session_key, args).await,
             "sandbox_send_file" => self.send_file(session_key, chat_id, args).await,
             "sandbox_view_image" => self.view_image(session_key, args).await,
+            "sandbox_read_file" => self.read_file(session_key, args).await,
+            "sandbox_write_file" => self.write_file(session_key, args).await,
+            "sandbox_edit_file" => self.edit_file(session_key, args).await,
             "sandbox_browser" => self.browse(session_key, args).await,
             _ => Ok(failure(
                 "unsupported",
@@ -145,6 +152,193 @@ impl SandboxToolBackend {
             })),
             error: None,
         })
+    }
+
+    async fn read_file(
+        &self,
+        session_key: &str,
+        args: &Value,
+    ) -> anyhow::Result<PlatformResult> {
+        let Some(path) = args.get("path").and_then(Value::as_str) else {
+            return Ok(failure("invalid_args", "sandbox_read_file requires { path: '/workspace/...' }"));
+        };
+        let offset = args
+            .get("offset")
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            .max(1);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_READ_LINES as u64)
+            .clamp(1, MAX_READ_LINES as u64) as usize;
+        let host = match self.manager.resolve_file(session_key, path) {
+            Ok(host) => host,
+            Err(error) => {
+                return Ok(failure(sandbox_error_code(&error), &error.to_string()))
+            }
+        };
+        let metadata = match std::fs::metadata(&host) {
+            Ok(metadata) => metadata,
+            Err(error) => return Ok(failure("sandbox_error", &error.to_string())),
+        };
+        if metadata.len() > MAX_READ_BYTES {
+            return Ok(failure(
+                "file_too_large",
+                &format!("file exceeds {MAX_READ_BYTES} bytes; use sandbox_exec for larger files"),
+            ));
+        }
+        let bytes = match std::fs::read(&host) {
+            Ok(bytes) => bytes,
+            Err(error) => return Ok(failure("sandbox_error", &error.to_string())),
+        };
+        if bytes.contains(&0) {
+            return Ok(failure(
+                "binary_file",
+                "binary file; use sandbox_view_image or sandbox_exec",
+            ));
+        }
+        let text = match String::from_utf8(bytes) {
+            Ok(text) => text,
+            Err(_) => {
+                return Ok(failure(
+                    "binary_file",
+                    "file is not valid UTF-8; use sandbox_exec",
+                ))
+            }
+        };
+        let total_lines = text.lines().count();
+        let lines: Vec<&str> = text
+            .lines()
+            .skip(offset.saturating_sub(1) as usize)
+            .take(limit)
+            .collect();
+        let start = offset.saturating_sub(1) as usize;
+        let truncated = start + lines.len() < total_lines;
+        Ok(PlatformResult {
+            ok: true,
+            result: Some(json!({
+                "path": path,
+                "text": lines.join("\n"),
+                "offset": offset,
+                "limit": limit,
+                "total_lines": total_lines,
+                "truncated": truncated,
+            })),
+            error: None,
+        })
+    }
+
+    async fn write_file(
+        &self,
+        session_key: &str,
+        args: &Value,
+    ) -> anyhow::Result<PlatformResult> {
+        let Some(path) = args.get("path").and_then(Value::as_str) else {
+            return Ok(failure("invalid_args", "sandbox_write_file requires { path, content }"));
+        };
+        let Some(content) = args.get("content").and_then(Value::as_str) else {
+            return Ok(failure("invalid_args", "sandbox_write_file requires { path, content }"));
+        };
+        if content.len() as u64 > chrono_sandbox::MAX_WRITE_BYTES {
+            return Ok(failure(
+                "file_too_large",
+                &format!("content exceeds {} bytes", chrono_sandbox::MAX_WRITE_BYTES),
+            ));
+        }
+        let created = self.manager.resolve_file(session_key, path).is_err();
+        match self
+            .manager
+            .write_workspace_file(session_key, path, content.as_bytes())
+        {
+            Ok(()) => Ok(PlatformResult {
+                ok: true,
+                result: Some(json!({
+                    "path": path,
+                    "bytes": content.len(),
+                    "created": created,
+                })),
+                error: None,
+            }),
+            Err(error) => Ok(failure(sandbox_error_code(&error), &error.to_string())),
+        }
+    }
+
+    async fn edit_file(
+        &self,
+        session_key: &str,
+        args: &Value,
+    ) -> anyhow::Result<PlatformResult> {
+        let (Some(path), Some(old_string), Some(new_string)) = (
+            args.get("path").and_then(Value::as_str),
+            args.get("old_string").and_then(Value::as_str),
+            args.get("new_string").and_then(Value::as_str),
+        ) else {
+            return Ok(failure(
+                "invalid_args",
+                "sandbox_edit_file requires { path, old_string, new_string }",
+            ));
+        };
+        if old_string.is_empty() {
+            return Ok(failure("invalid_args", "old_string must not be empty"));
+        }
+        let replace_all = args
+            .get("replace_all")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let host = match self.manager.resolve_file(session_key, path) {
+            Ok(host) => host,
+            Err(error) => {
+                return Ok(failure(sandbox_error_code(&error), &error.to_string()))
+            }
+        };
+        let metadata = match std::fs::metadata(&host) {
+            Ok(metadata) => metadata,
+            Err(error) => return Ok(failure("sandbox_error", &error.to_string())),
+        };
+        if metadata.len() > chrono_sandbox::MAX_WRITE_BYTES {
+            return Ok(failure(
+                "file_too_large",
+                &format!("file exceeds {} bytes", chrono_sandbox::MAX_WRITE_BYTES),
+            ));
+        }
+        let text = match std::fs::read_to_string(&host) {
+            Ok(text) => text,
+            Err(_) => return Ok(failure("binary_file", "file is not valid UTF-8")),
+        };
+        let matches = text.matches(old_string).count();
+        if matches == 0 {
+            return Ok(failure("edit_no_match", "old_string was not found"));
+        }
+        if matches > 1 && !replace_all {
+            return Ok(failure(
+                "edit_not_unique",
+                &format!("old_string matched {matches} times; set replace_all=true"),
+            ));
+        }
+        let updated = if replace_all {
+            text.replace(old_string, new_string)
+        } else {
+            text.replacen(old_string, new_string, 1)
+        };
+        if updated.len() as u64 > chrono_sandbox::MAX_WRITE_BYTES {
+            return Ok(failure("file_too_large", "edited file is too large"));
+        }
+        match self
+            .manager
+            .write_workspace_file(session_key, path, updated.as_bytes())
+        {
+            Ok(()) => Ok(PlatformResult {
+                ok: true,
+                result: Some(json!({
+                    "path": path,
+                    "replacements": if replace_all { matches } else { 1 },
+                    "bytes": updated.len(),
+                })),
+                error: None,
+            }),
+            Err(error) => Ok(failure(sandbox_error_code(&error), &error.to_string())),
+        }
     }
 
     async fn browse(
@@ -860,6 +1054,94 @@ mod tests {
             .unwrap();
         assert!(!result.ok);
         assert_eq!(result.error.unwrap().code, "browser_failed");
+    }
+
+    #[tokio::test]
+    async fn file_tools_write_read_and_edit_workspace_files() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = Arc::new(SandboxManager::new(
+            root.path().to_path_buf(),
+            SandboxConfig::default(),
+        ));
+        let backend = SandboxToolBackend::new(manager, None);
+        let path = "/workspace/notes/demo.txt";
+
+        let written = backend
+            .write_file(
+                "acc:chat:dm",
+                &json!({ "path": path, "content": "alpha\nbeta\nalpha\n" }),
+            )
+            .await
+            .unwrap();
+        assert!(written.ok);
+        assert_eq!(written.result.unwrap()["created"], true);
+
+        let read = backend
+            .read_file(
+                "acc:chat:dm",
+                &json!({ "path": path, "offset": 2, "limit": 1 }),
+            )
+            .await
+            .unwrap();
+        assert!(read.ok);
+        let read = read.result.unwrap();
+        assert_eq!(read["text"], "beta");
+        assert_eq!(read["total_lines"], 3);
+        assert_eq!(read["truncated"], true);
+
+        let edited = backend
+            .edit_file(
+                "acc:chat:dm",
+                &json!({ "path": path, "old_string": "beta", "new_string": "BETA" }),
+            )
+            .await
+            .unwrap();
+        assert!(edited.ok);
+
+        let not_unique = backend
+            .edit_file(
+                "acc:chat:dm",
+                &json!({ "path": path, "old_string": "alpha", "new_string": "A" }),
+            )
+            .await
+            .unwrap();
+        assert!(!not_unique.ok);
+        assert_eq!(not_unique.error.unwrap().code, "edit_not_unique");
+
+        let replaced = backend
+            .edit_file(
+                "acc:chat:dm",
+                &json!({ "path": path, "old_string": "alpha", "new_string": "A", "replace_all": true }),
+            )
+            .await
+            .unwrap();
+        assert!(replaced.ok);
+
+        let final_read = backend
+            .read_file("acc:chat:dm", &json!({ "path": path }))
+            .await
+            .unwrap()
+            .result
+            .unwrap();
+        assert_eq!(final_read["text"], "A\nBETA\nA");
+    }
+
+    #[tokio::test]
+    async fn write_file_rejects_paths_outside_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = Arc::new(SandboxManager::new(
+            root.path().to_path_buf(),
+            SandboxConfig::default(),
+        ));
+        let backend = SandboxToolBackend::new(manager, None);
+        let result = backend
+            .write_file(
+                "acc:chat:dm",
+                &json!({ "path": "/workspace/../escape.txt", "content": "x" }),
+            )
+            .await
+            .unwrap();
+        assert!(!result.ok);
     }
 
     #[tokio::test]

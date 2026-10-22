@@ -233,11 +233,15 @@ function names and the plugin name pattern reject dots.
 | `sandbox_exec` | ✅ | Run a shell command in `/workspace`; returns `exit_code`, `stdout`, `stderr`, `truncated` |
 | `sandbox_send_file` | ✅ | Send a `/workspace/...` file to the current chat (50 MiB limit) |
 | `sandbox_view_image` | ✅ | Read a workspace image as native multimodal content for image-capable models (6 MiB limit; png/jpeg/webp/gif) |
+| `sandbox_read_file` | ✅ | Read UTF-8 text with offset/limit (2 MiB cap) |
+| `sandbox_write_file` | ✅ | Create/replace text atomically (4 MiB cap) |
+| `sandbox_edit_file` | ✅ | Exact-string replacement in an existing text file |
 | `sandbox_browser` | ✅ | Playwright action batch when `sandbox.browser=playwright`; fresh browser per call, requires network and image support |
 | inbound attachments | ✅ | Telegram documents/photos/audio/video/voice imported to `/workspace/upload/...`; image-capable models also receive native image input; attachment-only and file+text messages both trigger one AI turn |
 
-File read/write intentionally uses `sandbox_exec` (`cat`, `sed`, redirection)
-rather than dedicated `sandbox_read` / `sandbox_write` tools.
+Text file read/write uses `sandbox_read_file` / `sandbox_write_file` /
+`sandbox_edit_file`; `sandbox_exec` remains available for binary files and
+shell operations.
 `sandbox_view_image` is registered only when the resolved model declares image
 input support; it cannot deliver images to text-only models.
 

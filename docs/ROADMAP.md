@@ -122,6 +122,8 @@
 - [x] Gateway-managed Docker runtime: lazy create, workspace mount, resource caps,
       read-only root, no network by default, idle/max-lifetime cleanup, timeout destroy
 - [x] `sandbox_exec` built-in tool: async IPC dispatch, hard timeout, capped output, audit
+- [x] `sandbox_read_file` / `sandbox_write_file` / `sandbox_edit_file` with
+      atomic writes, offset reads, and exact-match edits
 - [x] `sandbox_view_image` for image-capable models; inbound images also use native
       `agent.prompt(text, images)` while remaining available under `/workspace/upload/`
 - [x] Chat ↔ sandbox file bridge: Telegram attachments are downloaded/imported to
@@ -135,9 +137,10 @@
 - [x] Plugin context: `ctx.sandbox.exec` / `sendFile` / `viewImage` facade
 - [ ] Plugin context: `ctx.sandbox.browser` for browser automation
 
-File read/write is intentionally handled by `sandbox_exec`; no separate
-`sandbox_read` / `sandbox_write` tools are planned. Image bytes use
-`sandbox_view_image` because text tools cannot deliver native multimodal input.
+Text file read/write uses `sandbox_read_file` / `sandbox_write_file` /
+`sandbox_edit_file`; `sandbox_exec` remains for binary files and shell work.
+Image bytes use `sandbox_view_image` because text tools cannot deliver native
+multimodal input.
 ### M5 — Multi-platform & hardening (week 9–12)
 
 - [x] rolling compaction (manual + automatic, persona-preserving; see M3.5)
