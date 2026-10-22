@@ -9,12 +9,4 @@ agent-host/dist/
 .DS_Store
 .env
 .env.*
-
-# Local-only Pi version overrides (never commit these)
-agent-host/package.local.json
-agent-host/bun.lock.local
-agent-host/.pi-local/
-
-# Generated catalog snapshots when CHRONO_HOME is inside the repo
-**/state/model-catalog.json
 !.env.example

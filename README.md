@@ -76,19 +76,12 @@ cd webui && npx tsc --noEmit        # TypeScript typecheck
 cargo test -p chrono-sandbox -p chrono-gateway -- --ignored  # Docker sandbox smoke
 ```
 
-### Local Pi version (not committed)
+### Pi dependency policy
 
-`agent-host/package.json` and `agent-host/bun.lock` stay pinned. To try a newer
-Pi locally without touching tracked files:
-
-```bash
-agent-host/scripts/sync-pi-local.sh 0.82.0
-# package.json / bun.lock remain unchanged; only node_modules changes
-bun install --frozen-lockfile   # restore the pinned version
-```
-
-Do not commit local Pi version bumps. Release updates to Pi are a separate,
-intentional `package.json` + `bun.lock` change.
+`@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` are pinned to exact
+upstream versions in `agent-host/package.json` and `agent-host/bun.lock`.
+Local version overrides are intentionally unsupported. Upgrade Pi only through
+a dedicated dependency commit that updates both files and passes the test suite.
 
 ## License
 
