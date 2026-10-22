@@ -361,7 +361,8 @@ Stored as explicit `settings` rows and reloaded on config change:
   shutdown removes all containers; startup removes orphans tagged with this
   `CHRONO_HOME`.
 - `/new` sends `sandbox.reset`; the gateway destroys the container and workspace
-  when `sandbox.destroy_on_new` is enabled.
+  when `sandbox.destroy_on_new` is enabled. In-flight uploads from the old
+  session are cancelled by a generation check instead of leaking into the new one.
 - The session detail page exposes a manual **Reset sandbox** action through
   `POST /api/v1/sessions/{id}/sandbox/reset`.
 - A timeout kills the process and **removes the container**, so background

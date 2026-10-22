@@ -137,6 +137,7 @@ pub struct SandboxManager {
     root: PathBuf,
     config: RwLock<SandboxConfig>,
     sessions: Mutex<HashMap<String, SessionState>>,
+    generations: Mutex<HashMap<String, u64>>,
     home_tag: String,
 }
 
@@ -148,6 +149,7 @@ impl SandboxManager {
             root,
             config: RwLock::new(config),
             sessions: Mutex::new(HashMap::new()),
+            generations: Mutex::new(HashMap::new()),
             home_tag,
         }
     }
@@ -158,6 +160,21 @@ impl SandboxManager {
 
     pub fn config(&self) -> SandboxConfig {
         self.config.read().clone()
+    }
+
+    /// Monotonic generation for a route; bumped whenever the container or
+    /// workspace is destroyed. In-flight imports compare this to detect
+    /// `/new` or a manual reset racing with an upload.
+    pub fn generation(&self, session_key: &str) -> u64 {
+        *self.generations.lock().get(session_key).unwrap_or(&0)
+    }
+
+    fn invalidate(&self, session_key: &str) {
+        *self
+            .generations
+            .lock()
+            .entry(session_key.to_string())
+            .or_insert(0) += 1;
     }
 
     pub async fn exec(
@@ -182,6 +199,7 @@ impl SandboxManager {
         if self.lifetime_expired(&config, &session.key) {
             let _ = self.remove_container(&session).await;
             self.sessions.lock().remove(&session.key);
+            self.invalidate(&session.key);
         }
 
         self.ensure_container(&config, &session).await?;
@@ -208,6 +226,7 @@ impl SandboxManager {
                 // running inside the container. Destroy the container.
                 let _ = self.remove_container(&session).await;
                 self.sessions.lock().remove(&session.key);
+                self.invalidate(&session.key);
                 Err(SandboxError::Timeout(ms))
             }
             Err(error) => Err(error),
@@ -218,6 +237,7 @@ impl SandboxManager {
         let session = self.session(session_key);
         let result = self.remove_container(&session).await;
         self.sessions.lock().remove(&session.key);
+        self.invalidate(&session.key);
         result
     }
 

@@ -770,6 +770,7 @@ fn handle_inbound_event(
 }
 
 async fn ingest_attachments(job: AttachmentJob) {
+    let generation = job.sandbox.generation(&job.session_key);
     let mut ready = Vec::with_capacity(job.attachments.len());
     for attachment in job.attachments {
         let name = attachment
@@ -783,6 +784,15 @@ async fn ingest_attachments(job: AttachmentJob) {
             &job.message_id,
             &name,
         );
+        if job.sandbox.generation(&job.session_key) != generation {
+            ready.push(json!({
+                "name": attachment.name,
+                "mime": attachment.mime,
+                "local_path": null,
+                "error": "cancelled by session reset",
+            }));
+            continue;
+        }
         let mut error = None;
         let Some(adapter) = &job.adapter else {
             error = Some("no live adapter".to_string());
@@ -798,7 +808,9 @@ async fn ingest_attachments(job: AttachmentJob) {
         if let Err(import_error) = adapter.download_attachment(&attachment.id, &staging).await {
             error = Some(import_error.to_string());
         }
-        let local_path = if error.is_none() {
+        let local_path = if error.is_none()
+            && job.sandbox.generation(&job.session_key) == generation
+        {
             match job
                 .sandbox
                 .import_file(&job.session_key, &job.message_id, &name, &staging)
@@ -810,6 +822,9 @@ async fn ingest_attachments(job: AttachmentJob) {
                 }
             }
         } else {
+            if error.is_none() {
+                error = Some("cancelled by session reset".to_string());
+            }
             None
         };
         if let Some(message) = &error {
@@ -822,6 +837,15 @@ async fn ingest_attachments(job: AttachmentJob) {
             "local_path": local_path,
             "error": error,
         }));
+    }
+
+    if job.sandbox.generation(&job.session_key) != generation {
+        for attachment in &mut ready {
+            if attachment["local_path"].is_string() {
+                attachment["local_path"] = Value::Null;
+                attachment["error"] = Value::String("cancelled by session reset".into());
+            }
+        }
     }
 
     let control = json!({
