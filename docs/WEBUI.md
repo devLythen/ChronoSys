@@ -24,7 +24,7 @@ ChronoSys 的管理与观测面板。操作员通过浏览器管理平台账号�
 | **Providers** | LLM 后端与可用模型目录 | `llm_providers` / `llm_credentials` / `llm_models` | 模型参数在模型行上 |
 | **Config** | 一份可被平台选用的运行配置 | `bot_profiles` | model_ref + persona_id FK + policy |
 | **Persona** | 提示词与工具/技能配置 | `personas`（独立表） | 与 Config 独立创建和删除 |
-| **Platforms** | 消息平台账号 + 选用哪份配置 | `platform_accounts` + `bindings` | UI 称「Attach config」 |
+| **Platforms** | 消息平台账号 + 路由绑定 | `platform_accounts` + `bindings` | 一个账号可绑定 DM/群/指定 chat |
 
 ### 闭环关系
 
@@ -50,7 +50,7 @@ Platforms (platform_accounts)
 | Config | `/api/v1/bots` | `bot_profiles` |
 | Persona | `/api/v1/personas` | `personas` |
 | Platform account | `/api/v1/accounts` | `platform_accounts` |
-| Attach config | `/api/v1/bindings` | `bindings` |
+| Routing binding | `/api/v1/bindings` | `bindings` |
 | Provider / Model | `/api/v1/providers` | `llm_providers` / `llm_models` |
 
 消息跑通的最小条件（Overview 页逐项检查）：
@@ -65,7 +65,7 @@ Platforms (platform_accounts)
 
 ```
 /#/overview      系统健康 + 配置完整性检查清单
-/#/platforms     消息平台账号 + Attach config
+/#/platforms     消息平台账号 + routing bindings
 /#/config        配置文件列表 — 装配 model + policy
 /#/config/:id    配置编辑器
 /#/providers     LLM 提供商、凭证、模型目录
@@ -202,10 +202,12 @@ Base：`/api/v1`。首次启动通过 WebUI onboarding 创建管理员密码，�
 - 详情页配置区：Platform / Adapter 下拉 + Bot Token + Proxy URL + Bot API URL
 - Proxy URL 默认空；支持 HTTP/SOCKS，留空时回退 `CHRONO_TELEGRAM_PROXY` / `HTTPS_PROXY` / `TELOXIDE_PROXY`
 - Bot API URL 新建账号时默认 `https://api.telegram.org`；可改为自托管 Bot API，localhost 自动绕过代理
-- Attached Config 为单选绑定：显示当前配置名 + 快捷跳转图标，Change / 解绑按钮
-- Attach 弹窗：Config 下拉选择，替换时先删旧绑定再建新绑定
+- Routing bindings：一个账号可配置多条绑定，分别对应 DM、群、指定 chat 或全部 chat
+- Add binding 弹窗：Config + Chat scope（`dm:*` / `group:*` / `chat:<id>` / `*`）
+- 绑定列表显示 Config、范围、session_mode、priority，可逐条删除
+- 群聊需要 `group:*` 或 `chat:<group_id>`；只有 `dm:*` 时群消息会被丢弃
 - Secret 输入提示：「留空保留现有 secret」
-- 术语：「Attach config」/「Detach」，禁用「Binding」
+- 术语：Routing binding / Remove binding；支持一账号多绑定
 
 ### Config
 - 卡片网格：标题(ID) + 模型(Cpu 图标) + 人格(User 图标) + Provider 跳转(Box 图标)

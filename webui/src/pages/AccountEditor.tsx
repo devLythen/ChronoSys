@@ -22,6 +22,14 @@ const PLATFORMS = [
   { value: "telegram", label: "Telegram" },
 ];
 
+function bindingLabel(pattern: string): string {
+  if (pattern === "dm:*") return "All DMs";
+  if (pattern === "group:*") return "All groups";
+  if (pattern === "*") return "All chats";
+  if (pattern.startsWith("chat:")) return `Chat ${pattern.slice(5)}`;
+  return pattern;
+}
+
 export default function AccountEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -46,9 +54,10 @@ export default function AccountEditor() {
 
 
   const accountBindings = bindings.filter((b: { account_id: string }) => b.account_id === id);
-  const currentBinding = accountBindings[0] ?? null;
   const [attachModalOpen, setAttachModalOpen] = useState(false);
   const [attachConfigId, setAttachConfigId] = useState("");
+  const [attachScope, setAttachScope] = useState<"dm" | "group" | "all" | "chat">("dm");
+  const [attachChatId, setAttachChatId] = useState("");
   const [detachConfirm, setDetachConfirm] = useState<{ id: string; name: string } | null>(null);
 
   const [platform, setPlatform] = useState("telegram");
@@ -184,42 +193,83 @@ export default function AccountEditor() {
       <Card className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="t-headline !text-lg">Attached Config</h2>
-            <p className="t-label text-muted-fg mt-1">Route messages to a bot profile</p>
+            <h2 className="t-headline !text-lg">Routing bindings</h2>
+            <p className="t-label text-muted-fg mt-1">
+              One account can route DMs, groups, or a specific chat to a bot profile.
+            </p>
           </div>
-          {currentBinding ? (
-            <div className="flex items-center gap-1">
-              <Button variant="secondary" size="sm" onClick={() => { setAttachConfigId(""); setAttachModalOpen(true); }}>
-                <Link2 size={14} />
-                Change
-              </Button>
-              <Button
-                variant="ghost" size="sm"
-                className="text-destructive hover:text-destructive"
-                onClick={() => setDetachConfirm({ id: currentBinding.id, name: currentBinding.bot_profile_id })}
-              >
-                <X size={14} />
-              </Button>
-            </div>
-          ) : (
-            <Button variant="secondary" size="sm" onClick={() => { setAttachConfigId(""); setAttachModalOpen(true); }}>
-              <Link2 size={14} />
-              Attach
-            </Button>
-          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setAttachConfigId("");
+              setAttachScope("dm");
+              setAttachChatId("");
+              setAttachModalOpen(true);
+            }}
+          >
+            <Link2 size={14} />
+            Add binding
+          </Button>
         </div>
 
-        {currentBinding ? (
-          <Link
-            to={`/config/${currentBinding.bot_profile_id}`}
-            className="flex items-center gap-2 px-3 py-3 bg-muted/30 border border-border hover:bg-muted/50 transition-colors group"
-          >
-            <ExternalLink size={14} className="text-muted-fg group-hover:text-fg transition-colors shrink-0" />
-            <span className="t-mono text-sm font-medium truncate">{currentBinding.bot_profile_id}</span>
-          </Link>
+        {accountBindings.length > 0 ? (
+          <div className="space-y-2">
+            {accountBindings.map((binding: {
+              id: string;
+              bot_profile_id: string;
+              chat_pattern: string;
+              session_mode: string;
+              priority: number;
+            }) => (
+              <div
+                key={binding.id}
+                className="flex items-center justify-between gap-3 px-3 py-3 bg-muted/30 border border-border"
+              >
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      to={`/config/${binding.bot_profile_id}`}
+                      className="t-mono text-sm font-medium hover:underline inline-flex items-center gap-1"
+                    >
+                      <ExternalLink size={13} />
+                      {binding.bot_profile_id}
+                    </Link>
+                    <span className="t-mono text-xs text-muted-fg">
+                      {bindingLabel(binding.chat_pattern)}
+                    </span>
+                    <span className="t-label text-muted-fg">
+                      {binding.session_mode} · priority {binding.priority}
+                    </span>
+                  </div>
+                  <p className="t-mono text-[11px] text-muted-fg truncate">{binding.chat_pattern}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive shrink-0"
+                  onClick={() => setDetachConfirm({
+                    id: binding.id,
+                    name: `${binding.bot_profile_id} · ${bindingLabel(binding.chat_pattern)}`,
+                  })}
+                  title="Remove binding"
+                >
+                  <X size={14} />
+                </Button>
+              </div>
+            ))}
+          </div>
         ) : (
-          <p className="t-body text-muted-fg py-4">No config attached. Attach one to route messages.</p>
+          <p className="t-body text-muted-fg py-4">
+            No routing binding. Add one for DMs, groups, or a specific chat.
+          </p>
         )}
+
+        <p className="text-xs text-muted-fg">
+          Telegram group messages use <code className="font-mono">group:*</code> or{" "}
+          <code className="font-mono">chat:&lt;group_id&gt;</code>. If the bot policy requires
+          mentions, include <code className="font-mono">@bot_username</code> in the message.
+        </p>
       </Card>
 
       <div className="rule-thin" />
@@ -230,11 +280,11 @@ export default function AccountEditor() {
         </Button>
       </div>
 
-      {/* ── Attach Modal ── */}
+      {/* ── Add binding modal ── */}
       <Modal
         open={attachModalOpen}
         onClose={() => setAttachModalOpen(false)}
-        title={currentBinding ? "Change Config" : "Attach Config"}
+        title="Add routing binding"
         size="sm"
       >
         <div className="space-y-4">
@@ -247,30 +297,76 @@ export default function AccountEditor() {
               ...bots.map((b: { id: string }) => ({ value: b.id, label: b.id })),
             ]}
           />
+          <Select
+            label="Chat scope"
+            value={attachScope}
+            onChange={(e) => setAttachScope(e.target.value as "dm" | "group" | "all" | "chat")}
+            options={[
+              { value: "dm", label: "All DMs (dm:*)" },
+              { value: "group", label: "All groups (group:*)" },
+              { value: "chat", label: "Specific chat (chat:<id>)" },
+              { value: "all", label: "All chats (*)" },
+            ]}
+          />
+          {attachScope === "chat" && (
+            <Input
+              label="Chat ID"
+              value={attachChatId}
+              onChange={(e) => setAttachChatId(e.target.value)}
+              placeholder="e.g. -1001234567890"
+              hint="Telegram group IDs are usually negative."
+            />
+          )}
+          <p className="text-xs text-muted-fg">
+            Specific chat has priority over group, group over DM, and all. Same-scope
+            conflicts use the numeric priority.
+          </p>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setAttachModalOpen(false)}>Cancel</Button>
-            <Button disabled={!attachConfigId} onClick={async () => {
-              if (currentBinding) {
-                await api.deleteBinding(currentBinding.id);
-              }
-              const bindingId = `${id}-${attachConfigId}-${Date.now().toString(36)}`;
-              await api.createBinding({
-                id: bindingId, account_id: id!, bot_profile_id: attachConfigId,
-                chat_pattern: "dm:*", session_mode: "dm", priority: 10, enabled: true,
-              });
-              qc.invalidateQueries({ queryKey: ["bindings"] });
-              setAttachModalOpen(false);
-              setAttachConfigId("");
-            }}>{currentBinding ? "Replace" : "Attach"}</Button>
+            <Button
+              disabled={!attachConfigId || (attachScope === "chat" && !attachChatId.trim())}
+              onClick={async () => {
+                try {
+                  const chatPattern =
+                    attachScope === "dm" ? "dm:*"
+                    : attachScope === "group" ? "group:*"
+                    : attachScope === "all" ? "*"
+                    : `chat:${attachChatId.trim()}`;
+                  const priority =
+                    attachScope === "chat" ? 100
+                    : attachScope === "group" ? 20
+                    : attachScope === "dm" ? 10
+                    : 0;
+                  const bindingId = `${id}-${attachConfigId}-${Date.now().toString(36)}`;
+                  await api.createBinding({
+                    id: bindingId,
+                    account_id: id!,
+                    bot_profile_id: attachConfigId,
+                    chat_pattern: chatPattern,
+                    session_mode: attachScope === "dm" ? "dm" : "shared",
+                    priority,
+                    enabled: true,
+                  });
+                  await qc.invalidateQueries({ queryKey: ["bindings"] });
+                  setAttachModalOpen(false);
+                  setAttachConfigId("");
+                  setAttachChatId("");
+                  toast.add("success", "Binding added");
+                } catch (err) {
+                  toast.add("error", err instanceof Error ? err.message : String(err));
+                }
+              }}
+            >
+              Add binding
+            </Button>
           </div>
         </div>
       </Modal>
 
-
       <ConfirmDialog
         open={detachConfirm !== null}
-        title="Detach Config"
-        message={`Detach config "${detachConfirm?.name}"?`}
+        title="Remove binding"
+        message={`Remove "${detachConfirm?.name}"?`}
         onConfirm={() => {
           api.deleteBinding(detachConfirm!.id).then(() =>
             qc.invalidateQueries({ queryKey: ["bindings"] })
