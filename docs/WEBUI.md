@@ -206,6 +206,8 @@ Base：`/api/v1`。首次启动通过 WebUI onboarding 创建管理员密码，�
 - Add binding 弹窗：Config + Chat scope（`dm:*` / `group:*` / `chat:<id>` / `*`）
 - 绑定列表显示 Config、范围、session_mode、priority，可逐条删除
 - 群聊需要 `group:*` 或 `chat:<group_id>`；只有 `dm:*` 时群消息会被丢弃
+- 开启 `mention_required` 后，无 `@` 群消息仍进入上下文但不会触发回复；只有 `@bot` 消息会触发一次 AI reply
+- Telegram privacy mode 开启时，普通群消息不会到达 bot；需关闭 privacy mode 或将 bot 设为管理员
 - Secret 输入提示：「留空保留现有 secret」
 - 术语：Routing binding / Remove binding；支持一账号多绑定
 

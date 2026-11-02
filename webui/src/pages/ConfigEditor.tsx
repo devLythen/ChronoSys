@@ -351,10 +351,16 @@ export default function ConfigEditor() {
               </div>
             </div>
 
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-sm text-fg">Require @mention in groups</span>
-              <Toggle checked={mentionRequired} onChange={setMentionRequired} />
-            </label>
+            <div className="space-y-1">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-sm text-fg">Require @mention to reply in groups</span>
+                <Toggle checked={mentionRequired} onChange={setMentionRequired} />
+              </label>
+              <p className="text-xs text-muted-fg">
+                Non-mentioned group messages are still stored as separate context
+                messages; only an addressed message triggers one AI reply.
+              </p>
+            </div>
 
             <label className="flex items-center justify-between cursor-pointer">
               <span className="text-sm text-fg">Show timestamp on messages</span>

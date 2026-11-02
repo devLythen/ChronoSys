@@ -57,7 +57,7 @@
 - [x] `chrono.adapter.telegram` (Bot API)
 - [x] Long-poll with exponential backoff + jitter; timeout 12s; fatal error detection
 - [x] Load enabled `platform_accounts` + `bindings` from DB
-- [x] rate limit + mention-only policy (from bot `policy_json`)
+- [x] rate limit + mention-gated replies; non-mentioned group messages are buffered context, not dropped
 - [x] basic audit log
 - [x] Session-strong isolation (per route + UUID session_id)
 - [x] Telegram `/new` command (registered via setMyCommands)

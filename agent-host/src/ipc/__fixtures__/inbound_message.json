@@ -13,6 +13,7 @@
     "id": "user1",
     "name": "Alice"
   },
+  "addressed": true,
   "message": {
     "id": "msg1",
     "text": "hello",

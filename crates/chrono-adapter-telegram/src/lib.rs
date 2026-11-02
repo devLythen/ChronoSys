@@ -417,6 +417,7 @@ fn handle_message(
             reply_to,
             attachments,
         },
+        addressed: true,
         received_at: chrono_now(),
     };
 

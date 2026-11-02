@@ -21,6 +21,7 @@ describe("fixtures discriminators", () => {
     expect(ev.type).toBe("inbound.message");
     expect(ev.session_key).toBe("acct1:chat1:shared");
     expect(ev.chat.kind).toBe("group");
+    expect(ev.addressed).toBe(true);
     expect(ev.message.attachments).toEqual([
       {
         id: "file1",

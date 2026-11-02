@@ -175,6 +175,14 @@ Session         durable conversation transcript (sessions.db)
 5. Gateway starts HTTP on `--host <IP:PORT>` or `CHRONO_API_HOST:CHRONO_API_PORT` (default `127.0.0.1:8787`). The first WebUI visit creates an admin password (Argon2 hash in `admin_credentials`); subsequent API/WebSocket access uses an HttpOnly session cookie. `server.public_url` controls the startup banner and CORS allow-list (restart required).
 6. Agent-host reads the config DB; if empty, logs info and waits for `config.reload`
 
+**Group context buffering.** When `mention_required=true`, the gateway forwards
+non-addressed group messages with `addressed=false` instead of dropping them.
+agent-host appends each one as a separate user message with sender attribution,
+persists it, and does not call the model. The next addressed message (normally
+`@bot` or a bot command) runs one AI turn over that history. Messages are never
+merged into one prompt. Telegram privacy mode must be disabled or the bot must
+be a group admin for the bot to receive non-command group messages at all.
+
 **No crash on empty config.** The system starts and stays alive. Operators configure via WebUI; gateway sends `config.reload` to agent-host when config changes. A provider or bot resolution failure is logged with its concrete reason; the process keeps running.
 
 ---
@@ -201,7 +209,9 @@ Built-in tools are allowlisted per persona via `tools_allowlist_json` in the `pe
 Gateway ↔ agent-host: length-prefixed JSON frames over stdin/stdout.
 
 Gateway → agent-host:
-- `inbound.message` — normalized platform event
+- `inbound.message` — normalized platform event. `addressed=false` marks a
+  group message that should be stored as context but must not trigger a model
+  turn (for example a group message without the bot mention).
 - `tool.response` — result of a tool execution
 - `config.reload` — config DB changed, re-resolve providers + default bot
 

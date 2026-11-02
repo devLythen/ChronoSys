@@ -677,30 +677,26 @@ fn handle_inbound_event(
         return Ok(());
     }
 
-    if resolved
+    let mention_required = resolved
         .policy_json
         .get("mention_required")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
+        .unwrap_or(false);
+    let addressed = if !mention_required {
+        true
+    } else {
         let bot_username = state
             .adapters
             .get(&routed.account_id)
             .map(|live| live.adapter.bot_username().to_string())
             .unwrap_or_default();
-        if !state.is_mentioned(&routed.event, &bot_username) {
-            eprintln!(
-                "[gateway] dropped (not mentioned) for account {}",
-                routed.account_id
-            );
-            state.audit.write(&json!({
-                "ts": chrono_now(),
-                "event": "dropped_mention",
-                "account_id": routed.account_id,
-                "detail": "not mentioned in group message",
-            }));
-            return Ok(());
-        }
+        state.is_mentioned(&routed.event, &bot_username)
+    };
+    if !addressed {
+        eprintln!(
+            "[gateway] context-only (not mentioned) for account {}",
+            routed.account_id
+        );
     }
 
     let mut event = routed.event;
@@ -710,8 +706,10 @@ fn handle_inbound_event(
             session_key,
             bot_profile_id,
             message,
+            addressed: event_addressed,
             ..
         } = &mut event;
+        *event_addressed = addressed;
         *session_key = chrono_ipc::adapter::session_key(
             &routed.account_id,
             &chat.id,
@@ -1180,6 +1178,7 @@ mod tests {
                         inline_data: None,
                     }],
                 },
+                addressed: true,
                 received_at: "2026-01-01T00:00:00Z".into(),
             },
             adapter: Some(Arc::new(FakeAdapter)),

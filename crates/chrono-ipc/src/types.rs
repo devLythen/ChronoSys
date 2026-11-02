@@ -13,8 +13,16 @@ pub enum ChronoEvent {
         chat: ChatRef,
         sender: SenderRef,
         message: InboundMessageBody,
+        /// True when the gateway should trigger an AI turn. Group messages
+        /// that do not address the bot are forwarded as context-only.
+        #[serde(default = "default_addressed")]
+        addressed: bool,
         received_at: String, // RFC3339; no chrono crate in M0
     },
+}
+
+fn default_addressed() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

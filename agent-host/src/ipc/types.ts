@@ -8,6 +8,7 @@ export interface ChronoEventInboundMessage {
   bot_profile_id?: string;
   chat: { id: string; kind: ChatKind; title?: string };
   sender: { id: string; name: string };
+  addressed?: boolean;
   message: {
     id: string;
     text: string;

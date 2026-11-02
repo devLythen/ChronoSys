@@ -277,6 +277,8 @@ interface ContextPolicy {
   showTimestamp: boolean;
   /** How sender identity is attached to user messages. */
   senderIdentity: SenderIdentity;
+  /** Group messages are context-only until the bot is mentioned. */
+  mentionRequired: boolean;
   /** IANA timezone for timestamps and the get_time tool. Default "UTC". */
   timezone: string;
 }
@@ -302,6 +304,7 @@ function readContextPolicy(bot: ResolvedBot): ContextPolicy {
         : 128000,
     showTimestamp: Boolean(p.show_timestamp),
     senderIdentity: parseSenderIdentity(p.sender_identity),
+    mentionRequired: p.mention_required === true,
     timezone: typeof p.timezone === "string" && p.timezone ? p.timezone : "UTC",
   };
 }
@@ -343,6 +346,23 @@ function buildSenderIdentity(event: ChronoEvent, policy: ContextPolicy): string 
 
 function buildUserPrefix(event: ChronoEvent, policy: ContextPolicy): string {
   return policy.showTimestamp ? `[${formatTime(event.received_at, policy.timezone)}] ` : "";
+}
+
+/** Build the user content for a normal turn or a buffered group message. */
+function buildInboundText(event: ChronoEvent, policy: ContextPolicy, groupContext: boolean): string {
+  const senderIdentity = buildSenderIdentity(event, policy);
+  const groupLabel =
+    groupContext && senderIdentity.length === 0
+      ? `[${event.sender.name} (${event.sender.id})] `
+      : "";
+  const userText = event.message.text.trim() || ATTACHMENT_ONLY_PROMPT;
+  return (
+    buildAttachmentNote(event) +
+    senderIdentity +
+    groupLabel +
+    buildUserPrefix(event, policy) +
+    userText
+  );
 }
 
 function resolveContextWindow(model: Model<Api>, policy: ContextPolicy): number {
@@ -945,6 +965,26 @@ async function main() {
 
     const route = `${event.session_key}#${bot.id}`;
 
+    // Group messages that do not address the bot are context only: store each
+    // one as a distinct user message, do not call the model, and let the next
+    // addressed message trigger one reply with the full history.
+    if (event.addressed === false) {
+      const policy = readContextPolicy(bot);
+      const bucket = getOrCreateBucket(route, event.session_key, bot.id);
+      bucket.messages.push({
+        role: "user",
+        content: [{ type: "text", text: buildInboundText(event, policy, true) }],
+        timestamp: Date.now(),
+      });
+      bucket.lastDate = getDate(event.received_at) || bucket.lastDate;
+      persistBucket(bucket);
+      logEvent({
+        type: "host_info",
+        message: `group context +1 route=${route} sender=${event.sender.name}`,
+      });
+      continue;
+    }
+
     // ── Platform commands (Telegram /new etc.) ───────────────────
     if (isNewSessionCommand(event.message.text)) {
       if (!newSessionCommandEnabled(bot)) {
@@ -1162,16 +1202,13 @@ async function main() {
 
     try {
       const historyBefore = bucket.messages.length;
-      const userPrefix = buildUserPrefix(event, ctxPolicy);
-      const senderIdentity = buildSenderIdentity(event, ctxPolicy);
-      const attachmentNote = buildAttachmentNote(event);
-      const userText = event.message.text.trim() || ATTACHMENT_ONLY_PROMPT;
+      const groupContext = event.chat.kind !== "dm" && ctxPolicy.mentionRequired;
       const images = inlineImages(
         event,
         bot.resolvedModel.model.input.includes("image"),
       );
       await agent.prompt(
-        attachmentNote + senderIdentity + userPrefix + userText,
+        buildInboundText(event, ctxPolicy, groupContext),
         images,
       );
 
