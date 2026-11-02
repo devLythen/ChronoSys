@@ -134,6 +134,11 @@ struct AttachmentJob {
     message_id: String,
 }
 
+fn contains_mention(text: &str, bot_username: &str) -> bool {
+    let needle = format!("@{}", bot_username.trim_start_matches('@'));
+    text.to_lowercase().contains(&needle.to_lowercase())
+}
+
 impl GatewayState {
     fn resolve_binding(&self, account_id: &str, event: &ChronoEvent) -> Option<ResolvedBinding> {
         let bindings = self.bindings.get(account_id)?;
@@ -171,8 +176,7 @@ impl GatewayState {
                 if matches!(chat.kind, chrono_ipc::ChatKind::Dm) {
                     return true;
                 }
-                let needle = format!("@{}", bot_username);
-                message.text.contains(&needle)
+                contains_mention(&message.text, bot_username)
             }
         }
     }
@@ -1132,6 +1136,13 @@ mod tests {
             self.frames.lock().push(payload.to_vec());
             Ok(())
         }
+    }
+
+    #[test]
+    fn mention_check_is_case_insensitive() {
+        assert!(contains_mention("hey @iris_chronobot", "Iris_chronobot"));
+        assert!(contains_mention("@IRIS_CHRONOBOT /new", "Iris_chronobot"));
+        assert!(!contains_mention("iris_chronobot without at", "Iris_chronobot"));
     }
 
     #[test]
