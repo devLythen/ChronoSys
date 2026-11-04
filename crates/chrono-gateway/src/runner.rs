@@ -651,15 +651,18 @@ fn handle_inbound_event(
     let resolved = match state.resolve_binding(&routed.account_id, &routed.event) {
         Some(r) => r,
         None => {
+            let (chat_id, chat_kind) = match &routed.event {
+                ChronoEvent::InboundMessage { chat, .. } => (chat.id.clone(), format!("{:?}", chat.kind)),
+            };
             eprintln!(
-                "[gateway] dropped (no binding) for account {}",
+                "[gateway] dropped (no binding) for account {} chat={chat_id} kind={chat_kind}",
                 routed.account_id
             );
             state.audit.write(&json!({
                 "ts": chrono_now(),
                 "event": "bind_miss",
                 "account_id": routed.account_id,
-                "detail": "no matching binding",
+                "detail": format!("no matching binding chat={chat_id} kind={chat_kind}"),
             }));
             return Ok(());
         }
@@ -693,9 +696,12 @@ fn handle_inbound_event(
         state.is_mentioned(&routed.event, &bot_username)
     };
     if !addressed {
+        let (event_id, chat_id) = match &routed.event {
+            ChronoEvent::InboundMessage { event_id, chat, .. } => (event_id, chat.id.clone()),
+        };
         eprintln!(
-            "[gateway] context-only (not mentioned) for account {}",
-            routed.account_id
+            "[gateway] context-only (not mentioned) for account {} chat={} event={}",
+            routed.account_id, chat_id, event_id
         );
     }
 
@@ -741,16 +747,36 @@ fn handle_inbound_event(
 
     {
         let ref_event = &event;
+        let (session_key, event_id, addressed, chat_id, chat_kind, sender_id, text) = match ref_event {
+            ChronoEvent::InboundMessage {
+                session_key,
+                event_id,
+                addressed,
+                chat,
+                sender,
+                message,
+                ..
+            } => (
+                session_key,
+                event_id,
+                *addressed,
+                &chat.id,
+                format!("{:?}", chat.kind),
+                &sender.id,
+                &message.text,
+            ),
+        };
         state.audit.write(&json!({
             "ts": chrono_now(),
             "event": "inbound",
             "account_id": routed.account_id,
-            "session_key": match ref_event {
-                ChronoEvent::InboundMessage { session_key, .. } => session_key,
-            },
-            "detail": match ref_event {
-                ChronoEvent::InboundMessage { message, .. } => &message.text,
-            },
+            "session_key": session_key,
+            "event_id": event_id,
+            "addressed": addressed,
+            "chat_id": chat_id,
+            "chat_kind": chat_kind,
+            "sender_id": sender_id,
+            "detail": text,
         }));
     }
 

@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { conversationMessages, withSystemPrompt } from "./transcript.ts";
+import { conversationMessages, findProtocolMarker, withSystemPrompt } from "./transcript.ts";
 
 test("withSystemPrompt replaces the leading prompt and keeps history", () => {
   const messages: AgentMessage[] = [
@@ -55,4 +55,10 @@ test("conversationMessages replaces an image-only tool result with a placeholder
   expect(conversationMessages([message])[0]!.content).toEqual([
     { type: "text", text: "[image omitted; use sandbox_view_image]" },
   ]);
+});
+
+test("detects provider control markers in text", () => {
+  expect(findProtocolMarker("hello <|DSML|tool_calls>")).toBe("<|DSML|");
+  expect(findProtocolMarker("reasoning </think>")).toBe("</think>");
+  expect(findProtocolMarker("normal text")).toBeNull();
 });

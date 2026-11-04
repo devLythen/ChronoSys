@@ -91,6 +91,20 @@ const MIGRATION_003 = `
 ALTER TABLE conversation_sessions ADD COLUMN last_date TEXT NOT NULL DEFAULT '';
 `;
 
+/** v4: persistent inbound update deduplication. */
+const MIGRATION_004 = `
+CREATE TABLE IF NOT EXISTS processed_events (
+  session_key     TEXT NOT NULL,
+  bot_profile_id  TEXT NOT NULL,
+  event_id        TEXT NOT NULL,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (session_key, bot_profile_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_processed_events_created
+  ON processed_events(created_at);
+`;
+
 export class SessionStore {
   private db: Database;
 
@@ -135,6 +149,31 @@ export class SessionStore {
         "INSERT INTO schema_migrations (version, name) VALUES (3, '003_last_date')",
       );
     }
+    if (row.v < 4) {
+      this.db.run(MIGRATION_004);
+      this.db.run(
+        "INSERT INTO schema_migrations (version, name) VALUES (4, '004_processed_events')",
+      );
+    }
+  }
+
+  /**
+   * Mark an inbound event as processed. Returns false for a duplicate within
+   * the retention window, which prevents duplicate gateway/Telegram deliveries
+   * from creating repeated AI turns.
+   */
+  markEvent(sessionKey: string, botProfileId: string, eventId: string): boolean {
+    if (!eventId) return true;
+    this.db.run(
+      "DELETE FROM processed_events WHERE created_at < datetime('now', '-7 days')",
+    );
+    const result = this.db.run(
+      `INSERT OR IGNORE INTO processed_events
+         (session_key, bot_profile_id, event_id)
+       VALUES (?, ?, ?)`,
+      [sessionKey, botProfileId, eventId],
+    ) as { changes: number };
+    return result.changes > 0;
   }
 
   /**

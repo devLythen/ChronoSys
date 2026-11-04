@@ -175,6 +175,14 @@ Session         durable conversation transcript (sessions.db)
 5. Gateway starts HTTP on `--host <IP:PORT>` or `CHRONO_API_HOST:CHRONO_API_PORT` (default `127.0.0.1:8787`). The first WebUI visit creates an admin password (Argon2 hash in `admin_credentials`); subsequent API/WebSocket access uses an HttpOnly session cookie. `server.public_url` controls the startup banner and CORS allow-list (restart required).
 6. Agent-host reads the config DB; if empty, logs info and waits for `config.reload`
 
+**Inbound deduplication and protocol guards.** agent-host persists processed
+`(session_key, bot_profile_id, event_id)` rows for 7 days and ignores duplicate
+Telegram deliveries before they can create a second AI turn. Compaction
+summaries containing provider control markers (`<｜DSML｜`, `<|DSML|`,
+`</think>`, tool-call tags) are rejected and the original history is retained.
+Assistant text containing those markers is logged as a provider protocol
+warning; raw markers remain in the exported transcript for diagnosis.
+
 **Group context buffering.** When `mention_required=true`, the gateway forwards
 non-addressed group messages with `addressed=false` instead of dropping them.
 agent-host appends each one as a separate user message with sender attribution,

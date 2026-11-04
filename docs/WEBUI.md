@@ -232,6 +232,11 @@ Base：`/api/v1`。首次启动通过 WebUI onboarding 创建管理员密码，�
 - Model 弹窗：model_id / temperature / max_tokens / top_p / thinking_level / extra_body_json；打开时查询 pi 目录并展示只读 capabilities（未知模型提示无能力数据）
 
 ### Sessions
+
+- 列表页提供 **Export index**（会话索引 JSON）和每行 **Export transcript**（完整 session JSON）
+- 详情页提供 **Export JSON**：包含 messages、route_key、session_key、bot、时间戳和 export 时间
+- 导出文件包含原始 transcript，便于排查 provider 控制标记、compaction 摘要和重复 turn
+
 - 列表：5 秒自动刷新
 - 详情：左侧 transcript 气泡，右侧元数据卡片（只读）
 - 详情页提供 **Reset sandbox**：确认后销毁该会话的容器与 `/workspace` 文件

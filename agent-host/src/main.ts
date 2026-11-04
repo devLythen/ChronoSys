@@ -6,7 +6,7 @@ import {
 import type { Model, Api, MutableModels, ThinkingLevel } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { ChronoEvent, ToolIpcMessage } from "./ipc/types.ts";
-import { conversationMessages, withSystemPrompt } from "./transcript.ts";
+import { conversationMessages, findProtocolMarker, findProtocolMarkerInMessages, withSystemPrompt } from "./transcript.ts";
 import { ATTACHMENT_ONLY_PROMPT, buildAttachmentNote, inlineImages } from "./attachments.ts";
 import {
   sendBodyTextToCurrentChat,
@@ -469,6 +469,14 @@ async function compactSessionMessages(
     const text = extractAssistantText(result);
     if (!text) {
       logEvent({ type: "host_warn", message: "compaction returned an empty summary" });
+      return messages;
+    }
+    const marker = findProtocolMarker(text);
+    if (marker) {
+      logEvent({
+        type: "host_warn",
+        message: `compaction rejected: summary contains provider marker ${marker}`,
+      });
       return messages;
     }
     summary = text;
@@ -965,6 +973,14 @@ async function main() {
 
     const route = `${event.session_key}#${bot.id}`;
 
+    if (!store.markEvent(event.session_key, bot.id, event.event_id)) {
+      logEvent({
+        type: "host_warn",
+        message: `duplicate inbound ignored event=${event.event_id} route=${route}`,
+      });
+      continue;
+    }
+
     // Group messages that do not address the bot are context only: store each
     // one as a distinct user message, do not call the model, and let the next
     // addressed message trigger one reply with the full history.
@@ -980,7 +996,7 @@ async function main() {
       persistBucket(bucket);
       logEvent({
         type: "host_info",
-        message: `group context +1 route=${route} sender=${event.sender.name}`,
+        message: `group context +1 event=${event.event_id} route=${route} sender=${event.sender.name}`,
       });
       continue;
     }
@@ -1165,7 +1181,7 @@ async function main() {
 
     logEvent({
       type: "host_info",
-      message: `${bot.id} #${bucket.sessionId.slice(0, 8)} h=${bucket.messages.length} model=${bot.modelRef}`,
+      message: `${bot.id} #${bucket.sessionId.slice(0, 8)} h=${bucket.messages.length} model=${bot.modelRef} event=${event.event_id} addressed=${event.addressed ?? true}`,
     });
 
     // ── Request-time context window guard ──────────────────────────
@@ -1213,6 +1229,15 @@ async function main() {
       );
 
       bucket.messages = conversationMessages(agent.state.messages);
+      const protocolMarker = findProtocolMarkerInMessages(
+        bucket.messages.slice(historyBefore),
+      );
+      if (protocolMarker) {
+        logEvent({
+          type: "host_warn",
+          message: `provider protocol marker ${protocolMarker} in assistant output event=${event.event_id} route=${route}`,
+        });
+      }
       persistBucket(bucket);
 
       // ── Post-turn auto-compact when context exceeds 80% threshold ──

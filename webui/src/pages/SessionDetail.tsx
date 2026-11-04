@@ -8,7 +8,8 @@ import Button from "../components/ui/Button";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { useToast } from "../components/ui/Toast";
 import { formatDate, cn } from "../lib/utils";
-import { ArrowLeft, Brain, Wrench, ChevronDown, ChevronRight } from "lucide-react";
+import { downloadJson } from "../lib/export";
+import { ArrowLeft, Brain, Wrench, ChevronDown, ChevronRight, Download } from "lucide-react";
 
 const STATUS_VARIANT: Record<string, "success" | "default" | "destructive" | "info"> = {
   active: "success",
@@ -47,6 +48,23 @@ interface AgentMessage {
   timestamp?: number;
   stopReason?: string;
   usage?: { totalTokens: number };
+}
+
+const RAW_PROTOCOL_MARKERS = ["<｜DSML｜", "<|DSML|", "</think>", "<tool_call>", "</tool_call>"];
+
+function hasRawProtocolMarker(messages: AgentMessage[]): boolean {
+  return messages.some((message) => {
+    const content = message.content;
+    if (typeof content === "string") {
+      return RAW_PROTOCOL_MARKERS.some((marker) => content.includes(marker));
+    }
+    if (!Array.isArray(content)) return false;
+    return content.some(
+      (block) =>
+        block.type === "text" &&
+        RAW_PROTOCOL_MARKERS.some((marker) => block.text.includes(marker)),
+    );
+  });
 }
 
 // ── Render helpers ──────────────────────────────────────────────
@@ -176,6 +194,11 @@ export default function SessionDetail() {
   }, [messages]);
 
 
+  const rawProtocolMarker = useMemo(
+    () => hasRawProtocolMarker(messages),
+    [messages],
+  );
+
   const pageRef = usePageEnter<HTMLDivElement>();
   if (isLoading) {
     return (
@@ -224,17 +247,41 @@ export default function SessionDetail() {
           <span className="t-label text-muted-fg">
             {messages.length} messages
           </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="ml-auto"
-            onClick={() => setResetOpen(true)}
-          >
-            Reset sandbox
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                downloadJson(`chrono-session-${session.session_id}.json`, {
+                  exported_at: new Date().toISOString(),
+                  session,
+                })
+              }
+            >
+              <Download size={14} />
+              Export JSON
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setResetOpen(true)}
+            >
+              Reset sandbox
+            </Button>
+          </div>
         </div>
       </div>
       <div className="rule-heavy" />
+
+      {rawProtocolMarker && (
+        <div className="border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This transcript contains raw provider control markers such as{" "}
+          <code className="font-mono text-xs">&lt;|DSML|</code> or{" "}
+          <code className="font-mono text-xs">&lt;/think&gt;</code>. This usually
+          means the model/provider returned reasoning or tool calls as plain text.
+          Export the session for diagnosis and reset it before continuing.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Transcript */}

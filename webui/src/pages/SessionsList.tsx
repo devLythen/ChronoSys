@@ -5,9 +5,14 @@ import type { SessionSummary } from "../api/types";
 import { usePageEnter } from "../hooks/useAnimations";
 import Table from "../components/ui/Table";
 import Badge from "../components/ui/Badge";
+import Button from "../components/ui/Button";
+import { useToast } from "../components/ui/Toast";
 import { formatDate, truncate } from "../lib/utils";
+import { downloadJson } from "../lib/export";
+import { Download } from "lucide-react";
 
 export default function SessionsList() {
+  const toast = useToast();
   const {
     data: sessions = [],
     isLoading,
@@ -20,13 +25,43 @@ export default function SessionsList() {
 
   const pageRef = usePageEnter<HTMLDivElement>();
 
+  async function exportSession(sessionId: string) {
+    try {
+      const detail = await api.getSession(sessionId);
+      downloadJson(`chrono-session-${sessionId}.json`, {
+        exported_at: new Date().toISOString(),
+        session: detail,
+      });
+    } catch (err) {
+      toast.add("error", err instanceof Error ? err.message : String(err));
+    }
+  }
+
   return (
     <div ref={pageRef} className="space-y-6 md:space-y-8">
       <div>
-        <h1 className="t-display">Sessions</h1>
-        <p className="t-body text-muted-fg mt-3 max-w-xl">
-          Read-only view of active chat sessions — auto-refreshes every 5s.
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="t-display">Sessions</h1>
+            <p className="t-body text-muted-fg mt-3 max-w-xl">
+              Read-only view of active chat sessions — auto-refreshes every 5s.
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={sessions.length === 0}
+            onClick={() =>
+              downloadJson(
+                `chrono-sessions-${new Date().toISOString().slice(0, 10)}.json`,
+                { exported_at: new Date().toISOString(), sessions },
+              )
+            }
+          >
+            <Download size={14} />
+            Export index
+          </Button>
+        </div>
       </div>
       <div className="rule-heavy" />
 
@@ -91,6 +126,24 @@ export default function SessionsList() {
               label: "Updated",
               className: "text-muted-fg py-3",
               render: (r) => formatDate(r.updated_at),
+            },
+            {
+              key: "export",
+              label: "",
+              className: "text-right py-3",
+              render: (r) => (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title="Export transcript JSON"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void exportSession(r.session_id);
+                  }}
+                >
+                  <Download size={14} />
+                </Button>
+              ),
             },
           ]}
           data={sessions as (SessionSummary & Record<string, unknown>)[]}

@@ -58,3 +58,22 @@ describe("SessionStore UUID model", () => {
     }
   });
 });
+
+test("deduplicates inbound event ids persistently", () => {
+  const path = sessionsDbPath(`${HOME}-dedupe`);
+  rmSync(`${HOME}-dedupe`, { recursive: true, force: true });
+  mkdirSync(`${HOME}-dedupe/state`, { recursive: true });
+  {
+    const store = new SessionStore(path);
+    expect(store.markEvent("acct:chat:group", "bot1", "tg_1")).toBe(true);
+    expect(store.markEvent("acct:chat:group", "bot1", "tg_1")).toBe(false);
+    expect(store.markEvent("acct:chat:group", "bot2", "tg_1")).toBe(true);
+    store.close();
+  }
+  {
+    const store = new SessionStore(path);
+    expect(store.markEvent("acct:chat:group", "bot1", "tg_1")).toBe(false);
+    store.close();
+  }
+  rmSync(`${HOME}-dedupe`, { recursive: true, force: true });
+});
