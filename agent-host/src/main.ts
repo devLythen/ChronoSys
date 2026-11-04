@@ -1085,6 +1085,16 @@ async function main() {
         ccp.compactPrompt || undefined,
         bot.systemPrompt,
       );
+      if (compacted === bucket.messages) {
+        await sendBodyTextToCurrentChat(
+          event.session_key,
+          "上下文压缩未完成；已保留原历史。请检查 provider 是否输出了原始控制标记。",
+          pendingCalls,
+          agent.signal,
+        );
+        writeControl({ type: "done" });
+        continue;
+      }
       const origEst = estimateContextTokens(bucket.messages);
       const origPct = Math.round((origEst.tokens / bot.resolvedModel.model.contextWindow) * 100);
       bucket.messages = compacted;
